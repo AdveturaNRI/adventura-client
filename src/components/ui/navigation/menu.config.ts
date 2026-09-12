@@ -1,0 +1,105 @@
+export type MenuIconKey =
+  | 'profile'
+  | 'dragon'
+  | 'notifications'
+  | 'settings'
+  | 'master'
+  | 'clubs'
+  | 'telegram'
+  | 'support'
+  | 'developer';
+
+export type MenuItemVariant = 'default' | 'danger';
+
+export type MenuItemSpec = {
+  key: string;
+  label: string;
+  subtitle: string;
+  icon: MenuIconKey;
+  variant?: MenuItemVariant;
+  badge?: string;
+};
+
+export type ProfileMenuSectionSpec = {
+  key: string;
+  title: string;
+  items: MenuItemSpec[];
+};
+
+export const MENU_SPECS: MenuItemSpec[] = [
+  {
+    key: 'profile',
+    label: 'Анкета игрока',
+    subtitle: 'Здесь вы можете настроить вашу анкету',
+    icon: 'profile',
+  },
+  {
+    key: 'games',
+    label: 'Игры, в которых я участвую',
+    subtitle: 'Ваши столы и заявки на участие',
+    icon: 'dragon',
+  },
+  {
+    key: 'notifications',
+    label: 'Уведомления',
+    subtitle: 'Сюда вам придут все уведомления',
+    icon: 'notifications',
+  },
+  {
+    key: 'settings',
+    label: 'Настройки',
+    subtitle: 'Здесь вы можете настроить приложение и ваш аккаунт',
+    icon: 'settings',
+  },
+];
+
+export const PROFILE_MENU_SECTIONS: ProfileMenuSectionSpec[] = [
+  {
+    key: 'main',
+    title: 'Основные',
+    items: MENU_SPECS,
+  },
+  {
+    key: 'workshop',
+    title: 'Мастерская',
+    items: [
+      {
+        key: 'master-room',
+        label: 'Кабинет мастера',
+        subtitle: 'Здесь вы можете создавать игры и управлять ими',
+        icon: 'master',
+      },
+      {
+        key: 'my-clubs',
+        label: 'Мои клубы',
+        subtitle: 'Площадки на карте: адрес, расписание, галерея',
+        icon: 'clubs',
+      },
+    ],
+  },
+  {
+    key: 'feedback',
+    title: 'Обратная связь',
+    items: [
+      {
+        key: 'social',
+        label: 'Наши соцсети',
+        subtitle: 'Здесь вы можете следить за новостями о нас',
+        icon: 'telegram',
+      },
+      {
+        key: 'support',
+        label: 'Поддержка',
+        subtitle: 'Здесь вы можете написать нам и сообщить о проблеме или нарушении',
+        icon: 'support',
+      },
+      {
+        key: 'developer',
+        label: 'Написать разработчику',
+        subtitle:
+          'Здесь вы можете напрямую предложить идею, сотрудничество или же просто поблагодарить',
+        icon: 'developer',
+      },
+    ],
+  },
+];

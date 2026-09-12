@@ -1,0 +1,17 @@
+node_modules
+.expo
+dist
+web-build
+.env
+.env.*
+!.env.example
+ios
+android
+.kotlin
+*.log
+.DS_Store
+.git
+example
+README.md
+LICENSE
+.vscode
