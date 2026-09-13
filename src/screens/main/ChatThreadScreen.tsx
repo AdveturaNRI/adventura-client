@@ -886,7 +886,7 @@ export default function ChatThreadScreen() {
 
   const loadConversation = useCallback(async () => {
     if (!conversationId) {
-      return;
+      return null;
     }
     const list = await listConversations();
     const found = list.find((item) => item.id === conversationId) ?? null;
@@ -894,6 +894,7 @@ export default function ChatThreadScreen() {
     if (found) {
       setPeerLastReadAt(found.peerLastReadAt);
     }
+    return found;
   }, [conversationId]);
 
   const loadMessages = useCallback(async () => {
@@ -928,18 +929,38 @@ export default function ChatThreadScreen() {
   useEffect(() => {
     let cancelled = false;
 
+    function leaveToChats(message?: string) {
+      if (cancelled) {
+        return;
+      }
+      if (message) {
+        toast.error(message);
+      }
+      router.replace('/chats');
+    }
+
     async function bootstrap() {
       if (!conversationId) {
+        leaveToChats();
         return;
       }
       setSuppressFavoriteBack(false);
       setLoading(true);
       try {
-        await Promise.all([loadConversation(), loadMessages()]);
+        const [found] = await Promise.all([loadConversation(), loadMessages()]);
+        if (!found) {
+          leaveToChats('Чат не найден');
+          return;
+        }
         await markConversationRead(conversationId);
       } catch (error) {
-        toast.error(localizeErrorMessage(error, 'Не удалось открыть чат'));
-        router.replace('/chats');
+        const missing =
+          error instanceof ApiError && (error.status === 404 || error.status === 403);
+        leaveToChats(
+          missing
+            ? 'Чат не найден'
+            : localizeErrorMessage(error, 'Не удалось открыть чат'),
+        );
       } finally {
         if (!cancelled) {
           setLoading(false);
