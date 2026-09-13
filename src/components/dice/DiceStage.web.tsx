@@ -19,7 +19,8 @@ import type {
 export type { DiceRollOutcome, DiceStageHandle };
 
 /**
- * Web: @3d-dice/dice-box via local public/dice-roller.html
+ * Web: @3d-dice/dice-box via local public/dice-box/dice-roller.html
+ * Path is under /dice-box/ so a cached /dice-roller.html → /dice-roller 301 cannot bite.
  */
 export const DiceStage = forwardRef<DiceStageHandle, DiceStageProps>(function DiceStage(
   { onReady, onDone },
@@ -107,7 +108,7 @@ export const DiceStage = forwardRef<DiceStageHandle, DiceStageProps>(function Di
     return () => window.removeEventListener('message', onWindowMessage);
   }, [onReady]);
 
-  const src = `/dice-roller.html?accent=${encodeURIComponent(colors.primary)}`;
+  const src = `/dice-box/dice-roller.html?accent=${encodeURIComponent(colors.primary)}`;
 
   return createElement(
     'div',
