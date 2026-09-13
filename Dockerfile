@@ -23,6 +23,6 @@ ENV NODE_ENV=production
 RUN npm install -g serve@14
 COPY --from=build /app/dist ./dist
 EXPOSE 3000
-# -s: SPA fallback for client routes; serve.json disables cleanUrls so
-# /dice-roller.html is not redirected to /dice-roller (Expo unmatched route).
-CMD ["sh", "-c", "serve -s -c dist/serve.json dist -l tcp://0.0.0.0:${PORT:-3000}"]
+# -s: SPA fallback for client routes; serve.json (from public/) disables cleanUrls
+# so /dice-roller.html is not redirected to /dice-roller (Expo unmatched route).
+CMD ["sh", "-c", "serve -s dist -l tcp://0.0.0.0:${PORT:-3000}"]
