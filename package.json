@@ -45,8 +45,8 @@
     "android": "expo run:android",
     "ios": "expo run:ios",
     "web": "expo start --web",
-    "build:web": "expo export -p web",
-    "start:web": "npx serve dist -l tcp://0.0.0.0:8081",
+    "build:web": "expo export -p web && cp dist/+not-found.html dist/404.html",
+    "start:web": "npx serve -c serve.json dist -l tcp://0.0.0.0:8081",
     "lint": "expo lint"
   },
   "private": true
