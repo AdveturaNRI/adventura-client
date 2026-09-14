@@ -1,5 +1,31 @@
 # Welcome to your Expo app 👋
 
+## Production deployment
+
+Pushes to `main` run `.github/workflows/deploy-production.yml`: it builds an
+immutable Docker image, publishes it to Docker Hub, then updates only the
+`adventura_web` Docker Swarm service by digest.
+
+Add these GitHub Actions secrets before the first push:
+
+- `DOCKERHUB_USERNAME` — `moskowpsix`.
+- `DOCKERHUB_TOKEN` — Docker Hub access token with read/write access.
+- `DEPLOY_HOST`, `DEPLOY_PORT` (optional; defaults to `22`) and `DEPLOY_USER`.
+- `DEPLOY_PASSWORD` — password for the deployment user permitted to run
+  `docker service update` on the Swarm manager.
+- `SWARM_SERVICE` — name of the frontend Swarm service; use `adventura_web`
+  for the `web` service in the `adventura` stack.
+- `DEPLOY_KNOWN_HOSTS` — verified ED25519 host key prefixed with
+  `adventura-deploy`, for example `adventura-deploy ssh-ed25519 AAAA...`.
+  Obtain and verify its SSH host fingerprint out of band; do not disable host
+  key checking in the workflow.
+
+The Swarm stack must contain a service named `web` in the `adventura` stack
+(therefore `adventura_web`). The deployment workflow updates its image only;
+it does not redeploy PostgreSQL, migrations, or the API. If the Docker Hub
+repository is private, log the Swarm manager into Docker Hub once before the
+first deploy.
+
 This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
 
 ## Get started
