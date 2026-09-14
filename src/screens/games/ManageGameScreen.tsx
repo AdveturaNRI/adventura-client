@@ -14,6 +14,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 
+import { DeleteGameDialog } from '@/components/games/DeleteGameDialog';
 import { useIsDesktopSidebarVisible, useIsDesktopWeb } from '@/components/navigation/DesktopThemeToggle';
 import { MobileBackButton } from '@/components/navigation/MobileBackButton';
 import { ScreenTransition } from '@/components/navigation/ScreenTransition';
@@ -25,6 +26,7 @@ import { useThemedStyles } from '@/hooks/use-themed-styles';
 import { openConversationWith, openGameChat } from '@/services/chats/chatsApi';
 import {
   acceptGameApplication,
+  deleteGame,
   getGameManage,
   rejectGameApplication,
   removeGamePlayer,
@@ -269,6 +271,11 @@ function createStyles(colors: ThemeColors, isDesktopWeb: boolean, topPadding: nu
       letterSpacing: -0.3,
       textAlign: isDesktopWeb ? 'left' : 'center',
     },
+    headerActions: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: Spacing.xs,
+    },
     headerEdit: {
       minWidth: 40,
       height: 40,
@@ -277,10 +284,24 @@ function createStyles(colors: ThemeColors, isDesktopWeb: boolean, topPadding: nu
       justifyContent: 'center',
       backgroundColor: 'rgba(21, 122, 254, 0.1)',
     },
+    headerDelete: {
+      minWidth: 40,
+      height: 40,
+      borderRadius: 20,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: 'rgba(255, 59, 48, 0.12)',
+    },
     headerEditLabel: {
       fontSize: FontSize.label,
       fontWeight: '600',
       color: colors.primary,
+      paddingHorizontal: Spacing.sm,
+    },
+    headerDeleteLabel: {
+      fontSize: FontSize.label,
+      fontWeight: '600',
+      color: colors.destructive,
       paddingHorizontal: Spacing.sm,
     },
     coverFrame: {
@@ -672,6 +693,8 @@ export default function ManageGameScreen() {
   const [payload, setPayload] = useState<GameManagePayload | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   const applyPayload = useCallback((next: GameManagePayload) => {
     setPayload(next);
@@ -707,6 +730,33 @@ export default function ManageGameScreen() {
     }
     router.push({ pathname: '/games-edit', params: { id: gameId } });
   }, [gameId, router]);
+
+  const openDeleteDialog = useCallback(() => {
+    if (busy || isDeleting) {
+      return;
+    }
+    setDeleteDialogOpen(true);
+  }, [busy, isDeleting]);
+
+  const handleDeleteGame = useCallback(
+    async (deleteChat: boolean) => {
+      if (!gameId || isDeleting) {
+        return;
+      }
+      setIsDeleting(true);
+      try {
+        await deleteGame(gameId, { deleteChat });
+        setDeleteDialogOpen(false);
+        toast.success(deleteChat ? 'Игра и чат удалены' : 'Игра удалена');
+        router.replace('/master-room');
+      } catch (error) {
+        toast.error(localizeErrorMessage(error, 'Не удалось удалить игру'));
+      } finally {
+        setIsDeleting(false);
+      }
+    },
+    [gameId, isDeleting, router],
+  );
 
   const openAnketa = useCallback(
     (userId: string) => {

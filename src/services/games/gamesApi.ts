@@ -167,6 +167,16 @@ export async function updateGame(
   });
 }
 
+export async function deleteGame(
+  gameId: string,
+  options?: { deleteChat?: boolean },
+): Promise<{ ok: true }> {
+  return apiRequest<{ ok: true }>(`/games/${encodeURIComponent(gameId)}`, {
+    method: 'DELETE',
+    body: { deleteChat: Boolean(options?.deleteChat) },
+  });
+}
+
 export async function updateGameStatus(
   gameId: string,
   status: GameStatus,
