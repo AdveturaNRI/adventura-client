@@ -1,5 +1,4 @@
 import { Ionicons } from '@expo/vector-icons';
-import { Image } from 'expo-image';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Modal,
@@ -16,6 +15,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { ClubsSelectedCity } from '@/components/map/clubs-map-session';
 import { toLatLng } from '@/components/map/map-coords';
 import { useIsDesktopWeb } from '@/components/navigation/DesktopThemeToggle';
+import { FadeInImage } from '@/components/ui/media/FadeInImage';
 import { FontSize, Radius, Spacing, type ThemeColors } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { useThemedStyles } from '@/hooks/use-themed-styles';
@@ -744,8 +744,8 @@ export function ClubsMapFeed({
                 style={({ pressed }) => [styles.card, pressed && styles.cardPressed]}>
                 <View style={styles.coverWrap}>
                   {club.coverUrl ? (
-                    <Image
-                      source={{ uri: club.coverUrl }}
+                    <FadeInImage
+                      uri={club.coverUrl}
                       style={styles.cover}
                       contentFit="cover"
                     />

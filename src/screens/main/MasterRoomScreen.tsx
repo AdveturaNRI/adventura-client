@@ -9,13 +9,13 @@ import {
   Text,
   View,
 } from 'react-native';
-import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
 
 import { MobileScreenHeader } from '@/components/navigation/MobileScreenHeader';
 import { useIsDesktopSidebarVisible, useIsDesktopWeb } from '@/components/navigation/DesktopThemeToggle';
 import { ScreenTransition } from '@/components/navigation/ScreenTransition';
 import { Button, toast } from '@/components/ui';
+import { FadeInImage } from '@/components/ui/media/FadeInImage';
 import { MenuIcon } from '@/components/ui/navigation/MenuIcons';
 import { FontSize, Radius, Spacing, type ThemeColors } from '@/constants/theme';
 import { useProfile } from '@/context/ProfileContext';
@@ -584,9 +584,8 @@ function GameCard({
             onPress={() => onManage(item.id)}
             style={StyleSheet.absoluteFill}>
             {coverUrl ? (
-              <Image
-                key={coverUrl}
-                source={{ uri: coverUrl }}
+              <FadeInImage
+                uri={coverUrl}
                 style={styles.coverImage}
                 contentFit="cover"
                 pointerEvents="none"

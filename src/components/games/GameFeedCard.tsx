@@ -9,6 +9,7 @@ import {
 import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
 
+import { FadeInImage } from '@/components/ui/media/FadeInImage';
 import { FontSize, Radius, Spacing, type ThemeColors } from '@/constants/theme';
 import { useProfile } from '@/context/ProfileContext';
 import { useTheme } from '@/hooks/use-theme';
@@ -589,9 +590,8 @@ export function GameFeedCard({
   const coverMedia = (
     <View style={StyleSheet.absoluteFill}>
       {coverUrl ? (
-        <Image
-          key={coverUrl}
-          source={{ uri: coverUrl }}
+        <FadeInImage
+          uri={coverUrl}
           style={styles.coverImage}
           contentFit="cover"
           pointerEvents="none"

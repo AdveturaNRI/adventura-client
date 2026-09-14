@@ -8,12 +8,12 @@ import {
   Text,
   View,
 } from 'react-native';
-import { Image } from 'expo-image';
 
 import { MobileScreenHeader } from '@/components/navigation/MobileScreenHeader';
 import { useIsDesktopSidebarVisible } from '@/components/navigation/DesktopThemeToggle';
 import { ScreenTransition } from '@/components/navigation/ScreenTransition';
 import { Button, toast } from '@/components/ui';
+import { FadeInImage } from '@/components/ui/media/FadeInImage';
 import { FontSize, Spacing, type ThemeColors } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { useThemedStyles } from '@/hooks/use-themed-styles';
@@ -135,7 +135,7 @@ export default function MyClubsScreen() {
                   onPress={() => router.push(`/clubs/${club.id}`)}
                   style={styles.card}>
                   {club.coverUrl ? (
-                    <Image source={{ uri: club.coverUrl }} style={styles.cover} contentFit="cover" />
+                    <FadeInImage uri={club.coverUrl} style={styles.cover} contentFit="cover" />
                   ) : (
                     <View style={styles.cover} />
                   )}

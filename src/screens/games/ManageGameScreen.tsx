@@ -1,4 +1,3 @@
-import { Image } from 'expo-image';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { type ComponentProps, useCallback, useState } from 'react';
 import {
@@ -20,6 +19,7 @@ import { MobileBackButton } from '@/components/navigation/MobileBackButton';
 import { ScreenTransition } from '@/components/navigation/ScreenTransition';
 import { UserAvatar } from '@/components/navigation/UserAvatar';
 import { Button, toast } from '@/components/ui';
+import { FadeInImage } from '@/components/ui/media/FadeInImage';
 import { FontSize, Radius, Spacing, type ThemeColors } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { useThemedStyles } from '@/hooks/use-themed-styles';
@@ -979,9 +979,8 @@ export default function ManageGameScreen() {
 
           <View style={styles.coverFrame}>
             {coverUrl ? (
-              <Image
-                key={coverUrl}
-                source={{ uri: coverUrl }}
+              <FadeInImage
+                uri={coverUrl}
                 style={styles.coverImage}
                 contentFit="cover"
               />

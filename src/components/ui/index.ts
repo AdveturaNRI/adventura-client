@@ -13,6 +13,8 @@ export {
   type ToastVariantSpec,
 } from './feedback/toast.config';
 
+export { FadeInImage } from './media/FadeInImage';
+
 export { Button } from './buttons/Button';
 export { SocialButton } from './buttons/SocialButton';
 
