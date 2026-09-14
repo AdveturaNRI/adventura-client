@@ -11,6 +11,7 @@ const pkgDist = path.join(root, 'node_modules', '@3d-dice', 'dice-box', 'dist');
 const assetsSrc = path.join(pkgDist, 'assets');
 const assetsDest = path.join(root, 'public', 'dice-box');
 const vendorDest = path.join(root, 'public', 'vendor', 'dice-box');
+const diceRollerPath = path.join(assetsDest, 'dice-roller.html');
 
 function copyRecursive(from, to) {
   fs.mkdirSync(to, { recursive: true });
@@ -30,8 +31,18 @@ if (!fs.existsSync(assetsSrc)) {
   process.exit(0);
 }
 
+// This app-owned iframe is intentionally co-located with the dice assets.
+// Keep it while replacing package-owned assets during every postinstall.
+const diceRollerHtml = fs.existsSync(diceRollerPath)
+  ? fs.readFileSync(diceRollerPath)
+  : null;
+
 fs.rmSync(assetsDest, { recursive: true, force: true });
 copyRecursive(assetsSrc, assetsDest);
+
+if (diceRollerHtml) {
+  fs.writeFileSync(diceRollerPath, diceRollerHtml);
+}
 
 // Clean preview scene for picker cards: die meshes only, no collider physics.
 const DIE_NAMES = new Set(['d4', 'd6', 'd8', 'd10', 'd12', 'd20', 'd100']);
