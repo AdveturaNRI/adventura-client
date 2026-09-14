@@ -91,6 +91,7 @@ jobs:
           sshpass -e ssh -p "$deploy_port" \
             -o PreferredAuthentications=password \
             -o PubkeyAuthentication=no \
+            -o HostKeyAlias=adventura-deploy \
             -o StrictHostKeyChecking=yes \
             "$DEPLOY_USER@$DEPLOY_HOST" \
             "docker service update --detach=false --with-registry-auth --image '$image' '$SWARM_SERVICE'"

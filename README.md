@@ -15,7 +15,8 @@ Add these GitHub Actions secrets before the first push:
   `docker service update` on the Swarm manager.
 - `SWARM_SERVICE` — name of the frontend Swarm service; use `adventura_web`
   for the `web` service in the `adventura` stack.
-- `DEPLOY_KNOWN_HOSTS` — verified known-host entry for the deployment server.
+- `DEPLOY_KNOWN_HOSTS` — verified ED25519 host key prefixed with
+  `adventura-deploy`, for example `adventura-deploy ssh-ed25519 AAAA...`.
   Obtain and verify its SSH host fingerprint out of band; do not disable host
   key checking in the workflow.
 
