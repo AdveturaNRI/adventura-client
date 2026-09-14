@@ -6,6 +6,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
+  Keyboard,
   KeyboardAvoidingView,
   Linking,
   Modal,
@@ -25,6 +26,7 @@ import Svg, { Path } from 'react-native-svg';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { MobileBackButton } from '@/components/navigation/MobileBackButton';
+import { resolveChatReturnHref } from '@/components/navigation/navigate-back';
 import { UserAvatar } from '@/components/navigation/UserAvatar';
 import { useIsDesktopSidebarVisible, useIsDesktopWeb } from '@/components/navigation/DesktopThemeToggle';
 import { ScreenTransition } from '@/components/navigation/ScreenTransition';
@@ -1053,8 +1055,13 @@ function createStyles(colors: ThemeColors, bottomPad: number) {
 }
 
 export default function ChatThreadScreen() {
-  const { id } = useLocalSearchParams<{ id: string }>();
+  const { id, returnTo, returnToId } = useLocalSearchParams<{
+    id: string;
+    returnTo?: string | string[];
+    returnToId?: string | string[];
+  }>();
   const conversationId = Array.isArray(id) ? id[0] : id;
+  const backHref = resolveChatReturnHref(returnTo, returnToId);
   const router = useRouter();
   const colors = useTheme();
   const insets = useSafeAreaInsets();
@@ -1077,6 +1084,7 @@ export default function ChatThreadScreen() {
   const [lightbox, setLightbox] = useState<{ uris: string[]; index: number } | null>(null);
   const [isDraggingFile, setIsDraggingFile] = useState(false);
   const [emojiPanelOpen, setEmojiPanelOpen] = useState(false);
+  const emojiPanelOpenRef = useRef(false);
   const [addingBack, setAddingBack] = useState(false);
   const [suppressFavoriteBack, setSuppressFavoriteBack] = useState(false);
   const [unblocking, setUnblocking] = useState(false);
@@ -1201,6 +1209,62 @@ export default function ChatThreadScreen() {
   useEffect(() => {
     setEmojiPanelOpen(false);
   }, [conversationId]);
+
+  useEffect(() => {
+    emojiPanelOpenRef.current = emojiPanelOpen;
+  }, [emojiPanelOpen]);
+
+  useEffect(() => {
+    if (Platform.OS === 'web') {
+      return;
+    }
+    const closeEmojiOnKeyboard = Keyboard.addListener('keyboardDidShow', () => {
+      if (emojiPanelOpenRef.current) {
+        setEmojiPanelOpen(false);
+      }
+    });
+    return () => closeEmojiOnKeyboard.remove();
+  }, []);
+
+  const openEmojiPanel = useCallback(() => {
+    if (Platform.OS !== 'web') {
+      Keyboard.dismiss();
+      composerInputRef.current?.blur();
+    }
+    setEmojiPanelOpen(true);
+  }, []);
+
+  const closeEmojiPanel = useCallback((focusInput = false) => {
+    setEmojiPanelOpen(false);
+    if (focusInput) {
+      requestAnimationFrame(() => {
+        composerInputRef.current?.focus();
+      });
+    }
+  }, []);
+
+  const toggleEmojiPanel = useCallback(() => {
+    if (emojiPanelOpenRef.current) {
+      closeEmojiPanel(true);
+      return;
+    }
+    openEmojiPanel();
+  }, [closeEmojiPanel, openEmojiPanel]);
+
+  const handleComposerFocus = useCallback(() => {
+    if (!emojiPanelOpenRef.current) {
+      return;
+    }
+    // На ПК/вебе поле и панель эмодзи живут вместе — фокус не должен её закрывать.
+    if (Platform.OS === 'web') {
+      return;
+    }
+    setEmojiPanelOpen(false);
+    // Первый фокус мог пройти с showSoftInputOnFocus=false — дожимаем клавиатуру.
+    requestAnimationFrame(() => {
+      composerInputRef.current?.focus();
+    });
+  }, []);
 
   const loadConversation = useCallback(async () => {
     if (!conversationId) {
@@ -1468,6 +1532,12 @@ export default function ChatThreadScreen() {
     draftRef.current = next;
     selectionRef.current = { start: nextCursor, end: nextCursor };
     setDraft(next);
+    if (Platform.OS !== 'web' && emojiPanelOpenRef.current) {
+      composerInputRef.current?.setNativeProps?.({
+        selection: { start: nextCursor, end: nextCursor },
+      });
+      return;
+    }
     requestAnimationFrame(() => {
       composerInputRef.current?.focus();
       composerInputRef.current?.setNativeProps?.({
@@ -1922,7 +1992,9 @@ export default function ChatThreadScreen() {
           </View>
         ) : null}
         <View style={[styles.header, { paddingTop: headerPadTop }]}>
-          {!hasDesktopSidebar ? <MobileBackButton /> : null}
+          {!hasDesktopSidebar || backHref ? (
+            <MobileBackButton backHref={backHref} />
+          ) : null}
           <Pressable
             accessibilityRole="button"
             accessibilityLabel={isGroup ? `Участники ${title}` : `Анкета ${title}`}
@@ -2427,6 +2499,8 @@ export default function ChatThreadScreen() {
             onSelectionChange={(event) => {
               selectionRef.current = event.nativeEvent.selection;
             }}
+            onFocus={handleComposerFocus}
+            showSoftInputOnFocus={!emojiPanelOpen}
             nativeID="chat-composer-input"
             placeholder="Сообщение"
             placeholderTextColor={colors.textMuted}
@@ -2445,12 +2519,7 @@ export default function ChatThreadScreen() {
             accessibilityRole="button"
             accessibilityLabel={emojiPanelOpen ? 'Скрыть эмодзи' : 'Эмодзи'}
             accessibilityState={{ selected: emojiPanelOpen }}
-            onPress={() => {
-              setEmojiPanelOpen((current) => !current);
-              requestAnimationFrame(() => {
-                composerInputRef.current?.focus();
-              });
-            }}
+            onPress={toggleEmojiPanel}
             style={[styles.iconButton, emojiPanelOpen ? styles.iconButtonActive : null]}>
             <Ionicons
               name={emojiPanelOpen ? 'happy' : 'happy-outline'}

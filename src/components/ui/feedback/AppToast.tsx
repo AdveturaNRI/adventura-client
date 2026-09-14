@@ -18,7 +18,7 @@ export function AppToast() {
   return (
     <>
       <NotificationToastListener />
-      <Toast config={config} topOffset={56} bottomOffset={40} />
+      <Toast config={config} topOffset={72} bottomOffset={40} />
     </>
   );
 }

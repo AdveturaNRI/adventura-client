@@ -2,9 +2,12 @@ import Toast from 'react-native-toast-message';
 
 import {
   type ToastAlignment,
+  type ToastEmphasis,
   type ToastPosition,
   type ToastVariant,
 } from '@/components/ui/feedback/toast.config';
+
+export type { ToastEmphasis };
 
 type ShowToastOptions = {
   title?: string;
@@ -14,6 +17,9 @@ type ShowToastOptions = {
   duration?: number;
   actionLabel?: string;
   onAction?: () => void;
+  emphasis?: ToastEmphasis;
+  avatarUrl?: string | null;
+  avatarName?: string | null;
 };
 
 const DEFAULT_TITLES: Record<ToastVariant, string> = {
@@ -34,6 +40,9 @@ function showToast(variant: ToastVariant, options: ShowToastOptions) {
       alignment: options.alignment ?? 'center',
       actionLabel: options.actionLabel,
       onAction: options.onAction,
+      emphasis: options.emphasis ?? 'default',
+      avatarUrl: options.avatarUrl ?? null,
+      avatarName: options.avatarName ?? null,
     },
   });
 }

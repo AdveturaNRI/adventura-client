@@ -142,6 +142,8 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
           type: notification.type,
           actorName: notification.actor.nickname,
           subject: notification.subject,
+          actionText: notification.actionText,
+          messageText: notification.messageText,
         });
       },
       onUnreadSync: (payload: UnreadSyncPayload) => {

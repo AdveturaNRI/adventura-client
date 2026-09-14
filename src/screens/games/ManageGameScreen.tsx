@@ -762,9 +762,24 @@ export default function ManageGameScreen() {
       }
       setIsDeleting(true);
       try {
+        const gameTitle = payload?.game.title?.trim();
         await deleteGame(gameId, { deleteChat });
         setDeleteDialogOpen(false);
-        toast.success(deleteChat ? 'Игра и чат удалены' : 'Игра удалена');
+        toast.success(
+          deleteChat
+            ? gameTitle
+              ? `«${gameTitle}» и чат стола удалены`
+              : 'Стол и игровой чат удалены'
+            : gameTitle
+              ? `«${gameTitle}» больше нет в кабинете`
+              : 'Стол убран из кабинета',
+          {
+            title: deleteChat ? 'Игра и чат удалены' : 'Игра удалена',
+            emphasis: 'alert',
+            alignment: isDesktopWeb ? 'right' : 'center',
+            duration: 4500,
+          },
+        );
         router.replace('/master-room');
       } catch (error) {
         toast.error(localizeErrorMessage(error, 'Не удалось удалить игру'));
@@ -772,7 +787,7 @@ export default function ManageGameScreen() {
         setIsDeleting(false);
       }
     },
-    [gameId, isDeleting, router],
+    [gameId, isDeleting, isDesktopWeb, payload?.game.title, router],
   );
 
   const openAnketa = useCallback(
@@ -784,20 +799,27 @@ export default function ManageGameScreen() {
 
   const openChat = useCallback(
     async (userId: string) => {
-      if (busy) {
+      if (busy || !gameId) {
         return;
       }
       setBusy(true);
       try {
         const conversation = await openConversationWith(userId);
-        router.push(`/chats/${conversation.id}`);
+        router.push({
+          pathname: '/chats/[id]',
+          params: {
+            id: conversation.id,
+            returnTo: '/games-manage',
+            returnToId: gameId,
+          },
+        });
       } catch (error) {
         toast.error(localizeErrorMessage(error, 'Не удалось открыть чат'));
       } finally {
         setBusy(false);
       }
     },
-    [busy, router],
+    [busy, gameId, router],
   );
 
   const openGroupChat = useCallback(async () => {
@@ -807,7 +829,14 @@ export default function ManageGameScreen() {
     setBusy(true);
     try {
       const conversation = await openGameChat(gameId);
-      router.push(`/chats/${conversation.id}`);
+      router.push({
+        pathname: '/chats/[id]',
+        params: {
+          id: conversation.id,
+          returnTo: '/games-manage',
+          returnToId: gameId,
+        },
+      });
     } catch (error) {
       toast.error(localizeErrorMessage(error, 'Не удалось открыть чат игры'));
     } finally {
@@ -893,14 +922,21 @@ export default function ManageGameScreen() {
       try {
         const next = await acceptGameApplication(gameId, person.id);
         applyPayload(next);
-        toast.success(`${person.nickname} в составе`);
+        toast.success(`${person.nickname} теперь в составе стола`, {
+          title: 'Заявка принята',
+          emphasis: 'alert',
+          alignment: isDesktopWeb ? 'right' : 'center',
+          avatarName: person.nickname,
+          avatarUrl: person.avatarUrl,
+          duration: 4500,
+        });
       } catch (error) {
         toast.error(localizeErrorMessage(error, 'Не удалось принять заявку'));
       } finally {
         setBusy(false);
       }
     },
-    [applyPayload, busy, gameId],
+    [applyPayload, busy, gameId, isDesktopWeb],
   );
 
   const rejectApplication = useCallback(
@@ -912,14 +948,21 @@ export default function ManageGameScreen() {
       try {
         const next = await rejectGameApplication(gameId, person.id);
         applyPayload(next);
-        toast.success('Заявка отклонена');
+        toast.warning(`${person.nickname} не попадёт за этот стол`, {
+          title: 'Заявка отклонена',
+          emphasis: 'alert',
+          alignment: isDesktopWeb ? 'right' : 'center',
+          avatarName: person.nickname,
+          avatarUrl: person.avatarUrl,
+          duration: 4500,
+        });
       } catch (error) {
         toast.error(localizeErrorMessage(error, 'Не удалось отклонить заявку'));
       } finally {
         setBusy(false);
       }
     },
-    [applyPayload, busy, gameId],
+    [applyPayload, busy, gameId, isDesktopWeb],
   );
 
   if (loading || !payload) {

@@ -269,7 +269,13 @@ export default function GameDetailScreen() {
     setBusy(true);
     try {
       const conversation = await openGameChat(item.id);
-      router.push(`/chats/${conversation.id}`);
+      router.push({
+        pathname: '/chats/[id]',
+        params: {
+          id: conversation.id,
+          returnTo: `/games/${item.id}`,
+        },
+      });
     } catch (error) {
       toast.error(localizeErrorMessage(error, 'Не удалось открыть чат игры'));
     } finally {

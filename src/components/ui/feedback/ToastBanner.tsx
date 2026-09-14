@@ -1,10 +1,13 @@
+import type { ComponentProps } from 'react';
 import { Ionicons } from '@expo/vector-icons';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import Toast, { type ToastConfigParams } from 'react-native-toast-message';
 
+import { UserAvatar } from '@/components/navigation/UserAvatar';
 import {
   getToastSpecs,
   type ToastAlignment,
+  type ToastEmphasis,
   type ToastVariant,
 } from '@/components/ui/feedback/toast.config';
 import { FontSize, Layout, Spacing, type ThemeColors } from '@/constants/theme';
@@ -15,12 +18,13 @@ type ToastBannerProps = ToastConfigParams<Record<string, unknown>> & {
   variant: ToastVariant;
 };
 
+type IconName = ComponentProps<typeof Ionicons>['name'];
+
 function createStyles(colors: ThemeColors) {
   return StyleSheet.create({
     outer: {
       width: '100%',
       paddingHorizontal: Spacing.md,
-      // Let clicks pass through empty space around the banner (e.g. header actions).
       pointerEvents: 'box-none',
     },
     alignLeft: {
@@ -37,48 +41,98 @@ function createStyles(colors: ThemeColors) {
       maxWidth: Layout.maxContentWidth,
       flexDirection: 'row',
       alignItems: 'center',
-      gap: Spacing.sm,
-      paddingVertical: Spacing.md,
+      gap: Spacing.sm + 2,
+      paddingVertical: 12,
       paddingHorizontal: Spacing.md,
       borderRadius: 16,
       backgroundColor: colors.surface,
       borderWidth: 1,
       borderColor: colors.borderLight,
       shadowColor: colors.shadow,
-      shadowOffset: { width: 0, height: 8 },
-      shadowOpacity: 0.12,
-      shadowRadius: 20,
-      elevation: 6,
+      shadowOffset: { width: 0, height: 10 },
+      shadowOpacity: 0.14,
+      shadowRadius: 22,
+      elevation: 8,
+      overflow: 'hidden',
       pointerEvents: 'auto',
+    },
+    cardAlert: {
+      borderColor: 'rgba(21, 122, 254, 0.28)',
+      backgroundColor: colors.surface,
+    },
+    cardChat: {
+      borderColor: 'rgba(21, 122, 254, 0.28)',
+      backgroundColor: colors.surface,
+    },
+    cardWarningEmphasis: {
+      borderColor: 'rgba(255, 159, 10, 0.35)',
+    },
+    cardPressed: {
+      opacity: 0.94,
     },
     cardShrink: {
       width: 'auto',
-      minWidth: 280,
+      minWidth: 300,
+      maxWidth: '100%',
+    },
+    leading: {
+      width: 44,
+      height: 44,
+      flexShrink: 0,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    iconWell: {
+      width: 44,
+      height: 44,
+      borderRadius: 14,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    avatarSeal: {
+      position: 'absolute',
+      right: -2,
+      bottom: -2,
+      width: 18,
+      height: 18,
+      borderRadius: 9,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: colors.primary,
+      borderWidth: 2,
+      borderColor: colors.surface,
+    },
+    avatarSealWarning: {
+      backgroundColor: '#FF9F0A',
+    },
+    avatarSealSuccess: {
+      backgroundColor: colors.success,
     },
     content: {
       flex: 1,
-      gap: 2,
+      gap: 3,
       minWidth: 0,
     },
     title: {
       fontSize: FontSize.label,
       fontWeight: '600',
       color: colors.text,
+      letterSpacing: -0.1,
+    },
+    titleEmphasis: {
+      fontWeight: '700',
     },
     message: {
       fontSize: FontSize.caption,
       color: colors.textSecondary,
-      lineHeight: 18,
+      lineHeight: 17,
     },
     actionButton: {
       flexShrink: 0,
-      paddingVertical: 6,
-      paddingHorizontal: 10,
+      paddingVertical: 7,
+      paddingHorizontal: 12,
       borderRadius: 999,
       backgroundColor: 'rgba(21, 122, 254, 0.12)',
-    },
-    actionButtonPressed: {
-      opacity: 0.85,
     },
     actionLabel: {
       fontSize: FontSize.caption,
@@ -102,6 +156,39 @@ function getAlignmentStyle(
   }
 }
 
+function getIconWellBackground(variant: ToastVariant) {
+  switch (variant) {
+    case 'success':
+      return 'rgba(52, 199, 89, 0.14)';
+    case 'error':
+      return 'rgba(255, 59, 48, 0.14)';
+    case 'warning':
+      return 'rgba(255, 159, 10, 0.16)';
+    default:
+      return 'rgba(21, 122, 254, 0.12)';
+  }
+}
+
+function resolveIconName(emphasis: ToastEmphasis, specIcon: IconName): IconName {
+  if (emphasis === 'chat') {
+    return 'chatbubbles';
+  }
+  return specIcon;
+}
+
+function resolveSealIcon(emphasis: ToastEmphasis, variant: ToastVariant): IconName {
+  if (emphasis === 'chat') {
+    return 'chatbubble';
+  }
+  if (variant === 'success') {
+    return 'checkmark';
+  }
+  if (variant === 'warning' || variant === 'error') {
+    return 'close';
+  }
+  return 'notifications';
+}
+
 export function ToastBanner({ text1, text2, onPress, variant, props }: ToastBannerProps) {
   const colors = useTheme();
   const styles = useThemedStyles(createStyles);
@@ -109,40 +196,90 @@ export function ToastBanner({ text1, text2, onPress, variant, props }: ToastBann
   const alignment = (props?.alignment as ToastAlignment | undefined) ?? 'center';
   const actionLabel = typeof props?.actionLabel === 'string' ? props.actionLabel : undefined;
   const onAction = typeof props?.onAction === 'function' ? (props.onAction as () => void) : undefined;
+  const emphasis = (props?.emphasis as ToastEmphasis | undefined) ?? 'default';
+  const avatarUrl =
+    typeof props?.avatarUrl === 'string' && props.avatarUrl.trim()
+      ? props.avatarUrl.trim()
+      : null;
+  const avatarName =
+    typeof props?.avatarName === 'string' && props.avatarName.trim()
+      ? props.avatarName.trim()
+      : null;
   const message = typeof text2 === 'string' && text2.trim() ? text2 : null;
+  const iconName = resolveIconName(emphasis, spec.icon);
+  const showAvatar = Boolean(avatarName);
+  const sealIcon = resolveSealIcon(emphasis, variant);
+
+  const handleAction = () => {
+    onAction?.();
+    Toast.hide();
+  };
+
+  const leading = showAvatar ? (
+    <View style={styles.leading}>
+      <UserAvatar nickname={avatarName!} avatarUrl={avatarUrl} size={40} />
+      <View
+        style={[
+          styles.avatarSeal,
+          variant === 'warning' ? styles.avatarSealWarning : null,
+          variant === 'success' ? styles.avatarSealSuccess : null,
+        ]}>
+        <Ionicons name={sealIcon} size={9} color={colors.onPrimary} />
+      </View>
+    </View>
+  ) : (
+    <View
+      style={[
+        styles.iconWell,
+        { backgroundColor: getIconWellBackground(variant) },
+      ]}>
+      <Ionicons name={iconName} size={22} color={spec.accentColor} />
+    </View>
+  );
 
   const body = (
     <>
-      <Ionicons name={spec.icon} size={22} color={spec.accentColor} />
+      {leading}
       <View style={styles.content}>
-        {text1 ? <Text style={styles.title}>{text1}</Text> : null}
-        {message ? <Text style={styles.message}>{message}</Text> : null}
+        {text1 ? (
+          <Text
+            style={[styles.title, emphasis !== 'default' ? styles.titleEmphasis : null]}
+            numberOfLines={1}>
+            {text1}
+          </Text>
+        ) : null}
+        {message ? (
+          <Text style={styles.message} numberOfLines={2}>
+            {message}
+          </Text>
+        ) : null}
       </View>
       {actionLabel && onAction ? (
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={actionLabel}
-          hitSlop={8}
-          onPress={() => {
-            onAction();
-            Toast.hide();
-          }}
-          style={({ pressed }) => [
-            styles.actionButton,
-            pressed && styles.actionButtonPressed,
-          ]}>
+        <View style={styles.actionButton} pointerEvents="none">
           <Text style={styles.actionLabel}>{actionLabel}</Text>
-        </Pressable>
+        </View>
       ) : null}
     </>
   );
 
-  const cardStyle = [styles.card, alignment !== 'center' ? styles.cardShrink : null];
+  const cardStyle = [
+    styles.card,
+    alignment !== 'center' ? styles.cardShrink : null,
+    emphasis === 'alert' ? styles.cardAlert : null,
+    emphasis === 'chat' ? styles.cardChat : null,
+    emphasis !== 'default' && variant === 'warning' ? styles.cardWarningEmphasis : null,
+  ];
+
+  const isInteractive = Boolean(onAction) || Boolean(onPress);
 
   return (
     <View pointerEvents="box-none" style={[styles.outer, getAlignmentStyle(alignment, styles)]}>
-      {onPress && !onAction ? (
-        <Pressable onPress={onPress} style={cardStyle}>
+      {isInteractive ? (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={actionLabel ?? text1 ?? 'Уведомление'}
+          onPress={onAction ? handleAction : onPress}
+          style={({ pressed }) => [...cardStyle, pressed && styles.cardPressed]}>
           {body}
         </Pressable>
       ) : (

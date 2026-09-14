@@ -222,6 +222,8 @@ export function notifyIncomingPortalNotification(options?: {
   type?: PortalNotification['type'];
   actorName?: string;
   subject?: string;
+  actionText?: string;
+  messageText?: string;
 }) {
   playIncomingMessageSound();
 
@@ -235,6 +237,8 @@ export function notifyIncomingPortalNotification(options?: {
     actor: { id: '', nickname: options.actorName ?? '', avatarUrl: null },
     actorName: options.actorName,
     subject: options.subject ?? '',
+    actionText: options.actionText,
+    messageText: options.messageText,
   });
 
   startTitleBlink(title);
