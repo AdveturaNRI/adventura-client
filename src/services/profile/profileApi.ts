@@ -20,6 +20,7 @@ export type UpdateProfilePayload = {
   availability?: string;
   age?: number;
   cityId?: string | null;
+  cityIds?: string[];
   playsOnline?: boolean;
   timezone?: string;
   systems?: string[];
@@ -88,6 +89,24 @@ export async function uploadProfileCard(localUri: string) {
   });
 }
 
+function isPresignedObjectUrl(url: string): boolean {
+  return (
+    url.includes('X-Amz-Signature=') ||
+    url.includes('X-Amz-Algorithm=') ||
+    url.includes('x-amz-signature=')
+  );
+}
+
+function withCacheBust(baseUrl: string, cacheKey?: string | null): string {
+  if (!cacheKey || isPresignedObjectUrl(baseUrl)) {
+    // Extra query params invalidate S3/Yandex SigV4 signatures.
+    return baseUrl;
+  }
+
+  const separator = baseUrl.includes('?') ? '&' : '?';
+  return `${baseUrl}${separator}v=${encodeURIComponent(cacheKey)}`;
+}
+
 export function pickAvatarUrl(
   avatar: ImageUrls | null,
   cacheKey?: string | null,
@@ -103,13 +122,7 @@ export function pickAvatarUrl(
     return null;
   }
 
-  if (!cacheKey) {
-    return baseUrl;
-  }
-
-  const separator = baseUrl.includes('?') ? '&' : '?';
-
-  return `${baseUrl}${separator}v=${encodeURIComponent(cacheKey)}`;
+  return withCacheBust(baseUrl, cacheKey);
 }
 
 export function pickProfileCardUrl(
@@ -127,13 +140,7 @@ export function pickProfileCardUrl(
     return null;
   }
 
-  if (!cacheKey) {
-    return baseUrl;
-  }
-
-  const separator = baseUrl.includes('?') ? '&' : '?';
-
-  return `${baseUrl}${separator}v=${encodeURIComponent(cacheKey)}`;
+  return withCacheBust(baseUrl, cacheKey);
 }
 
 export function isLocalImageUri(uri: string): boolean {
@@ -225,10 +232,10 @@ export async function saveQuestionnaireToServer(
     payload.availability = availability;
   }
 
-  if (draft.cityId) {
-    payload.cityId = draft.cityId;
+  if (draft.cities.length > 0) {
+    payload.cityIds = draft.cities.map((city) => city.id);
   } else {
-    payload.cityId = null;
+    payload.cityIds = [];
   }
 
   payload.playsOnline = draft.playsOnline;

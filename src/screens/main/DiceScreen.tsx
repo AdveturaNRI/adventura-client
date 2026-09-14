@@ -1,6 +1,8 @@
 import { Ionicons } from '@expo/vector-icons';
+import { useIsFocused } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -29,15 +31,17 @@ import {
 
 export type DieSides = DieGlyphSides;
 
-const DIE_OPTIONS: { sides: DieSides; label: string }[] = [
-  { sides: 4, label: 'd4' },
-  { sides: 6, label: 'd6' },
-  { sides: 8, label: 'd8' },
-  { sides: 10, label: 'd10' },
-  { sides: 12, label: 'd12' },
-  { sides: 20, label: 'd20' },
-  { sides: 100, label: 'd100' },
+const DIE_OPTIONS: { sides: DieSides; label: string; fullName: string }[] = [
+  { sides: 4, label: 'd4', fullName: 'Четырёхгранник (d4)' },
+  { sides: 6, label: 'd6', fullName: 'Шестигранник (d6)' },
+  { sides: 8, label: 'd8', fullName: 'Восьмигранник (d8)' },
+  { sides: 10, label: 'd10', fullName: 'Десятигранник (d10)' },
+  { sides: 12, label: 'd12', fullName: 'Двенадцатигранник (d12)' },
+  { sides: 20, label: 'd20', fullName: 'Двадцатигранник (d20)' },
+  { sides: 100, label: 'd100', fullName: 'Процентный (d100)' },
 ];
+
+const DIE_TOOLTIP_DELAY_MS = 280;
 
 const MAX_PER_DIE = 8;
 const MAX_TOTAL = 12;
@@ -97,6 +101,7 @@ function createStyles(colors: ThemeColors) {
       paddingHorizontal: 8,
       alignItems: 'center',
       justifyContent: 'flex-start',
+      ...(Platform.OS === 'web' ? ({ overflow: 'visible' } as object) : null),
     },
     railMedium: {
       width: 92,
@@ -122,11 +127,13 @@ function createStyles(colors: ThemeColors) {
       flexGrow: 0,
       flexShrink: 1,
       width: '100%',
+      ...(Platform.OS === 'web' ? ({ overflow: 'visible' } as object) : null),
     },
     railScrollContent: {
       alignItems: 'center',
       gap: 8,
       paddingBottom: 4,
+      ...(Platform.OS === 'web' ? ({ overflow: 'visible' } as object) : null),
     },
     railScrollContentCompact: {
       flexDirection: 'row',
@@ -138,6 +145,9 @@ function createStyles(colors: ThemeColors) {
       alignItems: 'center',
       gap: 5,
       width: '100%',
+      position: 'relative',
+      zIndex: 1,
+      ...(Platform.OS === 'web' ? ({ overflow: 'visible' } as object) : null),
     },
     dieSectionCompact: {
       width: 'auto',
@@ -152,6 +162,8 @@ function createStyles(colors: ThemeColors) {
       alignItems: 'center',
       justifyContent: 'center',
       position: 'relative',
+      zIndex: 1,
+      ...(Platform.OS === 'web' ? ({ overflow: 'visible' } as object) : null),
     },
     dieHitActive: {
       backgroundColor: 'rgba(21, 122, 254, 0.18)',
@@ -160,6 +172,62 @@ function createStyles(colors: ThemeColors) {
       width: 64,
       height: 64,
       borderRadius: 18,
+    },
+    dieLabel: {
+      fontSize: FontSize.caption,
+      fontWeight: '700',
+      letterSpacing: 0.2,
+      color: colors.primaryLight,
+      textAlign: 'center',
+    },
+    dieLabelMuted: {
+      color: colors.primaryLight,
+      opacity: 0.72,
+    },
+    dieTooltip: {
+      position: 'absolute',
+      zIndex: 20,
+      ...(Platform.OS === 'web'
+        ? ({
+            pointerEvents: 'none',
+          } as object)
+        : null),
+    },
+    dieTooltipBeside: {
+      left: '100%',
+      top: 8,
+      marginLeft: 8,
+    },
+    dieTooltipAbove: {
+      bottom: '100%',
+      left: 0,
+      right: 0,
+      marginBottom: 6,
+      alignItems: 'center',
+    },
+    dieTooltipBubble: {
+      paddingHorizontal: Spacing.sm,
+      paddingVertical: 6,
+      borderRadius: 8,
+      backgroundColor: colors.surface,
+      borderWidth: 1,
+      borderColor: colors.borderLight,
+      shadowColor: colors.shadow,
+      shadowOffset: { width: 0, height: 2 },
+      shadowOpacity: 0.12,
+      shadowRadius: 6,
+      elevation: 4,
+      ...(Platform.OS === 'web'
+        ? ({
+            whiteSpace: 'nowrap',
+          } as object)
+        : null),
+    },
+    dieTooltipText: {
+      fontSize: FontSize.caption,
+      fontWeight: '600',
+      color: colors.textSecondary,
+      textAlign: 'center',
     },
     dieBadge: {
       position: 'absolute',
@@ -443,6 +511,7 @@ export default function DiceScreen() {
   const colors = useTheme();
   const styles = useThemedStyles(createStyles);
   const hasDesktopSidebar = useIsDesktopSidebarVisible();
+  const isFocused = useIsFocused();
   const { width, height } = useWindowDimensions();
   const stageRef = useRef<DiceStageHandle>(null);
 
@@ -457,6 +526,36 @@ export default function DiceScreen() {
   const [outcome, setOutcome] = useState<DiceRollOutcome | null>(null);
   const [showLast, setShowLast] = useState(false);
   const [history, setHistory] = useState<DiceHistoryEntry[]>([]);
+  const [hoveredDie, setHoveredDie] = useState<DieSides | null>(null);
+  const hoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isWeb = Platform.OS === 'web';
+
+  const clearHoverTimer = useCallback(() => {
+    if (hoverTimerRef.current) {
+      clearTimeout(hoverTimerRef.current);
+      hoverTimerRef.current = null;
+    }
+  }, []);
+
+  const showDieTooltip = useCallback(
+    (sides: DieSides) => {
+      if (!isWeb) return;
+      clearHoverTimer();
+      hoverTimerRef.current = setTimeout(() => {
+        setHoveredDie(sides);
+      }, DIE_TOOLTIP_DELAY_MS);
+    },
+    [clearHoverTimer, isWeb],
+  );
+
+  const hideDieTooltip = useCallback(() => {
+    clearHoverTimer();
+    setHoveredDie(null);
+  }, [clearHoverTimer]);
+
+  useEffect(() => {
+    return () => clearHoverTimer();
+  }, [clearHoverTimer]);
 
   const parts = useMemo(() => poolParts(pool), [pool]);
   const notationLabel = parts.length
@@ -466,6 +565,14 @@ export default function DiceScreen() {
     () => DIE_OPTIONS.reduce((acc, option) => acc + pool[option.sides], 0),
     [pool],
   );
+
+  useEffect(() => {
+    if (isFocused) {
+      return;
+    }
+    setStageReady(false);
+    setRolling(false);
+  }, [isFocused]);
 
   useEffect(() => {
     let cancelled = false;
@@ -563,6 +670,7 @@ export default function DiceScreen() {
           const count = pool[option.sides];
           const active = count > 0;
           const canPlus = count < MAX_PER_DIE && totalDice < MAX_TOTAL;
+          const showTooltip = isWeb && hoveredDie === option.sides;
           return (
             <View
               key={option.sides}
@@ -570,12 +678,15 @@ export default function DiceScreen() {
                 styles.dieSection,
                 compact && styles.dieSectionCompact,
                 rolling && { opacity: 0.55 },
+                showTooltip && { zIndex: 30 },
               ]}>
               <Pressable
                 accessibilityRole="button"
-                accessibilityLabel={`Добавить ${option.label}, сейчас ${count}`}
+                accessibilityLabel={`${option.fullName}. Добавить, сейчас ${count}`}
                 disabled={rolling || !canPlus}
                 onPress={() => bump(option.sides, 1)}
+                onHoverIn={() => showDieTooltip(option.sides)}
+                onHoverOut={hideDieTooltip}
                 style={({ pressed }) => [
                   styles.dieHit,
                   (medium || large) && styles.dieHitLg,
@@ -592,7 +703,28 @@ export default function DiceScreen() {
                   size={compact ? 36 : diePreviewSize}
                   active={active || totalDice === 0}
                 />
+                {showTooltip ? (
+                  <View
+                    style={[
+                      styles.dieTooltip,
+                      compact ? styles.dieTooltipAbove : styles.dieTooltipBeside,
+                    ]}
+                    pointerEvents="none"
+                    accessibilityElementsHidden
+                    importantForAccessibility="no-hide-descendants">
+                    <View style={styles.dieTooltipBubble}>
+                      <Text style={styles.dieTooltipText}>{option.fullName}</Text>
+                    </View>
+                  </View>
+                ) : null}
               </Pressable>
+              <Text
+                style={[styles.dieLabel, !active && styles.dieLabelMuted]}
+                numberOfLines={1}
+                accessibilityElementsHidden
+                importantForAccessibility="no-hide-descendants">
+                {option.label}
+              </Text>
               {active ? (
                 <Pressable
                   accessibilityRole="button"
@@ -685,11 +817,13 @@ export default function DiceScreen() {
           <View style={[styles.tray, compact && styles.trayCompact]}>
             <View style={styles.trayInnerRing} />
             <View style={styles.stageFill}>
-              <DiceStage
-                ref={stageRef}
-                onReady={() => setStageReady(true)}
-                onDone={handleDone}
-              />
+              {isFocused ? (
+                <DiceStage
+                  ref={stageRef}
+                  onReady={() => setStageReady(true)}
+                  onDone={handleDone}
+                />
+              ) : null}
             </View>
 
             <View style={styles.statusChip}>

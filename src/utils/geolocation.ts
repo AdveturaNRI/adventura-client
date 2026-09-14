@@ -3,6 +3,9 @@ export type DeviceLocation = {
   lng: number;
 };
 
+export const GEOLOCATION_MANUAL_FALLBACK_MESSAGE =
+  'Не удалось определить местоположение автоматически. Пожалуйста, выберите город из списка вручную';
+
 export class GeolocationPermissionError extends Error {
   constructor(message = 'Вы запретили доступ к геолокации') {
     super(message);
@@ -16,34 +19,35 @@ export function readDeviceLocation(options?: {
   enableHighAccuracy?: boolean;
 }): Promise<DeviceLocation> {
   return new Promise((resolve, reject) => {
-    if (typeof navigator === 'undefined' || !navigator.geolocation) {
-      reject(new Error('Геолокация недоступна в этом браузере'));
-      return;
-    }
+    try {
+      if (typeof navigator === 'undefined' || !navigator.geolocation) {
+        reject(new Error(GEOLOCATION_MANUAL_FALLBACK_MESSAGE));
+        return;
+      }
 
-    navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        resolve({
-          lat: pos.coords.latitude,
-          lng: pos.coords.longitude,
-        });
-      },
-      (error) => {
-        if (error.code === error.PERMISSION_DENIED) {
-          reject(new GeolocationPermissionError());
-          return;
-        }
-        if (error.code === error.TIMEOUT) {
-          reject(new Error('Не удалось определить местоположение вовремя'));
-          return;
-        }
-        reject(new Error('Не удалось определить местоположение'));
-      },
-      {
-        enableHighAccuracy: options?.enableHighAccuracy ?? true,
-        timeout: options?.timeout ?? 12000,
-        maximumAge: options?.maximumAge ?? 30_000,
-      },
-    );
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          resolve({
+            lat: pos.coords.latitude,
+            lng: pos.coords.longitude,
+          });
+        },
+        (error) => {
+          if (error?.code === error.PERMISSION_DENIED) {
+            reject(new GeolocationPermissionError());
+            return;
+          }
+
+          reject(new Error(GEOLOCATION_MANUAL_FALLBACK_MESSAGE));
+        },
+        {
+          enableHighAccuracy: options?.enableHighAccuracy ?? true,
+          timeout: options?.timeout ?? 12000,
+          maximumAge: options?.maximumAge ?? 30_000,
+        },
+      );
+    } catch {
+      reject(new Error(GEOLOCATION_MANUAL_FALLBACK_MESSAGE));
+    }
   });
 }

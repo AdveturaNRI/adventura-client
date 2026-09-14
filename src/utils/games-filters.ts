@@ -175,7 +175,7 @@ export function buildActiveGamesFilterChips(filters: GamesFeedFilters): GamesFil
   } else if (filters.playMode === 'offline') {
     chips.push({
       key: 'playMode',
-      label: filters.cityLabel.trim() || 'Офлайн',
+      label: filters.cityLabel.trim() || 'Офлайн · мои города',
       icon: 'map-outline',
     });
   }

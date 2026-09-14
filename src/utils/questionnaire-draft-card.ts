@@ -23,7 +23,9 @@ export function questionnaireDraftToUserCardProps(draft: QuestionnaireDraft): Us
   const roles = draft.role ? roleChoiceToRoles(draft.role) : ['Игрок'];
   const schedule = formatAvailability(draft.availability);
   const bio = draft.description.trim() || '—';
-  const city = draft.cityLabel.trim() || null;
+  const cities = draft.cities
+    .map((city) => city.label.trim())
+    .filter(Boolean);
 
   return {
     name: draft.nickname.trim() || 'Без имени',
@@ -33,7 +35,7 @@ export function questionnaireDraftToUserCardProps(draft: QuestionnaireDraft): Us
     avatarUrl: draft.profileCardUri ?? undefined,
     playInfo: {
       playsOnline: draft.playsOnline,
-      location: city,
+      locations: cities,
       systems: [...draft.systems],
       readyToLearnNew: draft.readyToLearnNew,
       openToAnySystem: draft.openToAnySystem,

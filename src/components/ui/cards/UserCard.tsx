@@ -520,7 +520,10 @@ export function UserCard({
       {
         icon: 'play',
         label: 'Играю',
-        chips: buildLocationChips(playInfo.playsOnline, playInfo.location),
+        chips: buildLocationChips(
+          playInfo.playsOnline,
+          playInfo.locations ?? playInfo.location,
+        ),
       },
       {
         icon: 'systems',

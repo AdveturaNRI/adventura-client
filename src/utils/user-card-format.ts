@@ -1,13 +1,23 @@
-export function formatUserCardLocation(playsOnline: boolean, location: string): string {
+export function formatUserCardLocation(
+  playsOnline: boolean,
+  location: string | string[] | null | undefined,
+): string {
   const parts: string[] = [];
 
   if (playsOnline) {
     parts.push('Онлайн');
   }
 
-  if (location.trim()) {
-    parts.push(location.trim());
-  }
+  const cities = Array.isArray(location)
+    ? location.map((item) => item.trim()).filter(Boolean)
+    : location?.trim()
+      ? location
+          .split(/\s*[·|,]\s*/)
+          .map((item) => item.trim())
+          .filter(Boolean)
+      : [];
+
+  parts.push(...cities);
 
   return parts.length > 0 ? parts.join(', ') : 'Не указано';
 }

@@ -1,5 +1,5 @@
 /**
- * Native WebView HTML — same engine/API as public/dice-box/dice-roller.html
+ * Native WebView HTML — same engine/API as public/dice-stage.html
  */
 export function buildDiceBoxNativeHtml(options?: { accent?: string }) {
   const accent = options?.accent ?? '#157AFE';

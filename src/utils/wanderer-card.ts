@@ -6,7 +6,15 @@ import { formatUserCardVisibility } from '@/utils/user-card-format';
 
 export function wandererCardToUserCardProps(item: WandererCardItem): UserCardProps {
   const visibility = formatUserCardVisibility(true);
-  const city = item.location?.trim() || null;
+  const cities =
+    item.cities && item.cities.length > 0
+      ? item.cities.map((city) => city.trim()).filter(Boolean)
+      : item.location?.trim()
+        ? item.location
+            .split(/\s*[·|,]\s*/)
+            .map((city) => city.trim())
+            .filter(Boolean)
+        : [];
   const tagline = item.tagline?.trim() || '—';
   const description = item.description?.trim() ?? '';
   const about = item.about?.trim() ?? '';
@@ -20,7 +28,8 @@ export function wandererCardToUserCardProps(item: WandererCardItem): UserCardPro
     avatarUrl: pickProfileCardUrl(item.profileCard) ?? undefined,
     playInfo: {
       playsOnline: item.playsOnline,
-      location: city,
+      locations: cities,
+      location: cities[0] ?? null,
       systems: [...item.systems],
       readyToLearnNew: item.readyToLearnNew,
       openToAnySystem: item.openToAnySystem ?? false,

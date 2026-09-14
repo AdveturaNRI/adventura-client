@@ -175,28 +175,56 @@ export function buildWanderersFilterOptions(input: {
     roles: [...ROLE_OPTIONS],
     playModes: PLAY_MODE_OPTIONS,
     locations: uniqueSorted(
-      input.items.flatMap((item) => (item.location?.trim() ? [item.location.trim()] : [])),
+      input.items.flatMap((item) => {
+        if (item.cities && item.cities.length > 0) {
+          return item.cities.map((city) => city.trim()).filter(Boolean);
+        }
+
+        const legacy = item.location?.trim();
+        if (!legacy) {
+          return [];
+        }
+
+        return legacy
+          .split(/\s*[·|,]\s*/)
+          .map((city) => city.trim())
+          .filter(Boolean);
+      }),
     ),
     officialSystems: uniqueSorted(input.officialSystems),
     experiences: uniqueSorted(input.experiences),
   };
 }
 
+function getWandererCityNames(item: WandererCardItem): string[] {
+  if (item.cities && item.cities.length > 0) {
+    return item.cities.map((city) => city.trim()).filter(Boolean);
+  }
+
+  const legacy = item.location?.trim();
+  if (!legacy) {
+    return [];
+  }
+
+  return legacy
+    .split(/\s*[·|,]\s*/)
+    .map((city) => city.trim())
+    .filter(Boolean);
+}
+
 function matchesPlayFilters(item: WandererCardItem, filters: WanderersFilters): boolean {
   const hasPlayModeFilter = filters.playModes.length > 0;
   const hasLocationFilter = filters.locations.length > 0;
+  const cityNames = getWandererCityNames(item);
 
   if (!hasPlayModeFilter && !hasLocationFilter) {
     return true;
   }
 
   const matchesOnline = filters.playModes.includes('online') && item.playsOnline;
-  const matchesOffline =
-    filters.playModes.includes('offline') && Boolean(item.location?.trim());
+  const matchesOffline = filters.playModes.includes('offline') && cityNames.length > 0;
   const matchesLocation =
-    hasLocationFilter &&
-    Boolean(item.location?.trim()) &&
-    filters.locations.includes(item.location!.trim());
+    hasLocationFilter && cityNames.some((city) => filters.locations.includes(city));
 
   if (hasPlayModeFilter && hasLocationFilter) {
     return matchesOnline || matchesOffline || matchesLocation;

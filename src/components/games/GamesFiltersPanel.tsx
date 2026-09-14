@@ -112,6 +112,11 @@ function createStyles(colors: ThemeColors, isDesktopWeb: boolean, bottomInset: n
       fontWeight: '600',
       color: colors.textMuted,
     },
+    sectionHint: {
+      fontSize: FontSize.caption,
+      color: colors.textMuted,
+      lineHeight: FontSize.caption * 1.4,
+    },
     chipsRow: {
       flexDirection: 'row',
       flexWrap: 'wrap',
@@ -455,18 +460,25 @@ export function GamesFiltersPanel({
                   />
                 </View>
                 {draft.playMode === 'offline' ? (
-                  <CitySearchField
-                    label="Город"
-                    placeholder="Начните вводить город"
-                    value={draft.cityId}
-                    selectedLabel={draft.cityLabel || 'Любой город'}
-                    onChange={(cityId, cityLabel) =>
-                      patch({
-                        cityId,
-                        cityLabel: cityId ? cityLabel : '',
-                      })
-                    }
-                  />
+                  <View style={{ gap: Spacing.sm }}>
+                    <CitySearchField
+                      label="Город"
+                      placeholder="Начните вводить город"
+                      value={draft.cityId}
+                      selectedLabel={draft.cityLabel || 'Мои города'}
+                      onChange={(cityId, cityLabel) =>
+                        patch({
+                          cityId,
+                          cityLabel: cityId ? cityLabel : '',
+                        })
+                      }
+                    />
+                    {!draft.cityId ? (
+                      <Text style={styles.sectionHint}>
+                        Без выбора города покажем офлайн-игры из ваших городов в анкете
+                      </Text>
+                    ) : null}
+                  </View>
                 ) : null}
               </View>
 

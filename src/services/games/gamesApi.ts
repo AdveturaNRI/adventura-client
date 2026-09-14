@@ -87,6 +87,7 @@ export type GamesFeedQuery = {
   kind?: GameKind;
   isOnline?: boolean;
   cityId?: string;
+  cityIds?: string[];
   system?: string;
   isFree?: boolean;
   hasSeats?: boolean;
@@ -113,6 +114,9 @@ export async function listGamesFeed(
             ? { isOnline: String(query.isOnline) }
             : {}),
           ...(query.cityId?.trim() ? { cityId: query.cityId.trim() } : {}),
+          ...(query.cityIds && query.cityIds.length > 0
+            ? { cityIds: query.cityIds.filter(Boolean).join(',') }
+            : {}),
           ...(query.system?.trim() ? { system: query.system.trim() } : {}),
           ...(typeof query.isFree === 'boolean' ? { isFree: String(query.isFree) } : {}),
           ...(query.hasSeats ? { hasSeats: 'true' } : {}),

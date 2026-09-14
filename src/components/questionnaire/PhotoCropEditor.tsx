@@ -37,6 +37,25 @@ const MIN_SCALE = 1;
 const MAX_SCALE = 4;
 const IS_WEB = Platform.OS === 'web';
 
+function isTouchPrimaryDevice() {
+  if (!IS_WEB || typeof window === 'undefined') {
+    return !IS_WEB;
+  }
+
+  try {
+    return window.matchMedia('(hover: none), (pointer: coarse)').matches;
+  } catch {
+    return typeof navigator !== 'undefined' && navigator.maxTouchPoints > 0;
+  }
+}
+
+function touchDistance(
+  a: { clientX: number; clientY: number },
+  b: { clientX: number; clientY: number },
+) {
+  return Math.hypot(b.clientX - a.clientX, b.clientY - a.clientY);
+}
+
 type PhotoCropEditorProps = {
   visible: boolean;
   variant: PhotoCropVariant;
@@ -83,10 +102,24 @@ function createStyles(colors: ThemeColors) {
     canvas: {
       flex: 1,
       overflow: 'hidden',
+      ...(Platform.OS === 'web'
+        ? ({
+            touchAction: 'none',
+            WebkitUserSelect: 'none',
+            userSelect: 'none',
+          } as object)
+        : null),
     },
     gestureSurface: {
-      ...StyleSheet.absoluteFillObject,
+      ...StyleSheet.absoluteFill,
       zIndex: 1,
+      ...(Platform.OS === 'web'
+        ? ({
+            touchAction: 'none',
+            WebkitUserSelect: 'none',
+            userSelect: 'none',
+          } as object)
+        : null),
     },
     imageLayer: {
       zIndex: 0,
@@ -355,6 +388,25 @@ export function PhotoCropEditor({
   );
 
   const canvasRef = useRef<View>(null);
+  const [touchHint, setTouchHint] = useState(() => isTouchPrimaryDevice());
+
+  useEffect(() => {
+    if (!IS_WEB || typeof window === 'undefined') {
+      return;
+    }
+
+    const media = window.matchMedia('(hover: none), (pointer: coarse)');
+    const sync = () => setTouchHint(media.matches);
+    sync();
+
+    if (typeof media.addEventListener === 'function') {
+      media.addEventListener('change', sync);
+      return () => media.removeEventListener('change', sync);
+    }
+
+    media.addListener(sync);
+    return () => media.removeListener(sync);
+  }, []);
 
   useEffect(() => {
     if (!IS_WEB || !visible || cropWidth === 0 || cropHeight === 0) {
@@ -366,11 +418,16 @@ export function PhotoCropEditor({
       return;
     }
 
-    let isDragging = false;
+    let isMouseDragging = false;
     let pointerStartX = 0;
     let pointerStartY = 0;
     let dragStartX = 0;
     let dragStartY = 0;
+
+    const activeTouches = new Map<number, { clientX: number; clientY: number }>();
+    let touchMode: 'none' | 'pan' | 'pinch' = 'none';
+    let pinchStartDistance = 0;
+    let pinchStartScaleValue = 1;
 
     const applyTranslation = (nextX: number, nextY: number) => {
       const clamped = clampTranslationPlain(
@@ -387,12 +444,47 @@ export function PhotoCropEditor({
       translateY.value = clamped.y;
     };
 
+    const applyScale = (nextScale: number) => {
+      const clampedScale = Math.min(MAX_SCALE, Math.max(MIN_SCALE, nextScale));
+      scale.value = clampedScale;
+
+      const clamped = clampTranslationPlain(
+        translateX.value,
+        translateY.value,
+        clampedScale,
+        imageWidth,
+        imageHeight,
+        baseScale,
+        cropWidth,
+        cropHeight,
+      );
+      translateX.value = clamped.x;
+      translateY.value = clamped.y;
+    };
+
+    const beginPanFromTouch = (touch: { clientX: number; clientY: number }) => {
+      touchMode = 'pan';
+      pointerStartX = touch.clientX;
+      pointerStartY = touch.clientY;
+      dragStartX = translateX.value;
+      dragStartY = translateY.value;
+    };
+
+    const beginPinchFromTouches = (
+      first: { clientX: number; clientY: number },
+      second: { clientX: number; clientY: number },
+    ) => {
+      touchMode = 'pinch';
+      pinchStartDistance = Math.max(touchDistance(first, second), 1);
+      pinchStartScaleValue = scale.value;
+    };
+
     const onMouseDown = (event: MouseEvent) => {
-      if (event.button !== 0) {
+      if (event.button !== 0 || activeTouches.size > 0) {
         return;
       }
 
-      isDragging = true;
+      isMouseDragging = true;
       pointerStartX = event.clientX;
       pointerStartY = event.clientY;
       dragStartX = translateX.value;
@@ -402,7 +494,7 @@ export function PhotoCropEditor({
     };
 
     const onMouseMove = (event: MouseEvent) => {
-      if (!isDragging) {
+      if (!isMouseDragging) {
         return;
       }
 
@@ -412,12 +504,12 @@ export function PhotoCropEditor({
       );
     };
 
-    const stopDrag = () => {
-      if (!isDragging) {
+    const stopMouseDrag = () => {
+      if (!isMouseDragging) {
         return;
       }
 
-      isDragging = false;
+      isMouseDragging = false;
       node.style.cursor = 'grab';
       clampCurrentTranslation();
     };
@@ -427,18 +519,100 @@ export function PhotoCropEditor({
       adjustScale(event.deltaY > 0 ? -0.12 : 0.12);
     };
 
+    const onTouchStart = (event: TouchEvent) => {
+      for (let index = 0; index < event.changedTouches.length; index += 1) {
+        const touch = event.changedTouches.item(index);
+        if (!touch) {
+          continue;
+        }
+        activeTouches.set(touch.identifier, {
+          clientX: touch.clientX,
+          clientY: touch.clientY,
+        });
+      }
+
+      const touches = [...activeTouches.values()];
+      if (touches.length >= 2) {
+        beginPinchFromTouches(touches[0], touches[1]);
+      } else if (touches.length === 1) {
+        beginPanFromTouch(touches[0]);
+      }
+
+      event.preventDefault();
+    };
+
+    const onTouchMove = (event: TouchEvent) => {
+      for (let index = 0; index < event.changedTouches.length; index += 1) {
+        const touch = event.changedTouches.item(index);
+        if (!touch || !activeTouches.has(touch.identifier)) {
+          continue;
+        }
+        activeTouches.set(touch.identifier, {
+          clientX: touch.clientX,
+          clientY: touch.clientY,
+        });
+      }
+
+      const touches = [...activeTouches.values()];
+      if (touchMode === 'pinch' && touches.length >= 2) {
+        const distance = Math.max(touchDistance(touches[0], touches[1]), 1);
+        applyScale(pinchStartScaleValue * (distance / pinchStartDistance));
+      } else if (touchMode === 'pan' && touches.length === 1) {
+        applyTranslation(
+          dragStartX + touches[0].clientX - pointerStartX,
+          dragStartY + touches[0].clientY - pointerStartY,
+        );
+      }
+
+      event.preventDefault();
+    };
+
+    const onTouchEnd = (event: TouchEvent) => {
+      for (let index = 0; index < event.changedTouches.length; index += 1) {
+        const touch = event.changedTouches.item(index);
+        if (!touch) {
+          continue;
+        }
+        activeTouches.delete(touch.identifier);
+      }
+
+      const touches = [...activeTouches.values()];
+      if (touches.length >= 2) {
+        beginPinchFromTouches(touches[0], touches[1]);
+        return;
+      }
+
+      if (touches.length === 1) {
+        beginPanFromTouch(touches[0]);
+        return;
+      }
+
+      touchMode = 'none';
+      clampCurrentTranslation();
+    };
+
     node.style.cursor = 'grab';
+    node.style.touchAction = 'none';
     node.addEventListener('mousedown', onMouseDown);
     window.addEventListener('mousemove', onMouseMove);
-    window.addEventListener('mouseup', stopDrag);
+    window.addEventListener('mouseup', stopMouseDrag);
     node.addEventListener('wheel', onWheel, { passive: false });
+    node.addEventListener('touchstart', onTouchStart, { passive: false });
+    node.addEventListener('touchmove', onTouchMove, { passive: false });
+    node.addEventListener('touchend', onTouchEnd, { passive: false });
+    node.addEventListener('touchcancel', onTouchEnd, { passive: false });
 
     return () => {
       node.removeEventListener('mousedown', onMouseDown);
       window.removeEventListener('mousemove', onMouseMove);
-      window.removeEventListener('mouseup', stopDrag);
+      window.removeEventListener('mouseup', stopMouseDrag);
       node.removeEventListener('wheel', onWheel);
+      node.removeEventListener('touchstart', onTouchStart);
+      node.removeEventListener('touchmove', onTouchMove);
+      node.removeEventListener('touchend', onTouchEnd);
+      node.removeEventListener('touchcancel', onTouchEnd);
       node.style.cursor = '';
+      node.style.touchAction = '';
     };
   }, [
     adjustScale,
@@ -497,6 +671,9 @@ export function PhotoCropEditor({
 
   const displayWidth = imageWidth * baseScale;
   const displayHeight = imageHeight * baseScale;
+  const interactionHint = touchHint
+    ? 'Перетаскивайте и масштабируйте изображение пальцами'
+    : 'Перетащите фото мышью, используйте колёсико или кнопки ± для масштаба.';
 
   return (
     <Modal visible={visible} animationType="slide" onRequestClose={onCancel}>
@@ -555,7 +732,7 @@ export function PhotoCropEditor({
                 </GestureDetector>
               )}
 
-              <View pointerEvents="none" style={[StyleSheet.absoluteFillObject, styles.overlayLayer]}>
+              <View pointerEvents="none" style={[StyleSheet.absoluteFill, styles.overlayLayer]}>
                 <View style={[styles.dim, { top: 0, left: 0, right: 0, height: cropFrame.top }]} />
                 <View
                   style={[
@@ -627,11 +804,7 @@ export function PhotoCropEditor({
 
         <View style={styles.footer}>
           <Text style={styles.hint}>{preset.hint}</Text>
-          <Text style={styles.hint}>
-            {IS_WEB
-              ? 'Перетащите фото мышью, используйте колёсико или кнопки ± для масштаба.'
-              : 'Сведите или разведите пальцы, чтобы масштабировать. Перетащите фото для позиционирования.'}
-          </Text>
+          <Text style={styles.hint}>{interactionHint}</Text>
 
           <Pressable
             accessibilityRole="button"

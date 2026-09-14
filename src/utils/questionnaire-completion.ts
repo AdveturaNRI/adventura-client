@@ -127,7 +127,7 @@ function checksFromProfile(profile: UserProfile): CompletionChecks {
     experience: profile.experienceTypes.length > 0,
     availability: Boolean(profile.availability?.trim()),
     timezone: Boolean(profile.timezone?.trim()),
-    location: Boolean(profile.city?.id) || profile.playsOnline,
+    location: Boolean(profile.cities?.length || profile.city?.id) || profile.playsOnline,
     systems:
       profile.systems.length > 0 || profile.readyToLearnNew || profile.openToAnySystem,
   };
@@ -141,7 +141,7 @@ function checksFromDraft(draft: QuestionnaireDraft): CompletionChecks {
     experience: Boolean(draft.experienceTypeId),
     availability: Boolean(formatAvailability(draft.availability)),
     timezone: Boolean(draft.timezone.trim()),
-    location: Boolean(draft.cityId) || draft.playsOnline,
+    location: draft.cities.length > 0 || draft.playsOnline,
     systems:
       draft.systems.length > 0 || draft.readyToLearnNew || draft.openToAnySystem,
   };

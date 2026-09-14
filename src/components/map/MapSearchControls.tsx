@@ -1,5 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useEffect, useRef, useState } from 'react';
+import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react';
 import {
   Platform,
   Pressable,
@@ -17,7 +17,11 @@ import { useThemedStyles } from '@/hooks/use-themed-styles';
 import { geocodeCityLabel, isValidLatLng, type GeocodeResult } from '@/services/clubs/clubsApi';
 import { fetchCities } from '@/services/reference/referenceApi';
 import type { CityReferenceItem } from '@/utils/city-label';
-import { GeolocationPermissionError, readDeviceLocation } from '@/utils/geolocation';
+import {
+  GEOLOCATION_MANUAL_FALLBACK_MESSAGE,
+  GeolocationPermissionError,
+  readDeviceLocation,
+} from '@/utils/geolocation';
 
 const SEARCH_DEBOUNCE_MS = 220;
 
@@ -30,6 +34,10 @@ type Props = {
   onCollapseMap?: () => void;
   collapseLabel?: string;
   collapseIcon?: keyof typeof Ionicons.glyphMap;
+};
+
+export type MapSearchControlsHandle = {
+  focusSearch: () => void;
 };
 
 function createStyles(colors: ThemeColors) {
@@ -196,16 +204,20 @@ function createStyles(colors: ThemeColors) {
   });
 }
 
-export function MapSearchControls({
-  onSelectCity,
-  onLocateMe,
-  onLocationDenied,
-  onRetryLocation,
-  locationDenied,
-  onCollapseMap,
-  collapseLabel = 'Свернуть',
-  collapseIcon = 'albums-outline',
-}: Props) {
+export const MapSearchControls = forwardRef<MapSearchControlsHandle, Props>(
+  function MapSearchControls(
+    {
+      onSelectCity,
+      onLocateMe,
+      onLocationDenied,
+      onRetryLocation,
+      locationDenied,
+      onCollapseMap,
+      collapseLabel = 'Свернуть',
+      collapseIcon = 'albums-outline',
+    },
+    ref,
+  ) {
   const colors = useTheme();
   const styles = useThemedStyles(createStyles);
   const [query, setQuery] = useState('');
@@ -215,6 +227,18 @@ export function MapSearchControls({
   const [picking, setPicking] = useState(false);
   const requestIdRef = useRef(0);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const inputRef = useRef<TextInput>(null);
+
+  const focusSearch = () => {
+    setOpen(true);
+    requestAnimationFrame(() => {
+      inputRef.current?.focus();
+    });
+  };
+
+  useImperativeHandle(ref, () => ({
+    focusSearch,
+  }));
 
   useEffect(() => {
     if (debounceRef.current) {
@@ -264,6 +288,18 @@ export function MapSearchControls({
 
   const showResults = open && query.trim().length > 0 && (results.length > 0 || settled);
 
+  const notifyGeolocationFallback = (denied = false) => {
+    if (denied) {
+      onLocationDenied?.();
+    }
+
+    toast.info(GEOLOCATION_MANUAL_FALLBACK_MESSAGE, {
+      title: 'Местоположение',
+      duration: 4500,
+    });
+    focusSearch();
+  };
+
   const pickCity = (city: CityReferenceItem) => {
     if (picking) {
       return;
@@ -293,12 +329,7 @@ export function MapSearchControls({
       const point = await readDeviceLocation({ maximumAge: 0 });
       onLocateMe(point);
     } catch (error) {
-      if (error instanceof GeolocationPermissionError) {
-        onLocationDenied?.();
-        toast.error('Вы запретили доступ к геолокации');
-        return;
-      }
-      toast.error(error instanceof Error ? error.message : 'Геолокация недоступна');
+      notifyGeolocationFallback(error instanceof GeolocationPermissionError);
     }
   };
 
@@ -310,6 +341,7 @@ export function MapSearchControls({
             <Ionicons name="search-outline" size={18} color={colors.textMuted} />
           </View>
           <TextInput
+            ref={inputRef}
             value={query}
             onChangeText={(text) => {
               setQuery(text);
@@ -413,4 +445,4 @@ export function MapSearchControls({
       </Pressable>
     </View>
   );
-}
+});

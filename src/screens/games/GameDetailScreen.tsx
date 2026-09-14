@@ -394,9 +394,7 @@ export default function GameDetailScreen() {
           <Pressable style={styles.modalSheet} onPress={(event) => event.stopPropagation()}>
             <Text style={styles.modalTitle}>Заявка на стол</Text>
             <Text style={styles.modalSubtitle}>
-              {item
-                ? `Можно коротко написать мастеру к «${item.title}». Необязательно.`
-                : 'Можно коротко написать мастеру. Необязательно.'}
+              Расскажи мастеру немного о себе — это необязательно.
             </Text>
             <TextInput
               value={applyMessage}

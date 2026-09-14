@@ -23,7 +23,9 @@ export type UserCardChip = {
 
 export type UserCardPlayInfoInput = {
   playsOnline: boolean;
-  location: string | null;
+  /** @deprecated use locations */
+  location?: string | null;
+  locations?: string[];
   systems: string[];
   readyToLearnNew: boolean;
   openToAnySystem: boolean;
@@ -42,8 +44,34 @@ function isAgreementSchedule(schedule: string): boolean {
   return /^по договор/i.test(schedule.trim());
 }
 
-export function buildLocationChips(playsOnline: boolean, location: string | null): UserCardChip[] {
-  const city = location?.trim() ?? '';
+function resolveLocationNames(
+  locations: string[] | undefined,
+  location: string | null | undefined,
+): string[] {
+  if (locations && locations.length > 0) {
+    return locations.map((item) => item.trim()).filter(Boolean);
+  }
+
+  const legacy = location?.trim();
+  if (!legacy) {
+    return [];
+  }
+
+  return legacy
+    .split(/\s*[·|,]\s*/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+export function buildLocationChips(
+  playsOnline: boolean,
+  locationOrLocations: string | string[] | null | undefined,
+  maybeLocations?: string[],
+): UserCardChip[] {
+  const locations = Array.isArray(locationOrLocations)
+    ? resolveLocationNames(locationOrLocations, null)
+    : resolveLocationNames(maybeLocations, locationOrLocations);
+
   const chips: UserCardChip[] = [];
 
   if (playsOnline) {
@@ -55,7 +83,7 @@ export function buildLocationChips(playsOnline: boolean, location: string | null
     });
   }
 
-  if (city) {
+  for (const city of locations) {
     chips.push({
       key: `city-${city}`,
       label: city,

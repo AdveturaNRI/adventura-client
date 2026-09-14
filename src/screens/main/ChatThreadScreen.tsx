@@ -23,9 +23,11 @@ import Svg, { Path } from 'react-native-svg';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { MobileBackButton } from '@/components/navigation/MobileBackButton';
+import { UserAvatar } from '@/components/navigation/UserAvatar';
 import { useIsDesktopSidebarVisible, useIsDesktopWeb } from '@/components/navigation/DesktopThemeToggle';
 import { ScreenTransition } from '@/components/navigation/ScreenTransition';
 import { BlockUserDialog } from '@/components/chats/BlockUserDialog';
+import { ChatEmojiPanel } from '@/components/chats/ChatEmojiPanel';
 import { ChatImageLightbox } from '@/components/chats/ChatImageLightbox';
 import { ChatMessageBody } from '@/components/chats/ChatMessageBody';
 import { CrownOffIcon } from '@/components/chats/CrownOffIcon';
@@ -112,6 +114,70 @@ function isFileDragEvent(event: DragEvent) {
   return types.includes('Files') || (event.dataTransfer?.files?.length ?? 0) > 0;
 }
 
+function extensionForImageMime(mimeType: string) {
+  if (mimeType === 'image/jpeg' || mimeType === 'image/jpg') {
+    return 'jpg';
+  }
+  if (mimeType === 'image/webp') {
+    return 'webp';
+  }
+  if (mimeType === 'image/gif') {
+    return 'gif';
+  }
+  return 'png';
+}
+
+function normalizeClipboardImageFile(file: File) {
+  const mimeType = file.type || 'image/png';
+  const hasRealName =
+    Boolean(file.name?.trim()) &&
+    file.name !== 'image.png' &&
+    file.name !== 'blob' &&
+    file.name !== 'untitled';
+
+  if (hasRealName) {
+    return file;
+  }
+
+  return new File([file], `screenshot-${Date.now()}.${extensionForImageMime(mimeType)}`, {
+    type: mimeType,
+    lastModified: Date.now(),
+  });
+}
+
+function getClipboardImageFile(clipboardData: DataTransfer | null): File | null {
+  if (!clipboardData) {
+    return null;
+  }
+
+  const items = clipboardData.items;
+  if (items) {
+    for (let index = 0; index < items.length; index += 1) {
+      const item = items[index];
+      if (!item || item.kind !== 'file' || !item.type.startsWith('image/')) {
+        continue;
+      }
+
+      const file = item.getAsFile();
+      if (file) {
+        return normalizeClipboardImageFile(file);
+      }
+    }
+  }
+
+  const files = clipboardData.files;
+  if (files) {
+    for (let index = 0; index < files.length; index += 1) {
+      const file = files[index];
+      if (file?.type.startsWith('image/')) {
+        return normalizeClipboardImageFile(file);
+      }
+    }
+  }
+
+  return null;
+}
+
 function getWebHostNode(ref: View | null): HTMLElement | null {
   if (!ref || typeof document === 'undefined') {
     return null;
@@ -158,6 +224,127 @@ function formatMessageTime(iso: string) {
   } catch {
     return '';
   }
+}
+
+function startOfLocalDay(date: Date) {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
+}
+
+function formatChatDayLabel(iso: string, now = new Date()) {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) {
+    return '';
+  }
+
+  const todayStart = startOfLocalDay(now);
+  const dayStart = startOfLocalDay(date);
+  const dayDiff = Math.round((todayStart - dayStart) / 86_400_000);
+
+  if (dayDiff === 0) {
+    return 'Сегодня';
+  }
+
+  if (dayDiff === 1) {
+    return 'Вчера';
+  }
+
+  if (date.getFullYear() === now.getFullYear()) {
+    return date.toLocaleDateString('ru-RU', {
+      day: 'numeric',
+      month: 'long',
+    });
+  }
+
+  return date.toLocaleDateString('ru-RU', {
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+  });
+}
+
+function formatMessageFullDateTime(iso: string) {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) {
+    return '';
+  }
+
+  const datePart = date.toLocaleDateString('ru-RU', {
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+  });
+  const timePart = date.toLocaleTimeString('ru-RU', {
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+
+  return `${datePart}, ${timePart}`;
+}
+
+type ChatTimelineItem =
+  | { type: 'date'; id: string; label: string }
+  | { type: 'message'; id: string; message: ChatMessage; showAuthorMeta: boolean };
+
+function isSystemChatMessage(message: ChatMessage) {
+  const kind = message.kind;
+  return (
+    kind === 'favorite_received' ||
+    kind === 'favorite_removed' ||
+    kind === 'user_blocked' ||
+    kind === 'user_unblocked'
+  );
+}
+
+function buildChatTimeline(
+  messages: ChatMessage[],
+  options: { isGroup: boolean; myId?: string },
+): ChatTimelineItem[] {
+  const items: ChatTimelineItem[] = [];
+  let previousDayStart: number | null = null;
+
+  for (let index = 0; index < messages.length; index += 1) {
+    const message = messages[index];
+    const date = new Date(message.createdAt);
+    const dayStart = Number.isNaN(date.getTime()) ? null : startOfLocalDay(date);
+
+    if (dayStart != null && previousDayStart !== dayStart) {
+      const label = formatChatDayLabel(message.createdAt);
+      if (label) {
+        items.push({
+          type: 'date',
+          id: `date-${dayStart}`,
+          label,
+        });
+      }
+      previousDayStart = dayStart;
+    }
+
+    const mine = Boolean(options.myId && message.senderId === options.myId);
+    const previous = index > 0 ? messages[index - 1] : null;
+    let showAuthorMeta = false;
+
+    if (options.isGroup && !mine && !isSystemChatMessage(message)) {
+      const previousDay =
+        previous && !Number.isNaN(new Date(previous.createdAt).getTime())
+          ? startOfLocalDay(new Date(previous.createdAt))
+          : null;
+      const breaksSeries =
+        !previous ||
+        isSystemChatMessage(previous) ||
+        previous.senderId !== message.senderId ||
+        previousDay !== dayStart;
+      showAuthorMeta = breaksSeries;
+    }
+
+    items.push({
+      type: 'message',
+      id: message.id,
+      message,
+      showAuthorMeta,
+    });
+  }
+
+  return items;
 }
 
 function formatLastSeen(online: boolean, lastSeenAt: string | null) {
@@ -314,6 +501,22 @@ function createStyles(colors: ThemeColors, bottomPad: number) {
       color: colors.primary,
       marginBottom: 2,
       alignSelf: 'flex-start',
+      maxWidth: '100%',
+    },
+    authorAvatarCol: {
+      width: 30,
+      marginRight: 8,
+      alignItems: 'center',
+      justifyContent: 'flex-end',
+      alignSelf: 'flex-end',
+      paddingBottom: 2,
+    },
+    authorAvatarButton: {
+      borderRadius: 15,
+    },
+    authorAvatarSpacer: {
+      width: 30,
+      height: 30,
     },
     headerMenuButton: {
       width: 36,
@@ -409,6 +612,25 @@ function createStyles(colors: ThemeColors, bottomPad: number) {
       alignItems: 'center',
       paddingVertical: 6,
       paddingHorizontal: 8,
+    },
+    dateDividerRow: {
+      width: '100%',
+      alignItems: 'center',
+      paddingVertical: Spacing.sm,
+      paddingHorizontal: Spacing.md,
+    },
+    dateDividerChip: {
+      paddingHorizontal: Spacing.md,
+      paddingVertical: 4,
+      borderRadius: Radius.pill,
+      backgroundColor: colors.surfaceMuted,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: colors.borderLight,
+    },
+    dateDividerText: {
+      fontSize: FontSize.caption,
+      fontWeight: '600',
+      color: colors.textMuted,
     },
     favoriteNotice: {
       maxWidth: '100%',
@@ -657,6 +879,9 @@ function createStyles(colors: ThemeColors, bottomPad: number) {
       backgroundColor: colors.surfaceMuted,
       flexShrink: 0,
     },
+    iconButtonActive: {
+      backgroundColor: 'rgba(21, 122, 254, 0.12)',
+    },
     composerField: {
       flex: 1,
       minWidth: 0,
@@ -804,6 +1029,7 @@ export default function ChatThreadScreen() {
   const [pendingAttachment, setPendingAttachment] = useState<PendingAttachment | null>(null);
   const [lightboxUri, setLightboxUri] = useState<string | null>(null);
   const [isDraggingFile, setIsDraggingFile] = useState(false);
+  const [emojiPanelOpen, setEmojiPanelOpen] = useState(false);
   const [addingBack, setAddingBack] = useState(false);
   const [suppressFavoriteBack, setSuppressFavoriteBack] = useState(false);
   const [unblocking, setUnblocking] = useState(false);
@@ -827,6 +1053,8 @@ export default function ChatThreadScreen() {
   const sendingRef = useRef(false);
   const blockedMeRef = useRef(false);
   const composerFieldWrapRef = useRef<View>(null);
+  const composerInputRef = useRef<TextInput>(null);
+  const selectionRef = useRef({ start: 0, end: 0 });
   const myId = user?.id;
 
   draftRef.current = draft;
@@ -883,6 +1111,10 @@ export default function ChatThreadScreen() {
       }
     };
   }, []);
+
+  useEffect(() => {
+    setEmojiPanelOpen(false);
+  }, [conversationId]);
 
   const loadConversation = useCallback(async () => {
     if (!conversationId) {
@@ -1103,6 +1335,7 @@ export default function ChatThreadScreen() {
   );
 
   const pickAttachment = useCallback(async () => {
+    setEmojiPanelOpen(false);
     try {
       const result = await DocumentPicker.getDocumentAsync({
         copyToCacheDirectory: true,
@@ -1125,6 +1358,24 @@ export default function ChatThreadScreen() {
       toast.error('Не удалось выбрать файл');
     }
   }, [setPendingFromSource]);
+
+  const insertEmoji = useCallback((emoji: string) => {
+    const current = draftRef.current;
+    const selection = selectionRef.current;
+    const start = Math.min(selection.start, current.length);
+    const end = Math.min(selection.end, current.length);
+    const next = `${current.slice(0, start)}${emoji}${current.slice(end)}`;
+    const nextCursor = start + emoji.length;
+    draftRef.current = next;
+    selectionRef.current = { start: nextCursor, end: nextCursor };
+    setDraft(next);
+    requestAnimationFrame(() => {
+      composerInputRef.current?.focus();
+      composerInputRef.current?.setNativeProps?.({
+        selection: { start: nextCursor, end: nextCursor },
+      });
+    });
+  }, []);
 
   useEffect(() => {
     if (Platform.OS !== 'web' || typeof document === 'undefined') {
@@ -1175,16 +1426,38 @@ export default function ChatThreadScreen() {
       }
     };
 
+    const onPaste = (event: ClipboardEvent) => {
+      if (blockedMeRef.current) {
+        return;
+      }
+
+      const zone = getWebHostNode(dropZoneRef.current);
+      const target = event.target;
+      if (!zone || !(target instanceof Node) || !zone.contains(target)) {
+        return;
+      }
+
+      const imageFile = getClipboardImageFile(event.clipboardData);
+      if (!imageFile) {
+        return;
+      }
+
+      event.preventDefault();
+      acceptDroppedFile(imageFile);
+    };
+
     document.addEventListener('dragenter', onDragOver);
     document.addEventListener('dragover', onDragOver);
     document.addEventListener('dragleave', onDragLeave);
     document.addEventListener('drop', onDrop);
+    document.addEventListener('paste', onPaste);
 
     return () => {
       document.removeEventListener('dragenter', onDragOver);
       document.removeEventListener('dragover', onDragOver);
       document.removeEventListener('dragleave', onDragLeave);
       document.removeEventListener('drop', onDrop);
+      document.removeEventListener('paste', onPaste);
     };
   }, [acceptDroppedFile]);
 
@@ -1210,6 +1483,8 @@ export default function ChatThreadScreen() {
       });
       setDraft('');
       draftRef.current = '';
+      selectionRef.current = { start: 0, end: 0 };
+      setEmojiPanelOpen(false);
       clearPendingAttachment();
       setMessages((prev) => {
         if (prev.some((item) => item.id === message.id)) {
@@ -1453,7 +1728,10 @@ export default function ChatThreadScreen() {
   const headerPadTop = isDesktopWeb ? Spacing.md : insets.top + Spacing.sm;
   const peerReadMs =
     !isGroup && peerLastReadAt ? new Date(peerLastReadAt).getTime() : 0;
-  const renderedMessages = useMemo(() => messages, [messages]);
+  const renderedMessages = useMemo(
+    () => buildChatTimeline(messages, { isGroup, myId: myId ?? undefined }),
+    [isGroup, messages, myId],
+  );
   const peerId = conversation?.peer?.id;
   const myIdForBanner = myId;
   const peerRemovedMe = useMemo(() => {
@@ -1729,7 +2007,18 @@ export default function ChatThreadScreen() {
                 </Pressable>
               ) : null
             }
-            renderItem={({ item }) => {
+            renderItem={({ item: timelineItem }) => {
+              if (timelineItem.type === 'date') {
+                return (
+                  <View style={styles.dateDividerRow}>
+                    <View style={styles.dateDividerChip}>
+                      <Text style={styles.dateDividerText}>{timelineItem.label}</Text>
+                    </View>
+                  </View>
+                );
+              }
+
+              const item = timelineItem.message;
               const mine = item.senderId === myId;
               const isFavoriteNotice = item.kind === 'favorite_received';
               const isFavoriteRemovedNotice = item.kind === 'favorite_removed';
@@ -1776,10 +2065,17 @@ export default function ChatThreadScreen() {
                 mine && peerReadMs > 0 && new Date(item.createdAt).getTime() <= peerReadMs;
               const bubbleColor = mine ? colors.primary : colors.surfaceMuted;
               const kind = attachment?.kind ?? (previewUrl ? 'image' : null);
+              const timeLabel = formatMessageTime(item.createdAt);
+              const fullDateTimeLabel = formatMessageFullDateTime(item.createdAt);
+              const timeAccessibilityProps = fullDateTimeLabel
+                ? ({
+                    accessibilityLabel: fullDateTimeLabel,
+                    ...(Platform.OS === 'web' ? ({ title: fullDateTimeLabel } as object) : null),
+                  } as object)
+                : null;
 
               if (isFavoriteNotice || isFavoriteRemovedNotice) {
                 const peerName = conversation?.peer?.nickname ?? 'пользователя';
-                const timeLabel = formatMessageTime(item.createdAt);
 
                 return (
                   <View style={styles.systemNoticeRow}>
@@ -1830,7 +2126,9 @@ export default function ChatThreadScreen() {
                         {timeLabel ? (
                           <View style={styles.favoriteNoticeMeta}>
                             <View style={styles.favoriteNoticeDot} />
-                            <Text style={styles.favoriteNoticeTime}>{timeLabel}</Text>
+                            <Text style={styles.favoriteNoticeTime} {...timeAccessibilityProps}>
+                              {timeLabel}
+                            </Text>
                           </View>
                         ) : null}
                       </View>
@@ -1841,8 +2139,35 @@ export default function ChatThreadScreen() {
 
               return (
                 <View style={[styles.bubbleRow, mine && styles.bubbleRowMine]}>
+                  {isGroup && !mine ? (
+                    <View style={styles.authorAvatarCol}>
+                      {timelineItem.showAuthorMeta ? (
+                        <Pressable
+                          accessibilityRole="button"
+                          accessibilityLabel={`Профиль ${item.sender?.nickname ?? 'участника'}`}
+                          onPress={() => {
+                            if (item.senderId) {
+                              router.push(`/users/${item.senderId}`);
+                            }
+                          }}
+                          style={styles.authorAvatarButton}>
+                          <UserAvatar
+                            nickname={item.sender?.nickname ?? 'Игрок'}
+                            avatarUrl={
+                              item.sender?.avatarUrl ??
+                              members.find((member) => member.id === item.senderId)?.avatarUrl ??
+                              null
+                            }
+                            size={30}
+                          />
+                        </Pressable>
+                      ) : (
+                        <View style={styles.authorAvatarSpacer} />
+                      )}
+                    </View>
+                  ) : null}
                   <View style={[styles.bubbleShell, mine && styles.bubbleShellMine]}>
-                    {isGroup && !mine ? (
+                    {isGroup && !mine && timelineItem.showAuthorMeta ? (
                       <Text style={styles.senderName} numberOfLines={1}>
                         {item.sender?.nickname ?? 'Игрок'}
                       </Text>
@@ -1901,8 +2226,10 @@ export default function ChatThreadScreen() {
                           />
                         ) : null}
                         <View style={styles.metaRow}>
-                          <Text style={[styles.metaTime, mine && styles.metaTimeMine]}>
-                            {formatMessageTime(item.createdAt)}
+                          <Text
+                            style={[styles.metaTime, mine && styles.metaTimeMine]}
+                            {...timeAccessibilityProps}>
+                            {timeLabel}
                           </Text>
                           {mine ? (
                             <Ionicons
@@ -1976,6 +2303,7 @@ export default function ChatThreadScreen() {
           </View>
         ) : (
         <View style={styles.composerShell}>
+        {emojiPanelOpen ? <ChatEmojiPanel onSelect={insertEmoji} /> : null}
         <View style={styles.composer}>
           <Pressable
             accessibilityRole="button"
@@ -1986,11 +2314,15 @@ export default function ChatThreadScreen() {
           </Pressable>
           <View ref={composerFieldWrapRef} collapsable={false} style={styles.composerField}>
           <TextInput
+            ref={composerInputRef}
             style={styles.input}
             value={draft}
             onChangeText={(value) => {
               draftRef.current = value;
               setDraft(value);
+            }}
+            onSelectionChange={(event) => {
+              selectionRef.current = event.nativeEvent.selection;
             }}
             nativeID="chat-composer-input"
             placeholder="Сообщение"
@@ -2006,6 +2338,23 @@ export default function ChatThreadScreen() {
             }}
           />
           </View>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={emojiPanelOpen ? 'Скрыть эмодзи' : 'Эмодзи'}
+            accessibilityState={{ selected: emojiPanelOpen }}
+            onPress={() => {
+              setEmojiPanelOpen((current) => !current);
+              requestAnimationFrame(() => {
+                composerInputRef.current?.focus();
+              });
+            }}
+            style={[styles.iconButton, emojiPanelOpen ? styles.iconButtonActive : null]}>
+            <Ionicons
+              name={emojiPanelOpen ? 'happy' : 'happy-outline'}
+              size={20}
+              color={emojiPanelOpen ? colors.primary : colors.textMuted}
+            />
+          </Pressable>
           <Pressable
             accessibilityRole="button"
             accessibilityLabel="Отправить"

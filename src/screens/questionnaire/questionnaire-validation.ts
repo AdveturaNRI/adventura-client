@@ -44,13 +44,15 @@ export const PROFILE_STEP_VALIDATION_MESSAGE =
   'Укажите статус и возраст (от 1 до 99), чтобы продолжить';
 
 export function isLocationStepValid(
-  value: Pick<QuestionnaireDraft, 'cityId' | 'playsOnline'>,
+  value: Pick<QuestionnaireDraft, 'cities' | 'playsOnline'>,
 ): boolean {
-  return Boolean(value.cityId) || value.playsOnline;
+  return value.cities.length > 0 || value.playsOnline;
 }
 
 export const LOCATION_STEP_VALIDATION_MESSAGE =
   'Выберите город или отметьте «Играю онлайн»';
+
+export const MAX_QUESTIONNAIRE_CITIES = 3;
 
 export function isExperienceStepValid(
   value: Pick<QuestionnaireDraft, 'timezone'>,

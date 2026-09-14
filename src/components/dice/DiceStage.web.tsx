@@ -19,8 +19,9 @@ import type {
 export type { DiceRollOutcome, DiceStageHandle };
 
 /**
- * Web: @3d-dice/dice-box via local public/dice-box/dice-roller.html
- * Path is under /dice-box/ so a cached /dice-roller.html → /dice-roller 301 cannot bite.
+ * Web: @3d-dice/dice-box via local public/dice-stage.html
+ * Not under /dice-box (postinstall wipes that folder) and not /dice-roller.html
+ * (browsers may still have a cached 301 to /dice-roller from serve cleanUrls).
  */
 export const DiceStage = forwardRef<DiceStageHandle, DiceStageProps>(function DiceStage(
   { onReady, onDone },
@@ -35,7 +36,6 @@ export const DiceStage = forwardRef<DiceStageHandle, DiceStageProps>(function Di
     reject: (error: Error) => void;
   } | null>(null);
   const [ready, setReady] = useState(false);
-  const [status, setStatus] = useState('Тянем 3D-движок…');
   const [error, setError] = useState<string | null>(null);
 
   const postToIframe = (payload: Record<string, unknown>) => {
@@ -82,12 +82,8 @@ export const DiceStage = forwardRef<DiceStageHandle, DiceStageProps>(function Di
         if (!data?.type) {
           return;
         }
-        if (data.type === 'status' && data.message) {
-          setStatus(data.message);
-        }
         if (data.type === 'ready') {
           setReady(true);
-          setStatus('');
           onReady?.();
         }
         if (data.type === 'done' && data.outcome) {
@@ -108,7 +104,7 @@ export const DiceStage = forwardRef<DiceStageHandle, DiceStageProps>(function Di
     return () => window.removeEventListener('message', onWindowMessage);
   }, [onReady]);
 
-  const src = `/dice-box/dice-roller.html?accent=${encodeURIComponent(colors.primary)}`;
+  const src = `/dice-stage.html?accent=${encodeURIComponent(colors.primary)}`;
 
   return createElement(
     'div',
@@ -140,26 +136,15 @@ export const DiceStage = forwardRef<DiceStageHandle, DiceStageProps>(function Di
       allow: 'accelerometer; gyroscope',
     }),
     !ready && !error
-      ? createElement(
-          'div',
-          {
-            style: {
-              position: 'absolute',
-              inset: 0,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              color: 'rgba(255,255,255,0.75)',
-              fontSize: 14,
-              fontWeight: 600,
-              padding: 24,
-              textAlign: 'center',
-              background: 'rgba(11,18,32,0.35)',
-              pointerEvents: 'none',
-            },
+      ? createElement('div', {
+          style: {
+            position: 'absolute',
+            inset: 0,
+            background: '#0B1220',
+            pointerEvents: 'none',
           },
-          status || 'Загрузка…',
-        )
+          'aria-hidden': true,
+        })
       : null,
     error
       ? createElement(

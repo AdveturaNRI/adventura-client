@@ -11,22 +11,19 @@ import type { QuestionnaireDraft } from '@/screens/questionnaire/types';
 import {
   isLocationStepValid,
   LOCATION_STEP_VALIDATION_MESSAGE,
+  MAX_QUESTIONNAIRE_CITIES,
 } from '@/screens/questionnaire/questionnaire-validation';
 import { useQuestionnaireScreenStyles } from '@/screens/questionnaire/questionnaire-screen.styles';
 
 const STACK_CITY_CONTROLS_MAX_WIDTH = 720;
-const CITY_SWITCHER_OFFSET = Sizes.controlHeight + Spacing.md;
 
 type LocationStepProps = {
-  value: Pick<QuestionnaireDraft, 'cityId' | 'cityLabel' | 'playsOnline'>;
-  onChange: (value: Pick<QuestionnaireDraft, 'cityId' | 'cityLabel' | 'playsOnline'>) => void;
+  value: Pick<QuestionnaireDraft, 'cities' | 'playsOnline'>;
+  onChange: (value: Pick<QuestionnaireDraft, 'cities' | 'playsOnline'>) => void;
   showValidationError?: boolean;
 };
 
-function createStyles(
-  colors: ThemeColors,
-  stackCityControls: boolean,
-) {
+function createStyles(colors: ThemeColors, stackCityControls: boolean) {
   return StyleSheet.create({
     panel: {
       gap: Spacing.md,
@@ -37,7 +34,9 @@ function createStyles(
       backgroundColor: colors.surface,
       width: '100%',
       maxWidth: '100%',
-      overflow: 'hidden',
+      // Safari сбрасывает nested scroll, если absolute-дропдаун городов
+      // оказывается внутри overflow:hidden предка.
+      overflow: 'visible',
     },
     panelHeader: {
       flexDirection: 'row',
@@ -84,7 +83,6 @@ function createStyles(
     },
     onlineToggle: {
       minHeight: Sizes.controlHeight,
-      marginTop: stackCityControls ? 0 : CITY_SWITCHER_OFFSET,
       paddingHorizontal: Spacing.md,
       borderRadius: Radius.pill,
       borderWidth: 1,
@@ -142,7 +140,7 @@ export function LocationStep({ value, onChange, showValidationError = false }: L
   );
   const isValid = isLocationStepValid(value);
   const showError = showValidationError && !isValid;
-  const isOnlineRequired = !value.cityId;
+  const isOnlineRequired = value.cities.length === 0;
 
   return (
     <View style={screenStyles.stepBody}>
@@ -160,18 +158,23 @@ export function LocationStep({ value, onChange, showValidationError = false }: L
           </View>
           <View style={styles.panelHeaderText}>
             <Text style={styles.panelTitle}>{LOCATION_STEP.cityLabel}</Text>
-            <Text style={styles.panelSubtitle}>Выберите страну и начните вводить название</Text>
+            <Text style={styles.panelSubtitle}>
+              Добавьте до {MAX_QUESTIONNAIRE_CITIES} городов
+            </Text>
           </View>
         </View>
 
         <View style={styles.cityRow}>
           <View style={styles.cityField}>
             <CitySearchField
+              multiple
               label=""
               placeholder={LOCATION_STEP.cityPlaceholder}
-              value={value.cityId}
-              selectedLabel={value.cityLabel || LOCATION_STEP.cityEmptyHint}
-              onChange={(cityId, cityLabel) => onChange({ ...value, cityId, cityLabel })}
+              values={value.cities}
+              maxSelections={MAX_QUESTIONNAIRE_CITIES}
+              limitHint={LOCATION_STEP.cityLimitHint}
+              addLabel={LOCATION_STEP.addCityLabel}
+              onChange={(cities) => onChange({ ...value, cities })}
             />
           </View>
 

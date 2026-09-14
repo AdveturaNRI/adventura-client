@@ -79,8 +79,11 @@ function getExperienceSummaryLines(draft: QuestionnaireDraft): string[] {
 function getLocationSummaryLines(draft: QuestionnaireDraft): string[] {
   const lines: string[] = [];
 
-  if (draft.cityLabel.trim()) {
-    lines.push(draft.cityLabel.trim());
+  for (const city of draft.cities) {
+    const label = city.label.trim();
+    if (label) {
+      lines.push(label);
+    }
   }
 
   if (draft.playsOnline) {

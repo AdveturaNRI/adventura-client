@@ -60,6 +60,13 @@ function isProfileCardDirty(draft: QuestionnaireDraft, saved: QuestionnaireDraft
 }
 
 export function profileToQuestionnaireDraft(profile: UserProfile): QuestionnaireDraft {
+  const profileCities =
+    profile.cities && profile.cities.length > 0
+      ? profile.cities
+      : profile.city
+        ? [profile.city]
+        : [];
+
   return {
     role: rolesToChoice(profile.roles),
     profileCardUri: pickProfileCardUrl(profile.profileCard, profile.updatedAt),
@@ -72,8 +79,10 @@ export function profileToQuestionnaireDraft(profile: UserProfile): Questionnaire
     experienceTypeLabel: profile.experienceTypes[0]?.name ?? '',
     availability: parseAvailability(profile.availability),
     timezone: profile.timezone?.trim() || DEFAULT_TIMEZONE,
-    cityId: profile.city?.id ?? null,
-    cityLabel: profile.city ? formatCityLabel(profile.city) : profile.location ?? '',
+    cities: profileCities.map((city) => ({
+      id: city.id,
+      label: formatCityLabel(city),
+    })),
     playsOnline: profile.playsOnline,
     systems: [...profile.systems],
     readyToLearnNew: profile.readyToLearnNew,
@@ -97,8 +106,10 @@ export function isQuestionnaireDraftDirty(
     draft.experienceTypeLabel !== saved.experienceTypeLabel ||
     !areAvailabilitiesEqual(draft.availability, saved.availability) ||
     draft.timezone !== saved.timezone ||
-    draft.cityId !== saved.cityId ||
-    draft.cityLabel !== saved.cityLabel ||
+    !areStringArraysEqual(
+      draft.cities.map((city) => city.id),
+      saved.cities.map((city) => city.id),
+    ) ||
     draft.playsOnline !== saved.playsOnline ||
     !areStringArraysEqual(draft.systems, saved.systems) ||
     draft.readyToLearnNew !== saved.readyToLearnNew ||

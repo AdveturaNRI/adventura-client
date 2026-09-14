@@ -72,7 +72,15 @@ export function ScreenTransition({
   }, [animateOnFocus, opacity, translateY]);
 
   useEffect(() => {
-    if (!animateOnFocus || !isFocused) {
+    if (!animateOnFocus) {
+      return;
+    }
+
+    if (!isFocused) {
+      cancelAnimation(opacity);
+      cancelAnimation(translateY);
+      opacity.value = 0;
+      translateY.value = 0;
       return;
     }
 
@@ -91,6 +99,8 @@ export function ScreenTransition({
     overflow: 'hidden',
     opacity: opacity.value,
     transform: [{ translateY: translateY.value }],
+    // Web tabs keep screens mounted — hide inactive ones so iframes/overlays don't bleed.
+    pointerEvents: !animateOnFocus || opacity.value > 0.05 ? 'auto' : 'none',
   }));
 
   return <Animated.View style={animatedStyle}>{children}</Animated.View>;

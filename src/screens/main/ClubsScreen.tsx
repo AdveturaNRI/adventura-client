@@ -25,7 +25,10 @@ import {
   setClubsMapUserLocation,
   type ClubsSelectedCity,
 } from '@/components/map/clubs-map-session';
-import { MapSearchControls } from '@/components/map/MapSearchControls';
+import {
+  MapSearchControls,
+  type MapSearchControlsHandle,
+} from '@/components/map/MapSearchControls';
 import { isFiniteLatLng, toLatLng } from '@/components/map/map-coords';
 import {
   useIsDesktopSidebarVisible,
@@ -39,7 +42,11 @@ import { FontSize, Radius, Spacing, type ThemeColors } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { useThemedStyles } from '@/hooks/use-themed-styles';
 import { listClubsMap, reverseGeocode, type ClubListItem } from '@/services/clubs/clubsApi';
-import { GeolocationPermissionError, readDeviceLocation } from '@/utils/geolocation';
+import {
+  GEOLOCATION_MANUAL_FALLBACK_MESSAGE,
+  GeolocationPermissionError,
+  readDeviceLocation,
+} from '@/utils/geolocation';
 
 function createStyles(
   colors: ThemeColors,
@@ -148,9 +155,32 @@ export default function ClubsScreen() {
   const [lockCamera, setLockCamera] = useState(session.didInitialCamera);
   const focusTokenRef = useRef(0);
   const deniedToastShownRef = useRef(session.locationDenied);
+  const mapSearchRef = useRef<MapSearchControlsHandle>(null);
   const applyUserLocationRef = useRef<
     (point: { lat: number; lng: number }, moveCamera?: boolean) => void
   >(() => undefined);
+
+  const notifyGeolocationFallback = useCallback(
+    (denied = false, options?: { once?: boolean }) => {
+      if (denied) {
+        setLocationDenied(true);
+        setClubsMapLocationDenied(true);
+      }
+
+      if (options?.once && deniedToastShownRef.current) {
+        mapSearchRef.current?.focusSearch();
+        return;
+      }
+
+      deniedToastShownRef.current = true;
+      toast.info(GEOLOCATION_MANUAL_FALLBACK_MESSAGE, {
+        title: 'Местоположение',
+        duration: 4500,
+      });
+      mapSearchRef.current?.focusSearch();
+    },
+    [],
+  );
 
   const styles = useThemedStyles((theme) =>
     createStyles(theme, isDesktopWeb, mapCollapsed, topPadding),
@@ -371,24 +401,15 @@ export default function ClubsScreen() {
             return;
           }
           markClubsMapInitialLocateDone();
-          if (error instanceof GeolocationPermissionError) {
-            setLocationDenied(true);
-            setClubsMapLocationDenied(true);
-            if (!deniedToastShownRef.current) {
-              deniedToastShownRef.current = true;
-              toast.error('Вы запретили доступ к геолокации');
-            }
-            return;
-          }
-          toast.error(
-            error instanceof Error ? error.message : 'Не удалось определить местоположение',
-          );
+          notifyGeolocationFallback(error instanceof GeolocationPermissionError, {
+            once: true,
+          });
         });
 
       return () => {
         cancelled = true;
       };
-    }, [applyUserLocation]),
+    }, [applyUserLocation, notifyGeolocationFallback]),
   );
 
   const markers = useMemo(
@@ -490,6 +511,7 @@ export default function ClubsScreen() {
                 }}
               />
               <MapSearchControls
+                ref={mapSearchRef}
                 locationDenied={locationDenied && !userLocation}
                 onCollapseMap={isDesktopWeb ? toggleMapCollapsed : undefined}
                 onSelectCity={(hit, options) => {
@@ -509,24 +531,16 @@ export default function ClubsScreen() {
                 onRetryLocation={() => {
                   void readDeviceLocation({ maximumAge: 0 })
                     .then((point) => {
+                      deniedToastShownRef.current = false;
                       applyUserLocation(point, true);
                       markClubsMapInitialLocateDone();
                     })
                     .catch((error) => {
-                      if (error instanceof GeolocationPermissionError) {
-                        setLocationDenied(true);
-                        setClubsMapLocationDenied(true);
-                        toast.error('Вы запретили доступ к геолокации');
-                        return;
-                      }
-                      toast.error(
-                        error instanceof Error
-                          ? error.message
-                          : 'Не удалось определить местоположение',
-                      );
+                      notifyGeolocationFallback(error instanceof GeolocationPermissionError);
                     });
                 }}
                 onLocateMe={(point) => {
+                  deniedToastShownRef.current = false;
                   applyUserLocation(point, true);
                   markClubsMapInitialLocateDone();
                 }}

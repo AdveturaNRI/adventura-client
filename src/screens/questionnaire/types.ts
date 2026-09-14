@@ -6,6 +6,11 @@ export type PlayerRoleChoice = 'player' | 'master' | 'both';
 
 export type { QuestionnaireAvailability };
 
+export type QuestionnaireCitySelection = {
+  id: string;
+  label: string;
+};
+
 export type QuestionnaireDraft = {
   role: PlayerRoleChoice | null;
   profileCardUri: string | null;
@@ -19,8 +24,7 @@ export type QuestionnaireDraft = {
   experienceTypeLabel: string;
   availability: QuestionnaireAvailability;
   timezone: string;
-  cityId: string | null;
-  cityLabel: string;
+  cities: QuestionnaireCitySelection[];
   playsOnline: boolean;
   systems: string[];
   readyToLearnNew: boolean;
@@ -70,8 +74,7 @@ export const INITIAL_QUESTIONNAIRE_DRAFT: QuestionnaireDraft = {
   experienceTypeLabel: '',
   availability: { ...EMPTY_QUESTIONNAIRE_AVAILABILITY, slots: [] },
   timezone: DEFAULT_TIMEZONE,
-  cityId: null,
-  cityLabel: '',
+  cities: [],
   playsOnline: false,
   systems: [],
   readyToLearnNew: false,

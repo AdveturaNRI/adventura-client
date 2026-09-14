@@ -344,6 +344,13 @@ export default function GamesScreen() {
 
   const toQuery = useCallback(
     (next: GamesFeedFilters): GamesFeedQuery => {
+      const profileCityIds =
+        profile?.cities && profile.cities.length > 0
+          ? profile.cities.map((city) => city.id)
+          : profile?.city?.id
+            ? [profile.city.id]
+            : [];
+
       return {
         status: next.status,
         timezone: viewerTimezone,
@@ -354,7 +361,11 @@ export default function GamesScreen() {
           : next.playMode === 'offline'
             ? { isOnline: false }
             : {}),
-        ...(next.playMode === 'offline' && next.cityId ? { cityId: next.cityId } : {}),
+        ...(next.playMode === 'offline' && next.cityId
+          ? { cityId: next.cityId }
+          : next.playMode === 'offline' && profileCityIds.length > 0
+            ? { cityIds: profileCityIds }
+            : {}),
         ...(next.system ? { system: next.system } : {}),
         ...(next.isFree !== null ? { isFree: next.isFree } : {}),
         ...(next.hasSeats ? { hasSeats: true } : {}),
@@ -367,7 +378,7 @@ export default function GamesScreen() {
             : {}),
       };
     },
-    [viewerTimezone],
+    [profile?.cities, profile?.city?.id, viewerTimezone],
   );
 
   const load = useCallback(async () => {
@@ -713,9 +724,7 @@ export default function GamesScreen() {
           <Pressable style={styles.modalSheet} onPress={(event) => event.stopPropagation()}>
             <Text style={styles.modalTitle}>Заявка на стол</Text>
             <Text style={styles.modalSubtitle}>
-              {applyTarget
-                ? `Можно коротко написать мастеру к «${applyTarget.title}». Необязательно.`
-                : 'Можно коротко написать мастеру. Необязательно.'}
+              Расскажи мастеру немного о себе — это необязательно.
             </Text>
             <TextInput
               value={applyMessage}

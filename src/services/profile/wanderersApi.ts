@@ -16,6 +16,7 @@ export type WandererCardItem = {
   about: string | null;
   description: string | null;
   location: string | null;
+  cities?: string[];
   playsOnline: boolean;
   experienceLabel: string | null;
   profileCard: ImageUrls | null;

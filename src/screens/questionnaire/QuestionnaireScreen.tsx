@@ -119,7 +119,7 @@ export default function QuestionnaireScreen() {
   );
 
   const isLocationStepComplete = isLocationStepValid({
-    cityId: draft.cityId,
+    cities: draft.cities,
     playsOnline: draft.playsOnline,
   });
 
@@ -647,8 +647,7 @@ export default function QuestionnaireScreen() {
                 ) : stepIndex === QUESTIONNAIRE_STEP_INDEX.location ? (
                   <LocationStep
                     value={{
-                      cityId: draft.cityId,
-                      cityLabel: draft.cityLabel,
+                      cities: draft.cities,
                       playsOnline: draft.playsOnline,
                     }}
                     showValidationError={locationValidationAttempted}
