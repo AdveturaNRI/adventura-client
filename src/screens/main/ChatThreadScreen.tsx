@@ -15,9 +15,11 @@ import {
   Text,
   TextInput,
   View,
-  type NativeScrollEvent,
-  type NativeSyntheticEvent,
-  type TextInputKeyPressEventData,
+} from 'react-native';
+import type {
+  NativeScrollEvent,
+  NativeSyntheticEvent,
+  TextInputKeyPressEventData,
 } from 'react-native';
 import Svg, { Path } from 'react-native-svg';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -27,6 +29,7 @@ import { UserAvatar } from '@/components/navigation/UserAvatar';
 import { useIsDesktopSidebarVisible, useIsDesktopWeb } from '@/components/navigation/DesktopThemeToggle';
 import { ScreenTransition } from '@/components/navigation/ScreenTransition';
 import { BlockUserDialog } from '@/components/chats/BlockUserDialog';
+import { ChatAlbumGrid } from '@/components/chats/ChatAlbumGrid';
 import { ChatEmojiPanel } from '@/components/chats/ChatEmojiPanel';
 import { ChatImageLightbox } from '@/components/chats/ChatImageLightbox';
 import { ChatMessageBody } from '@/components/chats/ChatMessageBody';
@@ -34,7 +37,8 @@ import { CrownOffIcon } from '@/components/chats/CrownOffIcon';
 import { DeleteChatDialog } from '@/components/chats/DeleteChatDialog';
 import { GroupMembersSheet } from '@/components/chats/GroupMembersSheet';
 import { toast } from '@/components/ui';
-import { FontSize, Radius, Spacing, type ThemeColors } from '@/constants/theme';
+import { FontSize, Radius, Spacing } from '@/constants/theme';
+import type { ThemeColors } from '@/constants/theme';
 import { MAX_UPLOAD_SIZE_MB, MAX_UPLOAD_SIZE_MESSAGE } from '@/constants/upload.config';
 import { useAuth } from '@/context/AuthContext';
 import { useRealtime } from '@/context/RealtimeContext';
@@ -50,10 +54,15 @@ import {
   blockPeer,
   unblockPeer,
   deleteConversation,
-  type ChatAttachmentKind,
-  type ChatMember,
-  type ChatMessage,
-  type ConversationListItem,
+  MAX_CHAT_ATTACHMENTS,
+  normalizeMessageAttachments,
+} from '@/services/chats/chatsApi';
+import type {
+  ChatAttachment,
+  ChatAttachmentKind,
+  ChatMember,
+  ChatMessage,
+  ConversationListItem,
 } from '@/services/chats/chatsApi';
 import { ApiError } from '@/services/api/api-error';
 import { upsertWandererReaction, clearWandererReaction } from '@/services/profile/wanderersApi';
@@ -66,11 +75,14 @@ import {
 function isGroupConversation(item: ConversationListItem | null | undefined) {
   return item?.type === 'group';
 }
+
 type PendingAttachment = {
+  id: string;
   uri: string;
   name: string;
   mimeType: string;
   kind: ChatAttachmentKind;
+  isObjectUrl?: boolean;
 };
 
 function attachmentKindFromMime(mimeType: string): ChatAttachmentKind {
@@ -145,10 +157,26 @@ function normalizeClipboardImageFile(file: File) {
   });
 }
 
-function getClipboardImageFile(clipboardData: DataTransfer | null): File | null {
+function getClipboardImageFiles(clipboardData: DataTransfer | null): File[] {
   if (!clipboardData) {
-    return null;
+    return [];
   }
+
+  const collected: File[] = [];
+  const seen = new Set<string>();
+
+  const push = (file: File | null) => {
+    if (!file || !file.type.startsWith('image/')) {
+      return;
+    }
+    const normalized = normalizeClipboardImageFile(file);
+    const key = `${normalized.name}:${normalized.size}:${normalized.lastModified}`;
+    if (seen.has(key)) {
+      return;
+    }
+    seen.add(key);
+    collected.push(normalized);
+  };
 
   const items = clipboardData.items;
   if (items) {
@@ -157,25 +185,28 @@ function getClipboardImageFile(clipboardData: DataTransfer | null): File | null 
       if (!item || item.kind !== 'file' || !item.type.startsWith('image/')) {
         continue;
       }
-
-      const file = item.getAsFile();
-      if (file) {
-        return normalizeClipboardImageFile(file);
-      }
+      push(item.getAsFile());
     }
   }
 
   const files = clipboardData.files;
   if (files) {
     for (let index = 0; index < files.length; index += 1) {
-      const file = files[index];
-      if (file?.type.startsWith('image/')) {
-        return normalizeClipboardImageFile(file);
-      }
+      push(files[index] ?? null);
     }
   }
 
-  return null;
+  return collected;
+}
+
+function fullUrlForAttachment(attachment: ChatAttachment): string | null {
+  return (
+    attachment.image?.original ??
+    attachment.image?.large ??
+    attachment.image?.medium ??
+    attachment.image?.thumb ??
+    attachment.url
+  );
 }
 
 function getWebHostNode(ref: View | null): HTMLElement | null {
@@ -914,44 +945,60 @@ function createStyles(colors: ThemeColors, bottomPad: number) {
     sendButtonDisabled: {
       opacity: 1,
     },
-    pendingImageWrap: {
+    pendingStrip: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: Spacing.sm,
       paddingHorizontal: Spacing.md,
       paddingTop: Spacing.sm,
       backgroundColor: colors.surface,
     },
+    pendingThumbWrap: {
+      position: 'relative',
+      width: 84,
+      height: 84,
+    },
     pendingImage: {
-      width: 96,
-      height: 96,
+      width: 84,
+      height: 84,
       borderRadius: 12,
     },
     pendingFileChip: {
-      alignSelf: 'flex-start',
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: Spacing.sm,
-      maxWidth: '100%',
-      paddingVertical: Spacing.sm,
-      paddingHorizontal: Spacing.md,
+      width: 84,
+      height: 84,
       borderRadius: 12,
+      padding: Spacing.sm,
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 4,
       backgroundColor: colors.surfaceMuted,
       borderWidth: 1,
       borderColor: colors.borderLight,
     },
     pendingFileName: {
-      flexShrink: 1,
-      fontSize: FontSize.label,
+      fontSize: 10,
+      textAlign: 'center',
       color: colors.text,
     },
     pendingClear: {
       position: 'absolute',
       top: 4,
-      right: Spacing.md + 4,
-      width: 28,
-      height: 28,
-      borderRadius: 14,
+      right: 4,
+      width: 24,
+      height: 24,
+      borderRadius: 12,
       alignItems: 'center',
       justifyContent: 'center',
-      backgroundColor: colors.overlay,
+      backgroundColor: colors.surface,
+      borderWidth: 1,
+      borderColor: colors.borderLight,
+    },
+    pendingBusy: {
+      ...StyleSheet.absoluteFill,
+      borderRadius: 12,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: 'rgba(0,0,0,0.35)',
     },
     bubbleAttachment: {
       flexDirection: 'row',
@@ -1026,8 +1073,8 @@ export default function ChatThreadScreen() {
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
   const [draft, setDraft] = useState('');
-  const [pendingAttachment, setPendingAttachment] = useState<PendingAttachment | null>(null);
-  const [lightboxUri, setLightboxUri] = useState<string | null>(null);
+  const [pendingAttachments, setPendingAttachments] = useState<PendingAttachment[]>([]);
+  const [lightbox, setLightbox] = useState<{ uris: string[]; index: number } | null>(null);
   const [isDraggingFile, setIsDraggingFile] = useState(false);
   const [emojiPanelOpen, setEmojiPanelOpen] = useState(false);
   const [addingBack, setAddingBack] = useState(false);
@@ -1048,8 +1095,7 @@ export default function ChatThreadScreen() {
   const layoutHeightRef = useRef(0);
   const dropZoneRef = useRef<View>(null);
   const draftRef = useRef('');
-  const pendingAttachmentRef = useRef<PendingAttachment | null>(null);
-  const pendingObjectUrlRef = useRef<string | null>(null);
+  const pendingAttachmentsRef = useRef<PendingAttachment[]>([]);
   const sendingRef = useRef(false);
   const blockedMeRef = useRef(false);
   const composerFieldWrapRef = useRef<View>(null);
@@ -1058,7 +1104,7 @@ export default function ChatThreadScreen() {
   const myId = user?.id;
 
   draftRef.current = draft;
-  pendingAttachmentRef.current = pendingAttachment;
+  pendingAttachmentsRef.current = pendingAttachments;
   sendingRef.current = sending;
   blockedMeRef.current = Boolean(conversation?.blockedMe);
 
@@ -1082,32 +1128,72 @@ export default function ChatThreadScreen() {
     pinToBottom();
   }, [pinToBottom]);
 
-  const clearPendingAttachment = useCallback(() => {
-    if (pendingObjectUrlRef.current) {
-      URL.revokeObjectURL(pendingObjectUrlRef.current);
-      pendingObjectUrlRef.current = null;
+  const clearPendingAttachments = useCallback(() => {
+    for (const item of pendingAttachmentsRef.current) {
+      if (item.isObjectUrl) {
+        URL.revokeObjectURL(item.uri);
+      }
     }
-    pendingAttachmentRef.current = null;
-    setPendingAttachment(null);
+    pendingAttachmentsRef.current = [];
+    setPendingAttachments([]);
   }, []);
 
-  const setPendingFromSource = useCallback(
-    (next: PendingAttachment, objectUrl?: string | null) => {
-      if (pendingObjectUrlRef.current) {
-        URL.revokeObjectURL(pendingObjectUrlRef.current);
+  const removePendingAttachment = useCallback((id: string) => {
+    setPendingAttachments((prev) => {
+      const target = prev.find((item) => item.id === id);
+      if (target?.isObjectUrl) {
+        URL.revokeObjectURL(target.uri);
       }
-      pendingObjectUrlRef.current = objectUrl ?? null;
-      pendingAttachmentRef.current = next;
-      setPendingAttachment(next);
-    },
-    [],
-  );
+      const next = prev.filter((item) => item.id !== id);
+      pendingAttachmentsRef.current = next;
+      return next;
+    });
+  }, []);
+
+  const appendPendingAttachments = useCallback((items: PendingAttachment[]) => {
+    if (items.length === 0) {
+      return;
+    }
+    const limitToast = (batch: PendingAttachment[]) => {
+      const allImages = batch.every((item) => item.kind === 'image');
+      toast.warning(
+        allImages
+          ? `Можно отправить не более ${MAX_CHAT_ATTACHMENTS} изображений за раз`
+          : `Можно отправить не более ${MAX_CHAT_ATTACHMENTS} файлов за раз`,
+      );
+    };
+
+    setPendingAttachments((prev) => {
+      const room = MAX_CHAT_ATTACHMENTS - prev.length;
+      if (room <= 0) {
+        for (const item of items) {
+          if (item.isObjectUrl) {
+            URL.revokeObjectURL(item.uri);
+          }
+        }
+        limitToast([...prev, ...items]);
+        return prev;
+      }
+      if (items.length > room) {
+        for (const item of items.slice(room)) {
+          if (item.isObjectUrl) {
+            URL.revokeObjectURL(item.uri);
+          }
+        }
+        limitToast([...prev, ...items]);
+      }
+      const next = [...prev, ...items.slice(0, room)];
+      pendingAttachmentsRef.current = next;
+      return next;
+    });
+  }, []);
 
   useEffect(() => {
     return () => {
-      if (pendingObjectUrlRef.current) {
-        URL.revokeObjectURL(pendingObjectUrlRef.current);
-        pendingObjectUrlRef.current = null;
+      for (const item of pendingAttachmentsRef.current) {
+        if (item.isObjectUrl) {
+          URL.revokeObjectURL(item.uri);
+        }
       }
     };
   }, []);
@@ -1308,30 +1394,40 @@ export default function ChatThreadScreen() {
       : '';
 
   const canSend =
-    Boolean(draft.trim() || pendingAttachment) && !sending && !conversation?.blockedMe;
+    Boolean(draft.trim() || pendingAttachments.length > 0) &&
+    !sending &&
+    !conversation?.blockedMe;
 
-  const acceptDroppedFile = useCallback(
-    (file: File) => {
-      const maxBytes =
-        getCachedUploadLimits()?.maxUploadBytes ?? MAX_UPLOAD_SIZE_MB * 1024 * 1024;
-      if (file.size > maxBytes) {
-        toast.error(getCachedFileTooLargeMessage() ?? MAX_UPLOAD_SIZE_MESSAGE);
+  const acceptDroppedFiles = useCallback(
+    (inputFiles: File[]) => {
+      if (inputFiles.length === 0) {
         return;
       }
 
-      const mimeType = file.type || 'application/octet-stream';
-      const objectUrl = URL.createObjectURL(file);
-      setPendingFromSource(
-        {
+      const maxBytes =
+        getCachedUploadLimits()?.maxUploadBytes ?? MAX_UPLOAD_SIZE_MB * 1024 * 1024;
+      const next: PendingAttachment[] = [];
+
+      for (const file of inputFiles) {
+        if (file.size > maxBytes) {
+          toast.error(getCachedFileTooLargeMessage() ?? MAX_UPLOAD_SIZE_MESSAGE);
+          continue;
+        }
+        const mimeType = file.type || 'application/octet-stream';
+        const objectUrl = URL.createObjectURL(file);
+        next.push({
+          id: `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
           uri: objectUrl,
           name: file.name || 'Файл',
           mimeType,
           kind: attachmentKindFromMime(mimeType),
-        },
-        objectUrl,
-      );
+          isObjectUrl: true,
+        });
+      }
+
+      appendPendingAttachments(next);
     },
-    [setPendingFromSource],
+    [appendPendingAttachments],
   );
 
   const pickAttachment = useCallback(async () => {
@@ -1339,25 +1435,28 @@ export default function ChatThreadScreen() {
     try {
       const result = await DocumentPicker.getDocumentAsync({
         copyToCacheDirectory: true,
-        multiple: false,
+        multiple: true,
       });
 
-      if (result.canceled || !result.assets?.[0]) {
+      if (result.canceled || !result.assets?.length) {
         return;
       }
 
-      const asset = result.assets[0];
-      const mimeType = asset.mimeType ?? 'application/octet-stream';
-      setPendingFromSource({
-        uri: asset.uri,
-        name: asset.name || 'Файл',
-        mimeType,
-        kind: attachmentKindFromMime(mimeType),
+      const next: PendingAttachment[] = result.assets.map((asset) => {
+        const mimeType = asset.mimeType ?? 'application/octet-stream';
+        return {
+          id: `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+          uri: asset.uri,
+          name: asset.name || 'Файл',
+          mimeType,
+          kind: attachmentKindFromMime(mimeType),
+        };
       });
+      appendPendingAttachments(next);
     } catch {
       toast.error('Не удалось выбрать файл');
     }
-  }, [setPendingFromSource]);
+  }, [appendPendingAttachments]);
 
   const insertEmoji = useCallback((emoji: string) => {
     const current = draftRef.current;
@@ -1420,9 +1519,9 @@ export default function ChatThreadScreen() {
       if (!isInsideDropZone(event.target)) {
         return;
       }
-      const file = event.dataTransfer?.files?.[0];
-      if (file) {
-        acceptDroppedFile(file);
+      const files = Array.from(event.dataTransfer?.files ?? []);
+      if (files.length > 0) {
+        acceptDroppedFiles(files);
       }
     };
 
@@ -1437,13 +1536,13 @@ export default function ChatThreadScreen() {
         return;
       }
 
-      const imageFile = getClipboardImageFile(event.clipboardData);
-      if (!imageFile) {
+      const imageFiles = getClipboardImageFiles(event.clipboardData);
+      if (imageFiles.length === 0) {
         return;
       }
 
       event.preventDefault();
-      acceptDroppedFile(imageFile);
+      acceptDroppedFiles(imageFiles);
     };
 
     document.addEventListener('dragenter', onDragOver);
@@ -1459,7 +1558,7 @@ export default function ChatThreadScreen() {
       document.removeEventListener('drop', onDrop);
       document.removeEventListener('paste', onPaste);
     };
-  }, [acceptDroppedFile]);
+  }, [acceptDroppedFiles]);
 
   const handleSend = useCallback(async () => {
     if (!conversationId || sendingRef.current || blockedMeRef.current) {
@@ -1467,8 +1566,8 @@ export default function ChatThreadScreen() {
     }
 
     const body = draftRef.current;
-    const attachment = pendingAttachmentRef.current;
-    if (!body.trim() && !attachment) {
+    const attachments = pendingAttachmentsRef.current;
+    if (!body.trim() && attachments.length === 0) {
       return;
     }
 
@@ -1477,15 +1576,17 @@ export default function ChatThreadScreen() {
     try {
       const message = await sendChatMessage(conversationId, {
         body,
-        fileUri: attachment?.uri,
-        fileName: attachment?.name,
-        mimeType: attachment?.mimeType,
+        files: attachments.map((item) => ({
+          uri: item.uri,
+          name: item.name,
+          mimeType: item.mimeType,
+        })),
       });
       setDraft('');
       draftRef.current = '';
       selectionRef.current = { start: 0, end: 0 };
       setEmojiPanelOpen(false);
-      clearPendingAttachment();
+      clearPendingAttachments();
       setMessages((prev) => {
         if (prev.some((item) => item.id === message.id)) {
           return prev;
@@ -1499,7 +1600,7 @@ export default function ChatThreadScreen() {
       setSending(false);
       sendingRef.current = false;
     }
-  }, [clearPendingAttachment, conversationId, scrollToBottom]);
+  }, [clearPendingAttachments, conversationId, scrollToBottom]);
 
   const handleAddBack = useCallback(async () => {
     const peerId = conversation?.peer?.id;
@@ -2042,29 +2143,15 @@ export default function ChatThreadScreen() {
                         : 'разблокировал вас.'
                       : null;
               const bodyText = noticeText ?? item.body;
-              const attachment = item.attachment;
-              const previewUrl =
-                attachment?.image?.medium ??
-                attachment?.image?.large ??
-                attachment?.image?.original ??
-                attachment?.image?.thumb ??
-                item.image?.medium ??
-                item.image?.large ??
-                item.image?.original ??
-                item.image?.thumb;
-              const fullUrl =
-                attachment?.image?.original ??
-                attachment?.image?.large ??
-                attachment?.image?.medium ??
-                attachment?.image?.thumb ??
-                item.image?.original ??
-                item.image?.large ??
-                item.image?.medium ??
-                item.image?.thumb;
+              const attachments = normalizeMessageAttachments(item);
+              const imageAttachments = attachments.filter((entry) => entry.kind === 'image');
+              const fileAttachments = attachments.filter((entry) => entry.kind !== 'image');
+              const lightboxUris = imageAttachments
+                .map((entry) => fullUrlForAttachment(entry))
+                .filter((value): value is string => Boolean(value));
               const isRead =
                 mine && peerReadMs > 0 && new Date(item.createdAt).getTime() <= peerReadMs;
               const bubbleColor = mine ? colors.primary : colors.surfaceMuted;
-              const kind = attachment?.kind ?? (previewUrl ? 'image' : null);
               const timeLabel = formatMessageTime(item.createdAt);
               const fullDateTimeLabel = formatMessageFullDateTime(item.createdAt);
               const timeAccessibilityProps = fullDateTimeLabel
@@ -2173,37 +2260,38 @@ export default function ChatThreadScreen() {
                       </Text>
                     ) : null}
                     <View style={[styles.bubble, mine && styles.bubbleMine]}>
-                      {kind === 'image' && previewUrl ? (
-                        <Pressable
-                          accessibilityRole="imagebutton"
-                          accessibilityLabel="Открыть фото"
-                          onPress={() => setLightboxUri(fullUrl ?? previewUrl)}>
-                          <Image
-                            source={{ uri: previewUrl }}
-                            style={styles.bubbleImage}
-                            contentFit="cover"
-                          />
-                        </Pressable>
+                      {imageAttachments.length > 0 ? (
+                        <ChatAlbumGrid
+                          images={imageAttachments}
+                          onOpen={(index) =>
+                            setLightbox({
+                              uris: lightboxUris,
+                              index,
+                            })
+                          }
+                        />
                       ) : null}
-                      {kind === 'audio' || kind === 'file' ? (
+                      {fileAttachments.map((fileAttachment, fileIndex) => (
                         <Pressable
+                          key={`${item.id}-file-${fileIndex}`}
                           accessibilityRole="button"
                           accessibilityLabel={
-                            kind === 'audio' ? 'Скачать аудио' : 'Скачать файл'
+                            fileAttachment.kind === 'audio' ? 'Скачать аудио' : 'Скачать файл'
                           }
                           onPress={() => {
-                            const url = attachment?.url;
+                            const url = fileAttachment.url;
                             if (!url) {
                               return;
                             }
                             downloadChatAttachment(
                               url,
-                              attachment?.name ?? (kind === 'audio' ? 'audio' : 'file'),
+                              fileAttachment.name ??
+                                (fileAttachment.kind === 'audio' ? 'audio' : 'file'),
                             );
                           }}
                           style={[styles.bubbleAttachment, mine && styles.bubbleAttachmentMine]}>
                           <Ionicons
-                            name={attachmentIcon(kind)}
+                            name={attachmentIcon(fileAttachment.kind)}
                             size={20}
                             color={mine ? colors.onPrimary : colors.primary}
                           />
@@ -2213,10 +2301,11 @@ export default function ChatThreadScreen() {
                               mine && styles.bubbleAttachmentNameMine,
                             ]}
                             numberOfLines={2}>
-                            {attachment?.name ?? (kind === 'audio' ? 'Аудио' : 'Файл')}
+                            {fileAttachment.name ??
+                              (fileAttachment.kind === 'audio' ? 'Аудио' : 'Файл')}
                           </Text>
                         </Pressable>
-                      ) : null}
+                      ))}
                       <View style={styles.bubbleContent}>
                         {bodyText ? (
                           <ChatMessageBody
@@ -2263,35 +2352,49 @@ export default function ChatThreadScreen() {
           />
         )}
 
-        <ChatImageLightbox uri={lightboxUri} onClose={() => setLightboxUri(null)} />
+        <ChatImageLightbox
+          uris={lightbox?.uris ?? null}
+          index={lightbox?.index ?? 0}
+          onClose={() => setLightbox(null)}
+        />
 
-        {pendingAttachment ? (
-          <View style={styles.pendingImageWrap}>
-            {pendingAttachment.kind === 'image' ? (
-              <Image
-                source={{ uri: pendingAttachment.uri }}
-                style={styles.pendingImage}
-                contentFit="cover"
-              />
-            ) : (
-              <View style={styles.pendingFileChip}>
-                <Ionicons
-                  name={attachmentIcon(pendingAttachment.kind)}
-                  size={20}
-                  color={colors.primary}
-                />
-                <Text style={styles.pendingFileName} numberOfLines={1}>
-                  {pendingAttachment.name}
-                </Text>
+        {pendingAttachments.length > 0 ? (
+          <View style={styles.pendingStrip}>
+            {pendingAttachments.map((item) => (
+              <View key={item.id} style={styles.pendingThumbWrap}>
+                {item.kind === 'image' ? (
+                  <Image
+                    source={{ uri: item.uri }}
+                    style={styles.pendingImage}
+                    contentFit="cover"
+                  />
+                ) : (
+                  <View style={styles.pendingFileChip}>
+                    <Ionicons
+                      name={attachmentIcon(item.kind)}
+                      size={18}
+                      color={colors.primary}
+                    />
+                    <Text style={styles.pendingFileName} numberOfLines={2}>
+                      {item.name}
+                    </Text>
+                  </View>
+                )}
+                {sending ? (
+                  <View style={styles.pendingBusy}>
+                    <ActivityIndicator color="#fff" size="small" />
+                  </View>
+                ) : (
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel="Убрать вложение"
+                    onPress={() => removePendingAttachment(item.id)}
+                    style={styles.pendingClear}>
+                    <Ionicons name="close" size={14} color={colors.text} />
+                  </Pressable>
+                )}
               </View>
-            )}
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Убрать вложение"
-              onPress={clearPendingAttachment}
-              style={styles.pendingClear}>
-              <Ionicons name="close" size={16} color={colors.text} />
-            </Pressable>
+            ))}
           </View>
         ) : null}
 

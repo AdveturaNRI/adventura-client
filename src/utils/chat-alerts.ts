@@ -1,6 +1,7 @@
 import { Platform } from 'react-native';
 
 import type { PortalNotification } from '@/services/notifications/notificationsApi';
+import { getPortalNotificationCopy } from '@/utils/portal-notification-copy';
 
 const SITE_TITLE = 'Adventura';
 const MESSAGE_ALERT_TITLE = 'Новое сообщение';
@@ -223,75 +224,19 @@ export function notifyIncomingPortalNotification(options?: {
   subject?: string;
 }) {
   playIncomingMessageSound();
-  if (options?.type === 'favorite_returned') {
-    const title = 'Вас добавили в избранные';
-    const body = options.actorName
-      ? `${options.actorName} добавил вас в избранные в ответ`
-      : 'Вас добавили в избранные в ответ';
-    startTitleBlink(title);
-    showDesktopPush(title, body);
+
+  if (!options?.type) {
+    startTitleBlink(NOTIFICATION_ALERT_TITLE);
     return;
   }
 
-  if (options?.type === 'game_application') {
-    const title = 'Новая заявка на игру';
-    const body = options.actorName
-      ? `${options.actorName} подал заявку${options.subject ? ` на «${options.subject}»` : ''}`
-      : options.subject
-        ? `Заявка на «${options.subject}»`
-        : 'Кто-то подал заявку на ваш стол';
-    startTitleBlink(title);
-    showDesktopPush(title, body);
-    return;
-  }
+  const { title, body } = getPortalNotificationCopy({
+    type: options.type,
+    actor: { id: '', nickname: options.actorName ?? '', avatarUrl: null },
+    actorName: options.actorName,
+    subject: options.subject ?? '',
+  });
 
-  if (options?.type === 'game_application_accepted') {
-    const title = 'Вас приняли за стол';
-    const body = options.subject
-      ? options.actorName
-        ? `${options.actorName} принял вас на «${options.subject}»`
-        : `Вас приняли на «${options.subject}»`
-      : options.actorName
-        ? `${options.actorName} принял вашу заявку`
-        : 'Мастер принял вашу заявку';
-    startTitleBlink(title);
-    showDesktopPush(title, body);
-    return;
-  }
-
-  if (options?.type === 'game_application_rejected') {
-    const title = 'Заявку отклонили';
-    const body = options.subject
-      ? options.actorName
-        ? `${options.actorName} отклонил заявку на «${options.subject}»`
-        : `Заявку на «${options.subject}» отклонили`
-      : options.actorName
-        ? `${options.actorName} отклонил вашу заявку`
-        : 'Мастер отклонил вашу заявку';
-    startTitleBlink(title);
-    showDesktopPush(title, body);
-    return;
-  }
-
-  if (options?.type === 'game_player_removed') {
-    const title = 'Вас убрали из игры';
-    const body = options.subject
-      ? options.actorName
-        ? `${options.actorName} убрал вас из «${options.subject}»`
-        : `Вас убрали из «${options.subject}»`
-      : options.actorName
-        ? `${options.actorName} убрал вас из состава`
-        : 'Мастер убрал вас из состава';
-    startTitleBlink(title);
-    showDesktopPush(title, body);
-    return;
-  }
-
-  startTitleBlink(NOTIFICATION_ALERT_TITLE);
-  if (options?.actorName) {
-    showDesktopPush(
-      NOTIFICATION_ALERT_TITLE,
-      `${options.actorName} ${options.type === 'favorite_received' ? 'добавил вас в избранные' : ''}`.trim(),
-    );
-  }
+  startTitleBlink(title);
+  showDesktopPush(title, body);
 }

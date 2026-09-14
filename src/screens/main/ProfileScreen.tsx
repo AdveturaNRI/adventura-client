@@ -10,7 +10,9 @@ import { ScreenTransition } from '@/components/navigation/ScreenTransition';
 import { Menu, MenuItem, PROFILE_MENU_SECTIONS, toast } from '@/components/ui';
 import { useAuth } from '@/context/AuthContext';
 import { useProfile, useMyAvatarUrl } from '@/context/ProfileContext';
+import { useRealtimeOptional } from '@/context/RealtimeContext';
 import { getQuestionnaireCompletion } from '@/utils/questionnaire-completion';
+import { formatUnreadBadge } from '@/utils/unread-badge';
 
 import { useProfileScreenStyles } from './profile-screen.styles';
 
@@ -56,7 +58,10 @@ export default function ProfileScreen() {
   const hasDesktopSidebar = useIsDesktopSidebarVisible();
   const showCompactNav = !hasDesktopSidebar;
   const styles = useProfileScreenStyles();
+  const realtime = useRealtimeOptional();
+  const unreadNotifications = realtime?.unreadNotifications ?? 0;
   const completion = useMemo(() => getQuestionnaireCompletion(profile), [profile]);
+  const notificationsBadge = formatUnreadBadge(unreadNotifications);
 
   useFocusEffect(
     useCallback(() => {
@@ -114,7 +119,11 @@ export default function ProfileScreen() {
                   label={item.label}
                   subtitle={item.subtitle}
                   icon={item.icon}
-                  badge={item.badge}
+                  badge={
+                    item.key === 'notifications' && notificationsBadge
+                      ? notificationsBadge
+                      : item.badge
+                  }
                   variant={item.variant}
                   onPress={() => handleMenuPress(item.key, router)}
                 />

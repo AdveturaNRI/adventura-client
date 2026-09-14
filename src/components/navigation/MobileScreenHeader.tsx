@@ -1,8 +1,10 @@
 import type { ReactNode } from 'react';
 import { StyleSheet, Text, View, type ViewStyle } from 'react-native';
 
+import { useIsDesktopWeb } from '@/components/navigation/DesktopThemeToggle';
 import { MobileBackButton } from '@/components/navigation/MobileBackButton';
 import { MobileMenuButton } from '@/components/navigation/MobileMenuButton';
+import { NotificationButton } from '@/components/navigation/NotificationButton';
 import { FontSize, type ThemeColors } from '@/constants/theme';
 import { useThemedStyles } from '@/hooks/use-themed-styles';
 
@@ -26,6 +28,12 @@ function createStyles(colors: ThemeColors) {
     },
     sideGrow: {
       flexShrink: 0,
+    },
+    actions: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+      minWidth: 0,
     },
     title: {
       flex: 1,
@@ -59,6 +67,7 @@ export function MobileScreenHeader({
   style,
 }: MobileScreenHeaderProps) {
   const styles = useThemedStyles(createStyles);
+  const isDesktopWeb = useIsDesktopWeb();
   const isCentered = align === 'center';
   const leftContent = leftAction ?? (showBack ? <MobileBackButton onPress={onBackPress} /> : null);
 
@@ -70,7 +79,9 @@ export function MobileScreenHeader({
       <Text style={[styles.title, !isCentered && styles.titleLeft]} numberOfLines={1}>
         {title}
       </Text>
-      <View style={[styles.side, styles.sideRight]}>
+      <View style={[styles.side, styles.sideRight, styles.actions]}>
+        {/* Desktop web already has the bell in MainDesktopHeader — avoid a duplicate. */}
+        {!isDesktopWeb ? <NotificationButton variant="compact" /> : null}
         <MobileMenuButton />
       </View>
     </View>

@@ -1,14 +1,7 @@
 import { useFocusEffect, useRouter } from 'expo-router';
-import { useCallback, useEffect, useState } from 'react';
-import {
-  ActivityIndicator,
-  Alert,
-  Platform,
-  ScrollView,
-  StyleSheet,
-  Text,
-  View,
-} from 'react-native';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from 'react-native';
+import Animated, { FadeOut, LinearTransition } from 'react-native-reanimated';
 
 import { useIsDesktopSidebarVisible } from '@/components/navigation/DesktopThemeToggle';
 import { MobileScreenHeader } from '@/components/navigation/MobileScreenHeader';
@@ -29,6 +22,14 @@ import { upsertWandererReaction } from '@/services/profile/wanderersApi';
 import { localizeErrorMessage } from '@/utils/localizeError';
 
 import { useNotificationsScreenStyles } from './notifications-screen.styles';
+
+const UNDO_WINDOW_MS = 5000;
+
+type PendingDelete = {
+  item: PortalNotification;
+  index: number;
+  timer: ReturnType<typeof setTimeout>;
+};
 
 function createExtraStyles(colors: ThemeColors) {
   return StyleSheet.create({
@@ -62,6 +63,24 @@ export default function NotificationsScreen() {
   const { lastNotification, setUnreadNotifications, publishConversationUpdate } = useRealtime();
   const [items, setItems] = useState<PortalNotification[]>([]);
   const [loading, setLoading] = useState(true);
+  const itemsRef = useRef(items);
+  const pendingDeletesRef = useRef(new Map<string, PendingDelete>());
+
+  useEffect(() => {
+    itemsRef.current = items;
+  }, [items]);
+
+  useEffect(() => {
+    return () => {
+      for (const pending of pendingDeletesRef.current.values()) {
+        clearTimeout(pending.timer);
+        void deleteNotification(pending.item.id).catch(() => {
+          // Screen unmounted — best-effort flush.
+        });
+      }
+      pendingDeletesRef.current.clear();
+    };
+  }, []);
 
   const load = useCallback(async () => {
     try {
@@ -128,34 +147,69 @@ export default function NotificationsScreen() {
     [publishConversationUpdate],
   );
 
-  const handleDelete = useCallback(async (notification: PortalNotification) => {
+  const commitDelete = useCallback(async (notification: PortalNotification) => {
+    pendingDeletesRef.current.delete(notification.id);
     try {
       await deleteNotification(notification.id);
-      setItems((prev) => prev.filter((item) => item.id !== notification.id));
     } catch (error) {
+      setItems((prev) => {
+        if (prev.some((item) => item.id === notification.id)) {
+          return prev;
+        }
+        return [notification, ...prev];
+      });
       toast.error(localizeErrorMessage(error, 'Не удалось удалить уведомление'));
     }
   }, []);
 
-  const confirmDelete = useCallback(
-    (notification: PortalNotification) => {
-      const run = () => {
-        void handleDelete(notification);
-      };
+  const undoDelete = useCallback((notificationId: string) => {
+    const pending = pendingDeletesRef.current.get(notificationId);
+    if (!pending) {
+      return;
+    }
+    clearTimeout(pending.timer);
+    pendingDeletesRef.current.delete(notificationId);
+    setItems((prev) => {
+      if (prev.some((item) => item.id === pending.item.id)) {
+        return prev;
+      }
+      const next = [...prev];
+      const index = Math.min(Math.max(pending.index, 0), next.length);
+      next.splice(index, 0, pending.item);
+      return next;
+    });
+  }, []);
 
-      if (Platform.OS === 'web') {
-        if (typeof window !== 'undefined' && window.confirm('Удалить уведомление?')) {
-          run();
-        }
-        return;
+  const handleDeletePress = useCallback(
+    (notification: PortalNotification) => {
+      const existing = pendingDeletesRef.current.get(notification.id);
+      if (existing) {
+        clearTimeout(existing.timer);
+        pendingDeletesRef.current.delete(notification.id);
       }
 
-      Alert.alert('Удалить уведомление?', 'Его нельзя будет восстановить.', [
-        { text: 'Отмена', style: 'cancel' },
-        { text: 'Удалить', style: 'destructive', onPress: run },
-      ]);
+      const index = itemsRef.current.findIndex((item) => item.id === notification.id);
+      setItems((prev) => prev.filter((item) => item.id !== notification.id));
+
+      const timer = setTimeout(() => {
+        void commitDelete(notification);
+      }, UNDO_WINDOW_MS);
+
+      pendingDeletesRef.current.set(notification.id, {
+        item: notification,
+        index: index < 0 ? 0 : index,
+        timer,
+      });
+
+      toast.info('', {
+        title: 'Уведомление удалено',
+        position: 'bottom',
+        duration: UNDO_WINDOW_MS,
+        actionLabel: 'Отменить',
+        onAction: () => undoDelete(notification.id),
+      });
     },
-    [handleDelete],
+    [commitDelete, undoDelete],
   );
 
   const openActorProfile = useCallback(
@@ -186,31 +240,35 @@ export default function NotificationsScreen() {
           <Text style={extra.empty}>Пока нет уведомлений</Text>
         ) : (
           items.map((item) => (
-            <NotificationCard
+            <Animated.View
               key={item.id}
-              actorName={item.actor.nickname}
-              actorAvatarUrl={item.actor.avatarUrl}
-              actionText={item.actionText}
-              messageText={item.messageText}
-              subject={item.subject || undefined}
-              timestamp={formatTimestamp(item.updatedAt)}
-              unread={!item.readAt}
-              variant={
-                item.type === 'favorite_returned'
-                  ? 'returned'
-                  : item.type === 'favorite_received'
-                    ? 'favorite'
-                    : item.type === 'game_application_accepted'
-                      ? 'returned'
-                      : 'default'
-              }
-              buttonLabel={item.canAddBack ? 'Добавить в ответ' : undefined}
-              onButtonPress={
-                item.canAddBack ? () => void handleAddBack(item) : undefined
-              }
-              onDeletePress={() => confirmDelete(item)}
-              onActorPress={() => openActorProfile(item)}
-            />
+              exiting={FadeOut.duration(220)}
+              layout={LinearTransition.duration(220)}>
+              <NotificationCard
+                actorName={item.actor.nickname}
+                actorAvatarUrl={item.actor.avatarUrl}
+                actionText={item.actionText}
+                messageText={item.messageText}
+                subject={item.subject || undefined}
+                timestamp={formatTimestamp(item.updatedAt)}
+                unread={!item.readAt}
+                variant={
+                  item.type === 'favorite_returned'
+                    ? 'returned'
+                    : item.type === 'favorite_received'
+                      ? 'favorite'
+                      : item.type === 'game_application_accepted'
+                        ? 'returned'
+                        : 'default'
+                }
+                buttonLabel={item.canAddBack ? 'Добавить в ответ' : undefined}
+                onButtonPress={
+                  item.canAddBack ? () => void handleAddBack(item) : undefined
+                }
+                onDeletePress={() => handleDeletePress(item)}
+                onActorPress={() => openActorProfile(item)}
+              />
+            </Animated.View>
           ))
         )}
       </ScrollView>

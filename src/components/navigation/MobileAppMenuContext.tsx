@@ -33,6 +33,7 @@ import { Radius, Spacing, type ThemeColors } from '@/constants/theme';
 import { useRealtimeOptional } from '@/context/RealtimeContext';
 import { useTheme } from '@/hooks/use-theme';
 import { useThemedStyles } from '@/hooks/use-themed-styles';
+import { formatUnreadBadge } from '@/utils/unread-badge';
 
 type MobileAppMenuContextValue = {
   open: () => void;
@@ -246,9 +247,7 @@ function MobileAppMenuModal({
                     navbarIcon={item.icon}
                     badge={
                       item.key === 'chats' && unreadChats > 0
-                        ? unreadChats > 9
-                          ? '9+'
-                          : String(unreadChats)
+                        ? formatUnreadBadge(unreadChats)
                         : undefined
                     }
                     onPress={() => onNavigate(item)}

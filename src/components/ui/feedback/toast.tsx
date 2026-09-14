@@ -8,10 +8,12 @@ import {
 
 type ShowToastOptions = {
   title?: string;
-  message: string;
+  message?: string;
   position?: ToastPosition;
   alignment?: ToastAlignment;
   duration?: number;
+  actionLabel?: string;
+  onAction?: () => void;
 };
 
 const DEFAULT_TITLES: Record<ToastVariant, string> = {
@@ -30,6 +32,8 @@ function showToast(variant: ToastVariant, options: ShowToastOptions) {
     visibilityTime: options.duration ?? 3500,
     props: {
       alignment: options.alignment ?? 'center',
+      actionLabel: options.actionLabel,
+      onAction: options.onAction,
     },
   });
 }
@@ -46,5 +50,8 @@ export const toast = {
   },
   warning(message: string, options?: Omit<ShowToastOptions, 'message'>) {
     showToast('warning', { message, ...options });
+  },
+  hide() {
+    Toast.hide();
   },
 };

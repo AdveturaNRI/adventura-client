@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
-import { useEffect } from 'react';
-import { Modal, Platform, Pressable, StyleSheet, View, useWindowDimensions } from 'react-native';
+import { useEffect, useMemo, useState } from 'react';
+import { Modal, Platform, Pressable, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, {
   useAnimatedStyle,
@@ -14,13 +14,30 @@ const MIN_SCALE = 1;
 const MAX_SCALE = 4;
 
 type ChatImageLightboxProps = {
-  uri: string | null;
+  /** @deprecated Prefer `uris` + `index`. */
+  uri?: string | null;
+  uris?: string[] | null;
+  index?: number;
   onClose: () => void;
 };
 
-export function ChatImageLightbox({ uri, onClose }: ChatImageLightboxProps) {
+export function ChatImageLightbox({
+  uri = null,
+  uris = null,
+  index = 0,
+  onClose,
+}: ChatImageLightboxProps) {
   const insets = useSafeAreaInsets();
   const { width, height } = useWindowDimensions();
+  const gallery = useMemo(() => {
+    if (uris && uris.length > 0) {
+      return uris.filter(Boolean);
+    }
+    return uri ? [uri] : [];
+  }, [uri, uris]);
+  const [activeIndex, setActiveIndex] = useState(0);
+  const activeUri = gallery[activeIndex] ?? null;
+
   const scale = useSharedValue(1);
   const savedScale = useSharedValue(1);
   const translateX = useSharedValue(0);
@@ -29,7 +46,15 @@ export function ChatImageLightbox({ uri, onClose }: ChatImageLightboxProps) {
   const savedTranslateY = useSharedValue(0);
 
   useEffect(() => {
-    if (!uri) {
+    if (gallery.length === 0) {
+      setActiveIndex(0);
+      return;
+    }
+    setActiveIndex(Math.min(Math.max(index, 0), gallery.length - 1));
+  }, [gallery, index]);
+
+  useEffect(() => {
+    if (!activeUri) {
       return;
     }
     scale.value = 1;
@@ -38,10 +63,10 @@ export function ChatImageLightbox({ uri, onClose }: ChatImageLightboxProps) {
     translateY.value = 0;
     savedTranslateX.value = 0;
     savedTranslateY.value = 0;
-  }, [uri, scale, savedScale, translateX, translateY, savedTranslateX, savedTranslateY]);
+  }, [activeUri, scale, savedScale, translateX, translateY, savedTranslateX, savedTranslateY]);
 
   useEffect(() => {
-    if (Platform.OS !== 'web' || !uri || typeof window === 'undefined') {
+    if (Platform.OS !== 'web' || !activeUri || typeof window === 'undefined') {
       return;
     }
 
@@ -59,9 +84,35 @@ export function ChatImageLightbox({ uri, onClose }: ChatImageLightboxProps) {
       }
     };
 
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'ArrowLeft') {
+        setActiveIndex((current) => Math.max(0, current - 1));
+      }
+      if (event.key === 'ArrowRight') {
+        setActiveIndex((current) => Math.min(gallery.length - 1, current + 1));
+      }
+      if (event.key === 'Escape') {
+        onClose();
+      }
+    };
+
     window.addEventListener('wheel', onWheel, { passive: false });
-    return () => window.removeEventListener('wheel', onWheel);
-  }, [uri, scale, savedScale, translateX, translateY, savedTranslateX, savedTranslateY]);
+    window.addEventListener('keydown', onKeyDown);
+    return () => {
+      window.removeEventListener('wheel', onWheel);
+      window.removeEventListener('keydown', onKeyDown);
+    };
+  }, [
+    activeUri,
+    gallery.length,
+    onClose,
+    scale,
+    savedScale,
+    translateX,
+    translateY,
+    savedTranslateX,
+    savedTranslateY,
+  ]);
 
   const pinch = Gesture.Pinch()
     .onUpdate((event) => {
@@ -119,8 +170,10 @@ export function ChatImageLightbox({ uri, onClose }: ChatImageLightboxProps) {
     ],
   }));
 
+  const showNav = gallery.length > 1;
+
   return (
-    <Modal visible={uri != null} transparent animationType="fade" onRequestClose={onClose}>
+    <Modal visible={gallery.length > 0} transparent animationType="fade" onRequestClose={onClose}>
       <View style={styles.root}>
         <Pressable style={StyleSheet.absoluteFill} onPress={onClose} />
         <Pressable
@@ -131,7 +184,45 @@ export function ChatImageLightbox({ uri, onClose }: ChatImageLightboxProps) {
           <Ionicons name="close" size={24} color="#fff" />
         </Pressable>
 
-        {uri ? (
+        {showNav ? (
+          <Text style={[styles.counter, { top: insets.top + 22 }]}>
+            {activeIndex + 1} / {gallery.length}
+          </Text>
+        ) : null}
+
+        {showNav ? (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Предыдущее фото"
+            disabled={activeIndex <= 0}
+            onPress={() => setActiveIndex((current) => Math.max(0, current - 1))}
+            style={[
+              styles.navButton,
+              styles.navButtonLeft,
+              activeIndex <= 0 && styles.navButtonDisabled,
+            ]}>
+            <Ionicons name="chevron-back" size={28} color="#fff" />
+          </Pressable>
+        ) : null}
+
+        {showNav ? (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Следующее фото"
+            disabled={activeIndex >= gallery.length - 1}
+            onPress={() =>
+              setActiveIndex((current) => Math.min(gallery.length - 1, current + 1))
+            }
+            style={[
+              styles.navButton,
+              styles.navButtonRight,
+              activeIndex >= gallery.length - 1 && styles.navButtonDisabled,
+            ]}>
+            <Ionicons name="chevron-forward" size={28} color="#fff" />
+          </Pressable>
+        ) : null}
+
+        {activeUri ? (
           <GestureDetector gesture={composed}>
             <Animated.View
               style={[
@@ -140,7 +231,7 @@ export function ChatImageLightbox({ uri, onClose }: ChatImageLightboxProps) {
                 imageStyle,
                 Platform.OS === 'web' ? ({ touchAction: 'none' } as object) : null,
               ]}>
-              <Image source={{ uri }} style={styles.image} contentFit="contain" />
+              <Image source={{ uri: activeUri }} style={styles.image} contentFit="contain" />
             </Animated.View>
           </GestureDetector>
         ) : null}
@@ -166,6 +257,33 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: 'rgba(255,255,255,0.14)',
+  },
+  counter: {
+    position: 'absolute',
+    alignSelf: 'center',
+    zIndex: 2,
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  navButton: {
+    position: 'absolute',
+    zIndex: 2,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.14)',
+  },
+  navButtonLeft: {
+    left: 12,
+  },
+  navButtonRight: {
+    right: 12,
+  },
+  navButtonDisabled: {
+    opacity: 0.35,
   },
   imageWrap: {
     alignItems: 'center',

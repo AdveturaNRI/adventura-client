@@ -12,6 +12,7 @@ import { NavbarIcon } from '@/components/ui/navigation/NavbarIcon';
 import { FontSize, Spacing, type ThemeColors } from '@/constants/theme';
 import { useRealtimeOptional } from '@/context/RealtimeContext';
 import { useThemedStyles } from '@/hooks/use-themed-styles';
+import { formatUnreadBadge } from '@/utils/unread-badge';
 
 export const DESKTOP_SIDEBAR_WIDTH = 260;
 
@@ -123,9 +124,7 @@ export function MainDesktopSidebar() {
                 </Text>
                 {showBadge ? (
                   <View style={styles.badge}>
-                    <Text style={styles.badgeText}>
-                      {unreadChats > 9 ? '9+' : String(unreadChats)}
-                    </Text>
+                    <Text style={styles.badgeText}>{formatUnreadBadge(unreadChats)}</Text>
                   </View>
                 ) : null}
               </Pressable>
