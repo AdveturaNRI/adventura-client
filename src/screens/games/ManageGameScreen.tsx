@@ -450,6 +450,23 @@ function createStyles(colors: ThemeColors, isDesktopWeb: boolean, topPadding: nu
       textAlign: 'center',
       color: colors.onPrimary,
     },
+    deleteGameBtn: {
+      minHeight: 48,
+      borderRadius: 999,
+      borderWidth: 1,
+      borderColor: 'rgba(255, 59, 48, 0.35)',
+      backgroundColor: 'rgba(255, 59, 48, 0.08)',
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 8,
+      paddingHorizontal: Spacing.lg,
+    },
+    deleteGameBtnLabel: {
+      fontSize: FontSize.button,
+      fontWeight: '500',
+      color: colors.destructive,
+    },
     sectionPanel: {
       borderRadius: 16,
       borderWidth: 1,
@@ -964,17 +981,35 @@ export default function ManageGameScreen() {
             <Text style={styles.headerTitle} numberOfLines={1}>
               {game.title}
             </Text>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Редактировать"
-              onPress={openEdit}
-              style={styles.headerEdit}>
-              {hasDesktopSidebar || isDesktopWeb ? (
-                <Text style={styles.headerEditLabel}>Изменить</Text>
-              ) : (
-                <Ionicons name="create-outline" size={20} color={colors.primary} />
-              )}
-            </Pressable>
+            <View style={styles.headerActions}>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Удалить игру"
+                disabled={busy || isDeleting}
+                onPress={openDeleteDialog}
+                style={({ pressed }) => [
+                  styles.headerDelete,
+                  pressed && { opacity: 0.85 },
+                  (busy || isDeleting) && { opacity: 0.55 },
+                ]}>
+                {hasDesktopSidebar || isDesktopWeb ? (
+                  <Text style={styles.headerDeleteLabel}>Удалить</Text>
+                ) : (
+                  <Ionicons name="trash-outline" size={20} color={colors.destructive} />
+                )}
+              </Pressable>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Редактировать"
+                onPress={openEdit}
+                style={styles.headerEdit}>
+                {hasDesktopSidebar || isDesktopWeb ? (
+                  <Text style={styles.headerEditLabel}>Изменить</Text>
+                ) : (
+                  <Ionicons name="create-outline" size={20} color={colors.primary} />
+                )}
+              </Pressable>
+            </View>
           </View>
 
           <View style={styles.coverFrame}>
@@ -1149,6 +1184,19 @@ export default function ManageGameScreen() {
             onPress={() => void openGroupChat()}
             icon={<Ionicons name="chatbubbles-outline" size={18} color={colors.text} />}
           />
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Удалить игру"
+            disabled={busy || isDeleting}
+            onPress={openDeleteDialog}
+            style={({ pressed }) => [
+              styles.deleteGameBtn,
+              pressed && { opacity: 0.88 },
+              (busy || isDeleting) && { opacity: 0.55 },
+            ]}>
+            <Ionicons name="trash-outline" size={18} color={colors.destructive} />
+            <Text style={styles.deleteGameBtnLabel}>Удалить игру</Text>
+          </Pressable>
 
           <View style={[styles.sectionPanel, styles.sectionPanelApps]}>
             <View style={styles.sectionHeader}>
@@ -1256,6 +1304,18 @@ export default function ManageGameScreen() {
             )}
           </View>
         </ScrollView>
+
+        <DeleteGameDialog
+          visible={deleteDialogOpen}
+          gameTitle={game.title}
+          isBusy={isDeleting}
+          onConfirm={(deleteChat) => void handleDeleteGame(deleteChat)}
+          onCancel={() => {
+            if (!isDeleting) {
+              setDeleteDialogOpen(false);
+            }
+          }}
+        />
       </View>
     </ScreenTransition>
   );

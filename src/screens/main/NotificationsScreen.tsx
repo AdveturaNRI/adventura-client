@@ -1,4 +1,4 @@
-import { useFocusEffect } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
@@ -56,6 +56,7 @@ function formatTimestamp(iso: string) {
 export default function NotificationsScreen() {
   const styles = useNotificationsScreenStyles();
   const extra = useThemedStyles(createExtraStyles);
+  const router = useRouter();
   const hasDesktopSidebar = useIsDesktopSidebarVisible();
   const showCompactNav = !hasDesktopSidebar;
   const { lastNotification, setUnreadNotifications, publishConversationUpdate } = useRealtime();
@@ -157,6 +158,17 @@ export default function NotificationsScreen() {
     [handleDelete],
   );
 
+  const openActorProfile = useCallback(
+    (notification: PortalNotification) => {
+      const userId = notification.actor?.id?.trim();
+      if (!userId) {
+        return;
+      }
+      router.push(`/users/${userId}`);
+    },
+    [router],
+  );
+
   return (
     <ScreenTransition animateOnFocus>
       <ScrollView style={styles.scroll} contentContainerStyle={styles.content}>
@@ -197,6 +209,7 @@ export default function NotificationsScreen() {
                 item.canAddBack ? () => void handleAddBack(item) : undefined
               }
               onDeletePress={() => confirmDelete(item)}
+              onActorPress={() => openActorProfile(item)}
             />
           ))
         )}

@@ -1,5 +1,5 @@
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
-import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Image, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { FontSize, Radius, Spacing, type ThemeColors } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
@@ -20,6 +20,8 @@ export type NotificationCardProps = {
   buttonLabel?: string;
   onButtonPress?: () => void;
   onDeletePress?: () => void;
+  /** Opens the actor profile — only avatar + nickname are interactive. */
+  onActorPress?: () => void;
   unread?: boolean;
   variant?: NotificationCardVariant;
 };
@@ -53,6 +55,16 @@ function createStyles(colors: ThemeColors) {
       width: 40,
       height: 40,
       flexShrink: 0,
+    },
+    avatarPressable: {
+      borderRadius: 20,
+      ...Platform.select({
+        web: { cursor: 'pointer' } as object,
+        default: {},
+      }),
+    },
+    avatarPressableHover: {
+      opacity: 0.88,
     },
     avatar: {
       width: 40,
@@ -108,10 +120,25 @@ function createStyles(colors: ThemeColors) {
       minWidth: 0,
       gap: 4,
     },
+    actorNamePressable: {
+      alignSelf: 'flex-start',
+      maxWidth: '100%',
+      borderRadius: 4,
+      ...Platform.select({
+        web: { cursor: 'pointer' } as object,
+        default: {},
+      }),
+    },
+    actorNamePressableHover: {
+      opacity: 0.82,
+    },
     actorName: {
       fontSize: FontSize.button,
       fontWeight: '700',
       color: colors.text,
+    },
+    actorNameInteractive: {
+      color: colors.primary,
     },
     message: {
       fontSize: FontSize.label,
@@ -172,6 +199,10 @@ function createStyles(colors: ThemeColors) {
       borderRadius: 14,
       alignItems: 'center',
       justifyContent: 'center',
+      ...Platform.select({
+        web: { cursor: 'pointer' } as object,
+        default: {},
+      }),
     },
     deleteButtonPressed: {
       opacity: 0.7,
@@ -185,15 +216,17 @@ function ActorAvatar({
   avatarUrl,
   styles,
   showCrown,
+  onPress,
 }: {
   name: string;
   avatarUrl?: string | null;
   styles: ReturnType<typeof createStyles>;
   showCrown: boolean;
+  onPress?: () => void;
 }) {
   const initial = [...name.trim()][0]?.toUpperCase() ?? '?';
 
-  return (
+  const avatar = (
     <View style={styles.avatarWrap}>
       <View style={[styles.avatar, showCrown && styles.avatarFavorite]}>
         {avatarUrl ? (
@@ -211,6 +244,26 @@ function ActorAvatar({
       ) : null}
     </View>
   );
+
+  if (!onPress) {
+    return avatar;
+  }
+
+  return (
+    <Pressable
+      accessibilityRole="link"
+      accessibilityLabel={`Профиль ${name}`}
+      onPress={(event) => {
+        event.stopPropagation?.();
+        onPress();
+      }}
+      style={({ pressed, hovered }: { pressed: boolean; hovered?: boolean }) => [
+        styles.avatarPressable,
+        (pressed || hovered) && styles.avatarPressableHover,
+      ]}>
+      {avatar}
+    </Pressable>
+  );
 }
 
 export function NotificationCard({
@@ -224,6 +277,7 @@ export function NotificationCard({
   buttonLabel = 'Написать',
   onButtonPress,
   onDeletePress,
+  onActorPress,
   unread = false,
   variant = 'default',
 }: NotificationCardProps) {
@@ -239,12 +293,33 @@ export function NotificationCard({
           avatarUrl={actorAvatarUrl}
           styles={styles}
           showCrown={isFavorite}
+          onPress={onActorPress}
         />
 
         <View style={styles.content}>
           <View style={styles.titleRow}>
             <View style={styles.textBlock}>
-              <Text style={styles.actorName}>{actorName}</Text>
+              {onActorPress ? (
+                <Pressable
+                  accessibilityRole="link"
+                  accessibilityLabel={`Профиль ${actorName}`}
+                  onPress={(event) => {
+                    event.stopPropagation?.();
+                    onActorPress();
+                  }}
+                  style={({ pressed, hovered }: { pressed: boolean; hovered?: boolean }) => [
+                    styles.actorNamePressable,
+                    (pressed || hovered) && styles.actorNamePressableHover,
+                  ]}>
+                  <Text style={[styles.actorName, styles.actorNameInteractive]} numberOfLines={1}>
+                    {actorName}
+                  </Text>
+                </Pressable>
+              ) : (
+                <Text style={styles.actorName} numberOfLines={1}>
+                  {actorName}
+                </Text>
+              )}
               <Text style={styles.message}>
                 <Text style={styles.actionText}>{actionText}</Text>
                 {messageText}
@@ -255,7 +330,10 @@ export function NotificationCard({
             {onButtonPress ? (
               <Pressable
                 accessibilityRole="button"
-                onPress={onButtonPress}
+                onPress={(event) => {
+                  event.stopPropagation?.();
+                  onButtonPress();
+                }}
                 style={({ pressed }) => [
                   styles.actionButton,
                   pressed && styles.actionButtonPressed,
@@ -281,7 +359,10 @@ export function NotificationCard({
             accessibilityRole="button"
             accessibilityLabel="Удалить уведомление"
             hitSlop={8}
-            onPress={onDeletePress}
+            onPress={(event) => {
+              event.stopPropagation?.();
+              onDeletePress();
+            }}
             style={({ pressed }) => [
               styles.deleteButton,
               pressed && styles.deleteButtonPressed,

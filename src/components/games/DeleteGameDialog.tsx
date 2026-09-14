@@ -166,8 +166,8 @@ export function DeleteGameDialog({
             <View style={styles.headerText}>
               <Text style={styles.title}>Удалить игру?</Text>
               <Text style={styles.message}>
-                «<Text style={styles.gameName}>{title}</Text>» пропадёт навсегда. Игрокам уйдёт
-                сообщение в чат и уведомление.
+                «<Text style={styles.gameName}>{title}</Text>» пропадёт навсегда. Игрокам придёт
+                уведомление.
               </Text>
             </View>
           </View>
