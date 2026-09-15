@@ -2976,11 +2976,26 @@ export default function ChatThreadScreen() {
         ) : null}
         {emojiPanelOpen ? <ChatEmojiPanel onSelect={insertEmoji} /> : null}
         <View style={[styles.composer, { overflow: 'visible' }]}>
-          {!hasMessageText && pendingAttachments.length === 0 && conversationId ? (
+          {conversationId ? (
             <ChatVoiceComposer
               conversationId={conversationId}
               disabled={sending}
               replyToId={replyTo?.id}
+              showMic={!hasMessageText && pendingAttachments.length === 0}
+              trailing={
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Отправить"
+                  disabled={!canSend}
+                  onPress={() => void handleSend()}
+                  style={[styles.sendButton, canSend && styles.sendButtonReady]}>
+                  <Ionicons
+                    name="send"
+                    size={18}
+                    color={canSend ? colors.onPrimary : colors.textMuted}
+                  />
+                </Pressable>
+              }
               onSent={(message) => {
                 setReplyTo(null);
                 setMessages((prev) =>
@@ -3056,85 +3071,7 @@ export default function ChatThreadScreen() {
                 </>
               }
             />
-          ) : (
-            <>
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="Прикрепить файл"
-                onPress={() => void pickAttachment()}
-                style={styles.iconButton}>
-                <Ionicons name="attach-outline" size={20} color={colors.textMuted} />
-              </Pressable>
-              <View ref={composerFieldWrapRef} collapsable={false} style={styles.composerField}>
-                <TextInput
-                  ref={composerInputRef}
-                  style={styles.input}
-                  value={draft}
-                  onChangeText={(value) => {
-                    draftRef.current = value;
-                    setDraft(value);
-                  }}
-                  onSelectionChange={(event) => {
-                    selectionRef.current = event.nativeEvent.selection;
-                  }}
-                  onFocus={handleComposerFocus}
-                  showSoftInputOnFocus={!emojiPanelOpen}
-                  nativeID="chat-composer-input"
-                  placeholder="Сообщение"
-                  placeholderTextColor={colors.textMuted}
-                  multiline
-                  blurOnSubmit={false}
-                  submitBehavior="newline"
-                  onKeyPress={handleKeyPress}
-                  onSubmitEditing={() => {
-                    if (Platform.OS !== 'web') {
-                      void handleSend();
-                    }
-                  }}
-                />
-              </View>
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel={emojiPanelOpen ? 'Скрыть эмодзи' : 'Эмодзи'}
-                accessibilityState={{ selected: emojiPanelOpen }}
-                onPress={toggleEmojiPanel}
-                style={[styles.iconButton, emojiPanelOpen ? styles.iconButtonActive : null]}>
-                <Ionicons
-                  name={emojiPanelOpen ? 'happy' : 'happy-outline'}
-                  size={20}
-                  color={emojiPanelOpen ? colors.primary : colors.textMuted}
-                />
-              </Pressable>
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="Бросить кости"
-                accessibilityState={{ selected: dicePopoverOpen }}
-                onPress={() => {
-                  setEmojiPanelOpen(false);
-                  emojiPanelOpenRef.current = false;
-                  setDicePopoverOpen(true);
-                }}
-                style={[styles.iconButton, dicePopoverOpen ? styles.iconButtonActive : null]}>
-                <Ionicons
-                  name="dice-outline"
-                  size={20}
-                  color={dicePopoverOpen ? colors.primary : colors.textMuted}
-                />
-              </Pressable>
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="Отправить"
-                disabled={!canSend}
-                onPress={() => void handleSend()}
-                style={[styles.sendButton, canSend && styles.sendButtonReady]}>
-                <Ionicons
-                  name="send"
-                  size={18}
-                  color={canSend ? colors.onPrimary : colors.textMuted}
-                />
-              </Pressable>
-            </>
-          )}
+          ) : null}
         </View>
         </View>
         )}
