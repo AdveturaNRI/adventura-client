@@ -1,5 +1,11 @@
 import { type ReactNode, useMemo } from 'react';
-import { Platform, Pressable, type StyleProp, type ViewStyle } from 'react-native';
+import {
+  Platform,
+  Pressable,
+  type GestureResponderEvent,
+  type StyleProp,
+  type ViewStyle,
+} from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, {
   runOnJS,
@@ -8,8 +14,6 @@ import Animated, {
   withSpring,
 } from 'react-native-reanimated';
 
-import { useIsDesktopWeb } from '@/components/navigation/DesktopThemeToggle';
-
 type ChatMessagePressableProps = {
   children: ReactNode;
   style?: StyleProp<ViewStyle>;
@@ -17,7 +21,7 @@ type ChatMessagePressableProps = {
   onOpenActions: () => void;
 };
 
-const LONG_PRESS_MS = 280;
+const LONG_PRESS_MS = 350;
 const PAN_ACTIVATE_X = 16;
 const PAN_FAIL_Y = 10;
 const PAN_HORIZONTAL_RATIO = 1.2;
@@ -31,8 +35,11 @@ const SPRING = {
 };
 
 /**
- * ПК: меню по клику.
- * Телефон: long press или горизонтальное перетягивание пузыря.
+ * Как в Telegram:
+ * - long press → контекстное меню
+ * - web: правый клик → меню
+ * - свайп по горизонтали → меню
+ * - режим выбора: обычный тап переключает выделение
  */
 export function ChatMessagePressable({
   children,
@@ -40,21 +47,19 @@ export function ChatMessagePressable({
   selectionMode,
   onOpenActions,
 }: ChatMessagePressableProps) {
-  const isDesktopWeb = useIsDesktopWeb();
-  const openOnClick = selectionMode || isDesktopWeb;
   const translateX = useSharedValue(0);
   const touchStartX = useSharedValue(0);
   const touchStartY = useSharedValue(0);
   const isPanActivated = useSharedValue(false);
 
   const composed = useMemo(() => {
-    if (openOnClick) {
+    if (selectionMode) {
       return Gesture.Tap();
     }
 
     const longPress = Gesture.LongPress()
       .minDuration(LONG_PRESS_MS)
-      .maxDistance(14)
+      .maxDistance(12)
       .onStart(() => {
         runOnJS(onOpenActions)();
       });
@@ -122,16 +127,28 @@ export function ChatMessagePressable({
         }
       });
 
-    return Gesture.Exclusive(pan, longPress);
-  }, [isPanActivated, onOpenActions, openOnClick, touchStartX, touchStartY, translateX]);
+    // Long press приоритетнее: как в TG удерживание открывает меню, свайп — запасной жест.
+    return Gesture.Exclusive(longPress, pan);
+  }, [isPanActivated, onOpenActions, selectionMode, touchStartX, touchStartY, translateX]);
 
   const animatedStyle = useAnimatedStyle(() => ({
     transform: [{ translateX: translateX.value }],
   }));
 
-  if (openOnClick) {
-    // Без role=button: внутри пузыря уже есть кнопки (ответ, файл, аватар),
-    // а на web Pressable+button даёт вложенный <button>.
+  const handleContextMenu = (event: GestureResponderEvent) => {
+    if (Platform.OS !== 'web' || selectionMode) {
+      return;
+    }
+    const native = event.nativeEvent as unknown as {
+      preventDefault?: () => void;
+      stopPropagation?: () => void;
+    };
+    native.preventDefault?.();
+    native.stopPropagation?.();
+    onOpenActions();
+  };
+
+  if (selectionMode) {
     return (
       <Pressable
         onPress={onOpenActions}
@@ -146,7 +163,12 @@ export function ChatMessagePressable({
 
   return (
     <GestureDetector gesture={composed}>
-      <Animated.View style={[style, animatedStyle]}>{children}</Animated.View>
+      <Animated.View
+        style={[style, animatedStyle]}
+        // @ts-expect-error RN Web: native context menu
+        onContextMenu={handleContextMenu}>
+        {children}
+      </Animated.View>
     </GestureDetector>
   );
 }

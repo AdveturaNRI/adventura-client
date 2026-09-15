@@ -24,7 +24,7 @@ import {
   type SwitcherOption,
 } from '@/components/ui';
 import { FontSize, Spacing, type ThemeColors } from '@/constants/theme';
-import { useTheme } from '@/hooks/use-theme';
+import { useTheme, useThemePreference } from '@/hooks/use-theme';
 import { useThemedStyles } from '@/hooks/use-themed-styles';
 import { useMainScreenStyles } from '@/screens/main/main-screen.styles';
 import { sendChatMessage } from '@/services/chats/chatsApi';
@@ -76,7 +76,7 @@ function formatTime(at: number) {
   return `${hh}:${mm}`;
 }
 
-function createStyles(colors: ThemeColors) {
+function createStyles(colors: ThemeColors, isDark: boolean) {
   return StyleSheet.create({
     root: {
       flex: 1,
@@ -97,8 +97,9 @@ function createStyles(colors: ThemeColors) {
       paddingHorizontal: Spacing.md,
       borderRadius: 14,
       borderWidth: 1,
-      borderColor: 'rgba(255, 149, 0, 0.32)',
-      backgroundColor: 'rgba(255, 149, 0, 0.1)',
+      borderColor: isDark ? 'rgba(255, 179, 64, 0.55)' : 'rgba(255, 149, 0, 0.32)',
+      // Непрозрачный фон: полупрозрачный оранжевый на #000 сливается, текст пропадает.
+      backgroundColor: isDark ? '#3A2A10' : 'rgba(255, 149, 0, 0.1)',
     },
     noticeIcon: {
       marginTop: 1,
@@ -111,12 +112,12 @@ function createStyles(colors: ThemeColors) {
     noticeTitle: {
       fontSize: FontSize.caption,
       fontWeight: '700',
-      color: '#FF9500',
+      color: isDark ? '#FFB340' : '#FF9500',
       lineHeight: FontSize.caption * 1.35,
     },
     noticeText: {
       fontSize: FontSize.caption,
-      color: colors.textSecondary,
+      color: isDark ? '#FFE0B2' : colors.textSecondary,
       lineHeight: FontSize.caption * 1.45,
     },
     filters: {
@@ -224,7 +225,9 @@ function createStyles(colors: ThemeColors) {
 export default function GeneratorsScreen() {
   const pageStyles = useMainScreenStyles();
   const colors = useTheme();
-  const styles = useThemedStyles(createStyles);
+  const { colorScheme } = useThemePreference();
+  const isDark = colorScheme === 'dark';
+  const styles = useThemedStyles((themeColors) => createStyles(themeColors, isDark));
   const hasDesktopSidebar = useIsDesktopSidebarVisible();
 
   const [tab, setTab] = useState<TabKey>('npc');
@@ -379,7 +382,7 @@ export default function GeneratorsScreen() {
           <Ionicons
             name="alert-circle"
             size={18}
-            color="#FF9500"
+            color={isDark ? '#FFB340' : '#FF9500'}
             style={styles.noticeIcon}
           />
           <View style={styles.noticeTextBlock}>
