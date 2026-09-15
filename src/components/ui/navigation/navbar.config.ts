@@ -17,6 +17,7 @@ export const NAVBAR_ITEMS: NavbarItem[] = [
   { key: 'games', label: 'Игры', icon: 'games' },
   { key: 'clubs', label: 'Клубы', icon: 'clubs' },
   { key: 'dice', label: 'Дайсы', icon: 'dice' },
+  { key: 'generators', label: 'Генераторы', icon: 'generators' },
   { key: 'chats', label: 'Чаты', icon: 'chats' },
   { key: 'profile', label: 'Профиль', icon: 'profile' },
 ];
@@ -57,6 +58,12 @@ export const MOBILE_APP_MENU_ITEMS: MobileAppMenuItem[] = [
     label: 'Дайсы',
     icon: 'dice',
     subtitle: 'Бросок кубиков для партии',
+  },
+  {
+    key: 'generators',
+    label: 'Генераторы',
+    icon: 'generators',
+    subtitle: 'NPC, таверны, королевства и подземелья',
   },
   {
     key: 'chats',

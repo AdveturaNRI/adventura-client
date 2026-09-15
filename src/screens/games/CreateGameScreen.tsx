@@ -29,6 +29,7 @@ import { SystemAuthorBadge } from '@/components/questionnaire/SystemAuthorBadge'
 import { Button, DateField, Input, SelectField, Switcher, TextArea, TimeField, toast } from '@/components/ui';
 import { FontSize, Radius, Sizes, Spacing, type ThemeColors } from '@/constants/theme';
 import { useProfile } from '@/context/ProfileContext';
+import { usePushPrompt } from '@/context/PushPromptContext';
 import { useTheme } from '@/hooks/use-theme';
 import { useThemedStyles } from '@/hooks/use-themed-styles';
 import type { UserGameSystemItem } from '@/services/api/types';
@@ -639,6 +640,7 @@ export default function CreateGameScreen() {
   const hasDesktopSidebar = useIsDesktopSidebarVisible();
   const colors = useTheme();
   const { profile, avatarUrl } = useProfile();
+  const { requestAfterCreateGame } = usePushPrompt();
   const topPadding = isDesktopWeb ? Spacing.lg : insets.top + Spacing.md;
   const styles = useThemedStyles((theme) => createStyles(theme, isDesktopWeb, topPadding));
 
@@ -1131,6 +1133,7 @@ export default function CreateGameScreen() {
         if (draft.coverUri && isLocalImageUri(draft.coverUri)) {
           await uploadGameCover(created.id, draft.coverUri);
         }
+        requestAfterCreateGame();
       }
 
       toast.success(isEdit ? 'Изменения сохранены' : 'Игра сохранена');
@@ -1144,7 +1147,7 @@ export default function CreateGameScreen() {
     } finally {
       setIsSaving(false);
     }
-  }, [draft, gameId, isEdit, isLoadingGame, isSaving, router, savedCoverUri, validate]);
+  }, [draft, gameId, isEdit, isLoadingGame, isSaving, requestAfterCreateGame, router, savedCoverUri, validate]);
 
   const kindOptions = useMemo(
     () => [

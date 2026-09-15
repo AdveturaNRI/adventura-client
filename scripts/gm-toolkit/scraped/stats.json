@@ -1,0 +1,48 @@
+{
+  "foundryRu": {
+    "raceLabels": 8,
+    "personNames": 274,
+    "occupations": 11,
+    "monsters": 324,
+    "mausGiven": 100,
+    "mausSurnames": 20,
+    "mausAppearances": 54,
+    "mausMannerisms": 26,
+    "mausGoals": 20,
+    "mausLandmarks": 41,
+    "fblKin": 10
+  },
+  "community": {
+    "tavernNames": 100,
+    "tavernEvents": 100,
+    "tavernFood": 100,
+    "tavernDrinks": 100,
+    "professions": 120,
+    "npcJobs": 100,
+    "quirks": 100,
+    "physicalTraits": 100,
+    "villages": 306,
+    "towns": 100,
+    "factions": 100,
+    "dungeonEncounters": 100,
+    "dwarfClans": 100,
+    "elvenTraits": 100,
+    "dwarvenTraits": 100,
+    "dragonbornTraits": 100,
+    "tieflingTraits": 100,
+    "orcTraits": 99,
+    "aasimarTraits": 100,
+    "halflingTraits": 100
+  },
+  "lorebench": {
+    "fantasyNpcNames": 144,
+    "tavernInnNames": 50,
+    "tavernRumors": 48,
+    "npcQuirks": 50,
+    "cityTownNames": 50,
+    "factionsGuilds": 49,
+    "dungeonRooms": 48,
+    "questHooks": 50,
+    "shopNames": 50
+  }
+}

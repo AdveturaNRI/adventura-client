@@ -34,7 +34,8 @@ export type ChatMessageKind =
   | 'favorite_removed'
   | 'user_blocked'
   | 'user_unblocked'
-  | 'game_deleted';
+  | 'game_deleted'
+  | 'dice_roll';
 
 export type ChatMessageSender = {
   id: string;
@@ -53,6 +54,17 @@ export type ChatMessage = {
   image: Partial<Record<string, string>> | null;
   attachment: ChatAttachment | null;
   attachments?: ChatAttachment[];
+  replyTo?: {
+    id: string;
+    body: string | null;
+    senderNickname: string;
+    hasMedia: boolean;
+  } | null;
+  forwardedFrom?: {
+    userId: string;
+    nickname: string;
+    messageId: string | null;
+  } | null;
 };
 
 export type ConversationListItem = {
@@ -78,6 +90,8 @@ export type ConversationListItem = {
   peerFavoritedMe?: boolean;
   blockedByMe?: boolean;
   blockedMe?: boolean;
+  isPinned?: boolean;
+  pinSortOrder?: number | null;
   updatedAt: string;
 };
 
@@ -120,6 +134,25 @@ export function normalizeMessageAttachments(message: ChatMessage): ChatAttachmen
 
 export function listConversations() {
   return apiRequest<ConversationListItem[]>('/chats');
+}
+
+export function pinConversation(conversationId: string) {
+  return apiRequest<ConversationListItem>(`/chats/${conversationId}/pin`, {
+    method: 'POST',
+  });
+}
+
+export function unpinConversation(conversationId: string) {
+  return apiRequest<ConversationListItem>(`/chats/${conversationId}/pin`, {
+    method: 'DELETE',
+  });
+}
+
+export function reorderPinnedConversations(conversationIds: string[]) {
+  return apiRequest<ConversationListItem[]>('/chats/pins/order', {
+    method: 'PUT',
+    body: { conversationIds },
+  });
 }
 
 export function openConversationWith(userId: string) {
@@ -200,6 +233,7 @@ export async function sendChatMessage(
   conversationId: string,
   options: {
     body?: string;
+    replyToId?: string;
     /** @deprecated Prefer `files` for albums. */
     fileUri?: string;
     fileName?: string;
@@ -211,6 +245,9 @@ export async function sendChatMessage(
 
   if (options.body?.trim()) {
     formData.append('body', options.body.trim());
+  }
+  if (options.replyToId?.trim()) {
+    formData.append('replyToId', options.replyToId.trim());
   }
 
   const files: ChatUploadFile[] =
@@ -244,4 +281,32 @@ export async function sendChatMessage(
   }
 
   return apiMultipart<ChatMessage>(`/chats/${conversationId}/messages`, formData);
+}
+
+export async function sendChatDiceRoll(
+  conversationId: string,
+  options: {
+    dice: { sides: number; qty: number }[];
+    modifier?: number;
+    hidden?: boolean;
+  },
+) {
+  return apiRequest<ChatMessage>(`/chats/${conversationId}/dice-rolls`, {
+    method: 'POST',
+    body: {
+      dice: options.dice,
+      modifier: options.modifier ?? 0,
+      hidden: Boolean(options.hidden),
+    },
+  });
+}
+
+export async function forwardChatMessages(
+  targetConversationId: string,
+  messageIds: string[],
+) {
+  return apiRequest<ChatMessage[]>(`/chats/${targetConversationId}/forward`, {
+    method: 'POST',
+    body: { messageIds },
+  });
 }

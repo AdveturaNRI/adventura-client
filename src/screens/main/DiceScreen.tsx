@@ -12,6 +12,7 @@ import {
 } from 'react-native';
 
 import type { DieGlyphSides } from '@/components/dice/DieGlyph';
+import { DiceColorPicker } from '@/components/dice/DiceColorPicker';
 import { DieMeshPreview, DieMeshPreviewProvider } from '@/components/dice/DieMeshPreview';
 import { DiceStage, type DiceStageHandle } from '@/components/dice/DiceStage';
 import type { DiceRollOutcome } from '@/components/dice/dice-stage.types';
@@ -19,6 +20,7 @@ import { MobileScreenHeader } from '@/components/navigation/MobileScreenHeader';
 import { useIsDesktopSidebarVisible } from '@/components/navigation/DesktopThemeToggle';
 import { ScreenTransition } from '@/components/navigation/ScreenTransition';
 import { FontSize, Spacing, type ThemeColors } from '@/constants/theme';
+import { useDiceAccentColor } from '@/hooks/use-dice-accent-color';
 import { useTheme } from '@/hooks/use-theme';
 import { useThemedStyles } from '@/hooks/use-themed-styles';
 import { useMainScreenStyles } from '@/screens/main/main-screen.styles';
@@ -503,6 +505,10 @@ function createStyles(colors: ThemeColors) {
       fontSize: 11,
       color: colors.textSecondary,
     },
+    colorBar: {
+      paddingHorizontal: Spacing.sm,
+      paddingBottom: Spacing.sm,
+    },
   });
 }
 
@@ -514,6 +520,7 @@ export default function DiceScreen() {
   const isFocused = useIsFocused();
   const { width, height } = useWindowDimensions();
   const stageRef = useRef<DiceStageHandle>(null);
+  const { accent, setAccent } = useDiceAccentColor();
 
   const compact = width < 760;
   const medium = width >= 760 && width < 1100;
@@ -529,6 +536,10 @@ export default function DiceScreen() {
   const [hoveredDie, setHoveredDie] = useState<DieSides | null>(null);
   const hoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isWeb = Platform.OS === 'web';
+
+  useEffect(() => {
+    setStageReady(false);
+  }, [accent]);
 
   const clearHoverTimer = useCallback(() => {
     if (hoverTimerRef.current) {
@@ -702,6 +713,7 @@ export default function DiceScreen() {
                   sides={option.sides}
                   size={compact ? 36 : diePreviewSize}
                   active={active || totalDice === 0}
+                  themeColor={accent}
                 />
                 {showTooltip ? (
                   <View
@@ -810,6 +822,16 @@ export default function DiceScreen() {
         <MobileScreenHeader title="Дайсы" />
       )}
 
+      <View style={styles.colorBar}>
+        <DiceColorPicker
+          value={accent}
+          disabled={rolling}
+          onChange={(hex) => {
+            void setAccent(hex);
+          }}
+        />
+      </View>
+
       <View style={[styles.workspace, compact && styles.workspaceCompact]}>
         {dieRail}
 
@@ -819,7 +841,9 @@ export default function DiceScreen() {
             <View style={styles.stageFill}>
               {isFocused ? (
                 <DiceStage
+                  key={accent}
                   ref={stageRef}
+                  accent={accent}
                   onReady={() => setStageReady(true)}
                   onDone={handleDone}
                 />

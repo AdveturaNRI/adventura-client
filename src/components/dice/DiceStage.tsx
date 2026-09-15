@@ -2,6 +2,7 @@ import {
   forwardRef,
   useCallback,
   useImperativeHandle,
+  useMemo,
   useRef,
   useState,
   type ComponentType,
@@ -13,6 +14,7 @@ import { buildDiceBoxNativeHtml } from '@/components/dice/dice-box-native-html';
 import { FontSize, type ThemeColors } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { useThemedStyles } from '@/hooks/use-themed-styles';
+import { DEFAULT_DICE_ACCENT } from '@/utils/dice-color-storage';
 
 import type { DiceNotation, DiceRollOutcome, DiceStageHandle, DiceStageProps } from './dice-stage.types';
 
@@ -33,9 +35,17 @@ function createStyles(colors: ThemeColors) {
       overflow: 'hidden',
       backgroundColor: '#0B1220',
     },
+    wrapTransparent: {
+      minHeight: 0,
+      borderRadius: 0,
+      backgroundColor: 'transparent',
+    },
     web: {
       flex: 1,
       backgroundColor: '#0B1220',
+    },
+    webTransparent: {
+      backgroundColor: 'transparent',
     },
     fallback: {
       ...StyleSheet.absoluteFill,
@@ -55,10 +65,11 @@ function createStyles(colors: ThemeColors) {
  * Native: WebView wrapper around the same @3d-dice/dice-box engine (CDN assets).
  */
 export const DiceStage = forwardRef<DiceStageHandle, DiceStageProps>(function DiceStage(
-  { onReady, onDone },
+  { onReady, onDone, transparent = false, accent },
   ref,
 ) {
   const colors = useTheme();
+  const themeAccent = accent?.trim() || colors.primary || DEFAULT_DICE_ACCENT;
   const styles = useThemedStyles(createStyles);
   const bridgeRef = useRef<WebBridge | null>(null);
   const pendingRef = useRef<{
@@ -93,10 +104,15 @@ export const DiceStage = forwardRef<DiceStageHandle, DiceStageProps>(function Di
     [send],
   );
 
-  const html = buildDiceBoxNativeHtml({ accent: colors.primary });
+  const html = useMemo(
+    () => buildDiceBoxNativeHtml({ accent: themeAccent, transparent }),
+    [themeAccent, transparent],
+  );
 
   return (
-    <View style={styles.wrap}>
+    <View
+      style={[styles.wrap, transparent ? styles.wrapTransparent : null]}
+      pointerEvents="none">
       {failed ? (
         <View style={styles.fallback}>
           <Text style={styles.fallbackText}>
@@ -105,6 +121,7 @@ export const DiceStage = forwardRef<DiceStageHandle, DiceStageProps>(function Di
         </View>
       ) : (
         <WebView
+          key={themeAccent}
           ref={(node: WebBridge | null) => {
             bridgeRef.current = node;
           }}
@@ -134,7 +151,7 @@ export const DiceStage = forwardRef<DiceStageHandle, DiceStageProps>(function Di
               // ignore
             }
           }}
-          style={styles.web}
+          style={[styles.web, transparent ? styles.webTransparent : null]}
           javaScriptEnabled
           domStorageEnabled
           mixedContentMode="always"
@@ -145,6 +162,7 @@ export const DiceStage = forwardRef<DiceStageHandle, DiceStageProps>(function Di
           overScrollMode="never"
           setSupportMultipleWindows={false}
           androidLayerType="hardware"
+          pointerEvents="none"
         />
       )}
     </View>

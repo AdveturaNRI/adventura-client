@@ -1,4 +1,5 @@
-import type { GameKind, GamesFeedStatus } from '@/services/games/gamesApi';
+import type { GameKind, GameListItem, GamesFeedStatus } from '@/services/games/gamesApi';
+import { formatCityLabel } from '@/utils/city-label';
 import { formatDateRu, isSameCalendarDay } from '@/utils/date-format';
 
 export type GamesPlayMode = 'online' | 'offline';
@@ -240,4 +241,258 @@ export function clearGamesFilterChip(
     default:
       return filters;
   }
+}
+
+/** Бейджи карточки, по которым можно сразу включить фильтр каталога. */
+export type GameFeedFilterBadge =
+  | 'kind'
+  | 'playMode'
+  | 'system'
+  | 'age'
+  | 'isFree'
+  | 'beginnersWelcome';
+
+export function ageFilterFromGame(item: Pick<GameListItem, 'anyAge' | 'minAge'>): GamesAgeFilter {
+  if (item.anyAge || item.minAge == null || item.minAge <= 0) {
+    return 'any';
+  }
+  if (item.minAge >= 18) {
+    return '18';
+  }
+  if (item.minAge >= 16) {
+    return '16';
+  }
+  return '12';
+}
+
+export function patchGamesFiltersFromBadge(
+  item: Pick<
+    GameListItem,
+    | 'kind'
+    | 'isOnline'
+    | 'city'
+    | 'systemName'
+    | 'anyAge'
+    | 'minAge'
+    | 'isFree'
+    | 'beginnersWelcome'
+  >,
+  badge: GameFeedFilterBadge,
+): Partial<GamesFeedFilters> {
+  switch (badge) {
+    case 'kind':
+      return { kind: item.kind };
+    case 'playMode':
+      if (item.isOnline) {
+        return { playMode: 'online', cityId: null, cityLabel: '' };
+      }
+      return {
+        playMode: 'offline',
+        cityId: item.city?.id ?? null,
+        cityLabel: item.city
+          ? formatCityLabel({
+              name: item.city.name,
+              region: item.city.region,
+              countryCode: 'RU',
+            })
+          : '',
+      };
+    case 'system':
+      return { system: item.systemName.trim() || null };
+    case 'age':
+      return { age: ageFilterFromGame(item) };
+    case 'isFree':
+      return { isFree: item.isFree };
+    case 'beginnersWelcome':
+      return { beginnersWelcome: true };
+    default:
+      return {};
+  }
+}
+
+export function applyGamesFilterPatch(
+  filters: GamesFeedFilters,
+  patch: Partial<GamesFeedFilters>,
+): GamesFeedFilters {
+  return { ...filters, ...patch };
+}
+
+function firstParam(
+  value: string | string[] | undefined | null,
+): string | null {
+  if (value == null) {
+    return null;
+  }
+  const raw = Array.isArray(value) ? value[0] : value;
+  const trimmed = raw?.trim();
+  return trimmed ? trimmed : null;
+}
+
+function parseKindParam(value: string | null): GameKind | null {
+  if (!value) {
+    return null;
+  }
+  const normalized = value.toLowerCase().replace(/[_-]/g, '');
+  if (normalized === 'oneshot' || normalized === 'typeoneshot') {
+    return 'ONESHOT';
+  }
+  if (normalized === 'campaign' || normalized === 'typecampaign') {
+    return 'CAMPAIGN';
+  }
+  if (value === 'ONESHOT' || value === 'CAMPAIGN') {
+    return value;
+  }
+  return null;
+}
+
+function parseAgeParam(value: string | null): GamesAgeFilter | null {
+  if (!value) {
+    return null;
+  }
+  const normalized = value.trim().toLowerCase().replace(/\+/g, '');
+  if (normalized === 'any' || normalized === 'любой') {
+    return 'any';
+  }
+  if (normalized === '12' || normalized === '16' || normalized === '18') {
+    return normalized;
+  }
+  return null;
+}
+
+function parsePlayModeParam(value: string | null): GamesPlayMode | null {
+  if (!value) {
+    return null;
+  }
+  const normalized = value.trim().toLowerCase();
+  if (normalized === 'online' || normalized === 'онлайн') {
+    return 'online';
+  }
+  if (normalized === 'offline' || normalized === 'офлайн') {
+    return 'offline';
+  }
+  return null;
+}
+
+function parseBoolParam(value: string | null): boolean | null {
+  if (!value) {
+    return null;
+  }
+  const normalized = value.trim().toLowerCase();
+  if (normalized === '1' || normalized === 'true' || normalized === 'yes' || normalized === 'free') {
+    return true;
+  }
+  if (normalized === '0' || normalized === 'false' || normalized === 'no' || normalized === 'paid') {
+    return false;
+  }
+  return null;
+}
+
+export type GamesFeedSearchParams = Record<string, string | string[] | undefined>;
+
+export function hasGamesFilterSearchParams(params: GamesFeedSearchParams): boolean {
+  return Boolean(
+    firstParam(params.kind) ||
+      firstParam(params.type) ||
+      firstParam(params.playMode) ||
+      firstParam(params.format) ||
+      firstParam(params.age) ||
+      firstParam(params.system) ||
+      firstParam(params.isFree) ||
+      firstParam(params.free) ||
+      firstParam(params.beginnersWelcome) ||
+      firstParam(params.cityId) ||
+      firstParam(params.q),
+  );
+}
+
+/** Читает query каталога (`/games?kind=oneshot&age=18+`). */
+export function gamesFeedFiltersFromSearchParams(
+  params: GamesFeedSearchParams,
+  base: GamesFeedFilters = EMPTY_GAMES_FEED_FILTERS,
+): GamesFeedFilters {
+  const kind =
+    parseKindParam(firstParam(params.kind)) ??
+    parseKindParam(firstParam(params.type));
+  const playMode =
+    parsePlayModeParam(firstParam(params.playMode)) ??
+    parsePlayModeParam(firstParam(params.format));
+  const age = parseAgeParam(firstParam(params.age));
+  const system = firstParam(params.system);
+  const isFree =
+    parseBoolParam(firstParam(params.isFree)) ??
+    parseBoolParam(firstParam(params.free));
+  const beginnersWelcome = parseBoolParam(firstParam(params.beginnersWelcome));
+  const cityId = firstParam(params.cityId);
+  const cityLabel = firstParam(params.cityLabel) ?? '';
+  const q = firstParam(params.q) ?? base.q;
+
+  let next: GamesFeedFilters = {
+    ...base,
+    ...(kind ? { kind } : {}),
+    ...(playMode ? { playMode } : {}),
+    ...(age ? { age } : {}),
+    ...(system ? { system } : {}),
+    ...(isFree !== null ? { isFree } : {}),
+    ...(beginnersWelcome === true ? { beginnersWelcome: true } : {}),
+    ...(q ? { q } : {}),
+  };
+
+  if (playMode === 'offline' && cityId) {
+    next = { ...next, cityId, cityLabel };
+  }
+
+  return next;
+}
+
+/** Сериализует активные фильтры в query для шаринга и перехода с деталки. */
+export function gamesFeedSearchParamsFromFilters(
+  filters: GamesFeedFilters,
+): Record<string, string> {
+  const params: Record<string, string> = {};
+
+  if (filters.kind === 'ONESHOT') {
+    params.kind = 'oneshot';
+  } else if (filters.kind === 'CAMPAIGN') {
+    params.kind = 'campaign';
+  }
+  if (filters.playMode) {
+    params.playMode = filters.playMode;
+  }
+  if (filters.cityId) {
+    params.cityId = filters.cityId;
+  }
+  if (filters.cityLabel.trim()) {
+    params.cityLabel = filters.cityLabel.trim();
+  }
+  if (filters.system) {
+    params.system = filters.system;
+  }
+  if (filters.isFree === true) {
+    params.isFree = 'true';
+  } else if (filters.isFree === false) {
+    params.isFree = 'false';
+  }
+  if (filters.beginnersWelcome) {
+    params.beginnersWelcome = 'true';
+  }
+  if (filters.age === 'any') {
+    params.age = 'any';
+  } else if (filters.age) {
+    params.age = `${filters.age}+`;
+  }
+  if (filters.q.trim()) {
+    params.q = filters.q.trim();
+  }
+
+  return params;
+}
+
+export function gamesCatalogHrefFromFilterPatch(
+  patch: Partial<GamesFeedFilters>,
+): { pathname: '/games'; params: Record<string, string> } {
+  const filters = applyGamesFilterPatch(EMPTY_GAMES_FEED_FILTERS, patch);
+  return {
+    pathname: '/games',
+    params: gamesFeedSearchParamsFromFilters(filters),
+  };
 }

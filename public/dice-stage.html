@@ -17,6 +17,11 @@
     }
     #dice-box { position: relative; }
     #dice-box canvas { width: 100% !important; height: 100% !important; display: block; }
+    html.transparent, html.transparent body, html.transparent #dice-box {
+      background: transparent !important;
+      pointer-events: none !important;
+    }
+    html.transparent #dice-box canvas { pointer-events: none !important; }
     #hint {
       position: absolute;
       left: 16px;
@@ -32,6 +37,11 @@
       display: none;
     }
   </style>
+  <script>
+    if (new URLSearchParams(location.search).get('transparent') === '1') {
+      document.documentElement.classList.add('transparent');
+    }
+  </script>
 </head>
 <body>
   <div id="dice-box">
@@ -106,6 +116,15 @@
 
     const params = new URLSearchParams(location.search);
     const accent = params.get('accent') || '#157AFE';
+    const transparent = params.get('transparent') === '1';
+
+    if (transparent) {
+      document.documentElement.style.background = 'transparent';
+      document.body.style.background = 'transparent';
+      const box = document.getElementById('dice-box');
+      if (box) box.style.background = 'transparent';
+      document.body.style.pointerEvents = 'none';
+    }
 
     const ROLL_CFG = {
       throwForce: 5,

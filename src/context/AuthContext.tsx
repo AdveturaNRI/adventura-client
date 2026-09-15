@@ -28,6 +28,7 @@ import {
 } from '@/utils/auth-storage';
 import { localizeErrorMessage } from '@/utils/localizeError';
 import { ensureUploadLimits } from '@/utils/upload-limits';
+import { markOfferPushAfterRegister } from '@/services/push/pushAttention';
 
 type AuthContextValue = {
   user: AuthUser | null;
@@ -143,6 +144,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setToken(response.accessToken);
         setUser(response.user);
         setRedirectToQuestionnaire(true);
+        void markOfferPushAfterRegister();
         toast.success('Аккаунт создан');
         return true;
       } catch (error) {

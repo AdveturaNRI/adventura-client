@@ -12,6 +12,7 @@ import { GlobalLoadingOverlay } from '@/components/ui/feedback/GlobalLoadingOver
 import { ThemeProvider } from '@/context/ThemeContext';
 import { AuthProvider } from '@/context/AuthContext';
 import { ProfileProvider } from '@/context/ProfileContext';
+import { PushPromptProvider } from '@/context/PushPromptContext';
 import { RealtimeProvider } from '@/context/RealtimeContext';
 import { useTheme, useThemePreference } from '@/hooks/use-theme';
 
@@ -44,11 +45,13 @@ export default function RootLayout() {
           <AuthProvider>
             <RealtimeProvider>
               <ProfileProvider>
-                <View style={rootStyles.container}>
-                  <RootNavigator />
-                  <AppToast />
-                  <GlobalLoadingOverlay />
-                </View>
+                <PushPromptProvider>
+                  <View style={rootStyles.container}>
+                    <RootNavigator />
+                    <AppToast />
+                    <GlobalLoadingOverlay />
+                  </View>
+                </PushPromptProvider>
               </ProfileProvider>
             </RealtimeProvider>
           </AuthProvider>

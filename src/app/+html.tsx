@@ -71,6 +71,9 @@ export default function Root({ children }: PropsWithChildren) {
           name="viewport"
           content="width=device-width, initial-scale=1, shrink-to-fit=no, viewport-fit=cover"
         />
+        <meta name="theme-color" content="#208AEF" />
+        <link rel="manifest" href="/manifest.json" />
+        <link rel="apple-touch-icon" href="/icons/icon-192.png" />
         <ScrollViewStyleReset />
         <style dangerouslySetInnerHTML={{ __html: responsiveRootCss }} />
       </head>

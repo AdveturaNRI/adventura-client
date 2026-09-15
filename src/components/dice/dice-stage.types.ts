@@ -25,4 +25,8 @@ export type DiceStageHandle = {
 export type DiceStageProps = {
   onReady?: () => void;
   onDone?: (outcome: DiceRollOutcome) => void;
+  /** Transparent canvas for chat overlay (no table bg). */
+  transparent?: boolean;
+  /** Hex color for dice body (`themeColor` in dice-box). */
+  accent?: string;
 };

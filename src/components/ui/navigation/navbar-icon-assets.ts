@@ -1,4 +1,11 @@
-export type NavbarIconKey = 'wanderers' | 'games' | 'clubs' | 'dice' | 'chats' | 'profile';
+export type NavbarIconKey =
+  | 'wanderers'
+  | 'games'
+  | 'clubs'
+  | 'dice'
+  | 'generators'
+  | 'chats'
+  | 'profile';
 
 export const NAVBAR_ICON_SVGS: Record<NavbarIconKey, string> = {
   wanderers:
@@ -9,6 +16,8 @@ export const NAVBAR_ICON_SVGS: Record<NavbarIconKey, string> = {
     '<svg width="22" height="22" viewBox="0 0 22 22" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M11 2.75C7.96243 2.75 5.5 5.21243 5.5 8.25C5.5 12.375 11 19.25 11 19.25C11 19.25 16.5 12.375 16.5 8.25C16.5 5.21243 14.0376 2.75 11 2.75Z" stroke="#828282" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><circle cx="11" cy="8.25" r="2.25" stroke="#828282" stroke-width="2"/></svg>',
   dice:
     '<svg width="22" height="22" viewBox="0 0 22 22" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M7.5 2.5L14.5 2.5L19.5 7.5V14.5L14.5 19.5H7.5L2.5 14.5V7.5L7.5 2.5Z" stroke="#828282" stroke-width="2" stroke-linejoin="round"/><circle cx="8" cy="8" r="1.2" fill="#828282"/><circle cx="14" cy="8" r="1.2" fill="#828282"/><circle cx="11" cy="11" r="1.2" fill="#828282"/><circle cx="8" cy="14" r="1.2" fill="#828282"/><circle cx="14" cy="14" r="1.2" fill="#828282"/></svg>',
+  generators:
+    '<svg width="22" height="22" viewBox="0 0 22 22" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M11 2.5V5.5" stroke="#828282" stroke-width="2" stroke-linecap="round"/><path d="M11 16.5V19.5" stroke="#828282" stroke-width="2" stroke-linecap="round"/><path d="M2.5 11H5.5" stroke="#828282" stroke-width="2" stroke-linecap="round"/><path d="M16.5 11H19.5" stroke="#828282" stroke-width="2" stroke-linecap="round"/><path d="M5.2 5.2L7.3 7.3" stroke="#828282" stroke-width="2" stroke-linecap="round"/><path d="M14.7 14.7L16.8 16.8" stroke="#828282" stroke-width="2" stroke-linecap="round"/><path d="M16.8 5.2L14.7 7.3" stroke="#828282" stroke-width="2" stroke-linecap="round"/><path d="M7.3 14.7L5.2 16.8" stroke="#828282" stroke-width="2" stroke-linecap="round"/><circle cx="11" cy="11" r="3.25" stroke="#828282" stroke-width="2"/></svg>',
   chats:
     '<svg width="22" height="22" viewBox="0 0 22 22" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M19.858 7.2703C19.376 6.11987 18.6748 5.0742 17.7934 4.19159C16.9146 3.30744 15.8708 2.60449 14.7211 2.12265C13.5434 1.62664 12.2779 1.37239 11 1.37499H10.957C9.65723 1.38143 8.4004 1.63925 7.21661 2.14628C6.0768 2.63306 5.04276 3.33726 4.17227 4.21952C3.29943 5.10015 2.60622 6.14216 2.13126 7.28749C1.63822 8.4785 1.3884 9.7561 1.39649 11.0451C1.40294 12.5361 1.75958 14.0164 2.42559 15.3398V18.6055C2.42559 19.1512 2.86817 19.5937 3.41173 19.5937H6.67305C8.00267 20.2647 9.46991 20.6177 10.9592 20.625H11.0043C12.2891 20.625 13.533 20.3758 14.7061 19.8881C15.8499 19.412 16.8899 18.7172 17.7676 17.8428C18.6527 16.9641 19.3488 15.9371 19.8365 14.792C20.3414 13.606 20.5992 12.3449 20.6057 11.043C20.61 9.73456 20.3565 8.46483 19.858 7.2703ZM6.71173 12.0312C6.14454 12.0312 5.68262 11.5693 5.68262 11C5.68262 10.4307 6.14454 9.96874 6.71173 9.96874C7.27891 9.96874 7.74083 10.4307 7.74083 11C7.74083 11.5693 7.28106 12.0312 6.71173 12.0312ZM11 12.0312C10.4328 12.0312 9.97091 11.5693 9.97091 11C9.97091 10.4307 10.4328 9.96874 11 9.96874C11.5672 9.96874 12.0291 10.4307 12.0291 11C12.0291 11.5693 11.5672 12.0312 11 12.0312ZM15.2883 12.0312C14.7211 12.0312 14.2592 11.5693 14.2592 11C14.2592 10.4307 14.7211 9.96874 15.2883 9.96874C15.8555 9.96874 16.3174 10.4307 16.3174 11C16.3174 11.5693 15.8555 12.0312 15.2883 12.0312Z" fill="#828282"/></svg>',
   profile:

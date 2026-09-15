@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { useFocusEffect, useRouter } from 'expo-router';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import {
   ActivityIndicator,
   Modal,
@@ -33,9 +33,14 @@ import {
 } from '@/services/games/gamesApi';
 import {
   EMPTY_GAMES_FEED_FILTERS,
+  applyGamesFilterPatch,
   buildActiveGamesFilterChips,
   clearGamesFilterChip,
   countActiveGamesFilters,
+  gamesFeedFiltersFromSearchParams,
+  gamesFeedSearchParamsFromFilters,
+  gamesFiltersSignature,
+  hasGamesFilterSearchParams,
   type GamesFeedFilters,
 } from '@/utils/games-filters';
 import { localizeErrorMessage } from '@/utils/localizeError';
@@ -314,6 +319,7 @@ function createLocalStyles(colors: ThemeColors, isDesktopWeb: boolean) {
 
 export default function GamesScreen() {
   const router = useRouter();
+  const searchParams = useLocalSearchParams();
   const mainStyles = useMainScreenStyles();
   const colors = useTheme();
   const isDesktopWeb = useIsDesktopWeb();
@@ -332,7 +338,28 @@ export default function GamesScreen() {
   const [busyGameId, setBusyGameId] = useState<string | null>(null);
   const [applyTarget, setApplyTarget] = useState<GameListItem | null>(null);
   const [applyMessage, setApplyMessage] = useState('');
+  const lastAppliedParamsSignature = useRef<string>('');
 
+  const searchParamsSignature = useMemo(
+    () =>
+      [
+        searchParams.kind,
+        searchParams.type,
+        searchParams.playMode,
+        searchParams.format,
+        searchParams.age,
+        searchParams.system,
+        searchParams.isFree,
+        searchParams.free,
+        searchParams.beginnersWelcome,
+        searchParams.cityId,
+        searchParams.cityLabel,
+        searchParams.q,
+      ]
+        .flat()
+        .join('|'),
+    [searchParams],
+  );
   const activeFilterCount = useMemo(
     () => countActiveGamesFilters({ ...filters, q: '' }),
     [filters],
@@ -401,6 +428,33 @@ export default function GamesScreen() {
   );
 
   useEffect(() => {
+    if (!hasGamesFilterSearchParams(searchParams)) {
+      return;
+    }
+    if (searchParamsSignature === lastAppliedParamsSignature.current) {
+      return;
+    }
+
+    setFilters((current) => {
+      const next = gamesFeedFiltersFromSearchParams(searchParams, {
+        ...EMPTY_GAMES_FEED_FILTERS,
+        status: current.status,
+        schedulePreset: current.schedulePreset,
+        scheduledFrom: current.scheduledFrom,
+        scheduledTo: current.scheduledTo,
+      });
+      if (gamesFiltersSignature(next) === gamesFiltersSignature(current)) {
+        lastAppliedParamsSignature.current = searchParamsSignature;
+        return current;
+      }
+      lastAppliedParamsSignature.current = searchParamsSignature;
+      setDraftFilters(next);
+      setSearchDraft(next.q);
+      return next;
+    });
+  }, [searchParams, searchParamsSignature]);
+
+  useEffect(() => {
     const handle = setTimeout(() => {
       const trimmed = searchDraft.trim();
       setFilters((current) =>
@@ -441,6 +495,34 @@ export default function GamesScreen() {
       return next;
     });
   }, []);
+
+  const syncFiltersToSearchParams = useCallback(
+    (next: GamesFeedFilters) => {
+      if (Platform.OS !== 'web') {
+        return;
+      }
+      const params = gamesFeedSearchParamsFromFilters(next);
+      const signature = Object.entries(params)
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([key, value]) => `${key}=${value}`)
+        .join('&');
+      lastAppliedParamsSignature.current = signature;
+      router.setParams(params);
+    },
+    [router],
+  );
+
+  const applyFilterBadge = useCallback(
+    (patch: Partial<GamesFeedFilters>) => {
+      setFilters((current) => {
+        const next = applyGamesFilterPatch(current, patch);
+        syncFiltersToSearchParams(next);
+        return next;
+      });
+      setDraftFilters((current) => applyGamesFilterPatch(current, patch));
+    },
+    [syncFiltersToSearchParams],
+  );
 
   const isOpenFeed = filters.status === 'RECRUITING';
   const pageSubtitle = isOpenFeed
@@ -703,6 +785,7 @@ export default function GamesScreen() {
                     item={item}
                     busy={busyGameId === item.id}
                     onPress={() => openDetail(item.id)}
+                    onFilterBadgePress={applyFilterBadge}
                     onOpenMaster={openMaster}
                     onApply={openApply}
                     onCancel={(id) => void handleCancel(id)}

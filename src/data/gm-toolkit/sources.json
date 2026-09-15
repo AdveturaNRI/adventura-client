@@ -1,0 +1,74 @@
+{
+  "pynames": {
+    "source": "https://github.com/Tiendil/pynames",
+    "cultures": {
+      "slavic_pagan": {
+        "m": 146,
+        "f": 88
+      },
+      "scandinavian": {
+        "m": 1202,
+        "f": 352
+      },
+      "mongolian": {
+        "m": 152,
+        "f": 167
+      },
+      "korean": {
+        "m": 220,
+        "f": 98
+      },
+      "orc": {
+        "m": 216,
+        "f": 242
+      },
+      "elf_dnd": {
+        "m": 350,
+        "f": 350
+      },
+      "elf_warhammer": {
+        "m": 250,
+        "f": 250
+      },
+      "goblin": {
+        "m": 300,
+        "f": 300
+      }
+    }
+  },
+  "foundryRu": {
+    "source": "phenomen/foundry-vtt-ru",
+    "raceLabels": 8,
+    "personNamesIgnored": 274,
+    "occupations": 11,
+    "monsters": 324,
+    "mausritter": {
+      "givenNames": 100,
+      "surnames": 20,
+      "appearances": 54,
+      "mannerisms": 26,
+      "goals": 20,
+      "landmarks": 41
+    }
+  },
+  "community": "foundry-vtt-community/tables",
+  "lorebench": "lorebench-tools/lorebench-tables",
+  "places": {
+    "sources": [
+      "https://github.com/subalterngames/Not_Constantinople (CK2, без слав./RU-культур)",
+      "https://github.com/Snake4life/fantasy-names (fantasy_towns + castles)",
+      "lorebench / community-tables (leading names)"
+    ],
+    "kingdoms": 2500,
+    "settlements": 9052,
+    "stats": {
+      "ck2Provinces": 1141,
+      "ck2Settlements": 7280,
+      "fantasyTowns": 1200,
+      "castles": 512,
+      "fromTables": 127,
+      "kingdomsOut": 2500,
+      "settlementsOut": 9052
+    }
+  }
+}

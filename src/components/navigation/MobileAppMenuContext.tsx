@@ -3,6 +3,7 @@ import { useRouter, useSegments } from 'expo-router';
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import {
   Modal,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -284,6 +285,32 @@ export function MobileAppMenuProvider({ children }: { children: ReactNode }) {
     },
     [activeKey, close, router],
   );
+
+  useEffect(() => {
+    if (Platform.OS !== 'web' || typeof window === 'undefined') {
+      return;
+    }
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      const key = event.key.toLowerCase();
+      if (key !== 'g' || !(event.metaKey || event.ctrlKey)) {
+        return;
+      }
+
+      const target = event.target as HTMLElement | null;
+      const tag = target?.tagName?.toLowerCase();
+      if (tag === 'input' || tag === 'textarea' || target?.isContentEditable) {
+        return;
+      }
+
+      event.preventDefault();
+      close();
+      navigateMainTab(router, 'generators');
+    };
+
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [close, router]);
 
   const value = useMemo(
     () => ({

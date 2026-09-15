@@ -32,9 +32,16 @@ import { useIsDesktopSidebarVisible, useIsDesktopWeb } from '@/components/naviga
 import { ScreenTransition } from '@/components/navigation/ScreenTransition';
 import { BlockUserDialog } from '@/components/chats/BlockUserDialog';
 import { ChatAlbumGrid } from '@/components/chats/ChatAlbumGrid';
+import { ChatDiceBubble } from '@/components/chats/ChatDiceBubble';
+import { ChatDiceOverlay, type ChatDiceOverlayRequest } from '@/components/chats/ChatDiceOverlay';
+import { ChatDicePopover } from '@/components/chats/ChatDicePopover';
 import { ChatEmojiPanel } from '@/components/chats/ChatEmojiPanel';
+import { ChatForwardPicker } from '@/components/chats/ChatForwardPicker';
 import { ChatImageLightbox } from '@/components/chats/ChatImageLightbox';
+import { ChatMessageActionsSheet } from '@/components/chats/ChatMessageActionsSheet';
 import { ChatMessageBody } from '@/components/chats/ChatMessageBody';
+import { ChatMessagePressable } from '@/components/chats/ChatMessagePressable';
+import { ChatReplyQuote, type ChatReplyPreviewData } from '@/components/chats/ChatReplyQuote';
 import { CrownOffIcon } from '@/components/chats/CrownOffIcon';
 import { DeleteChatDialog } from '@/components/chats/DeleteChatDialog';
 import { GroupMembersSheet } from '@/components/chats/GroupMembersSheet';
@@ -43,6 +50,7 @@ import { FontSize, Radius, Spacing } from '@/constants/theme';
 import type { ThemeColors } from '@/constants/theme';
 import { MAX_UPLOAD_SIZE_MB, MAX_UPLOAD_SIZE_MESSAGE } from '@/constants/upload.config';
 import { useAuth } from '@/context/AuthContext';
+import { usePushPrompt } from '@/context/PushPromptContext';
 import { useRealtime } from '@/context/RealtimeContext';
 import { useTheme } from '@/hooks/use-theme';
 import { useThemedStyles } from '@/hooks/use-themed-styles';
@@ -53,6 +61,8 @@ import {
   leaveGroup,
   markConversationRead,
   sendChatMessage,
+  sendChatDiceRoll,
+  forwardChatMessages,
   blockPeer,
   unblockPeer,
   deleteConversation,
@@ -68,6 +78,14 @@ import type {
 } from '@/services/chats/chatsApi';
 import { ApiError } from '@/services/api/api-error';
 import { upsertWandererReaction, clearWandererReaction } from '@/services/profile/wanderersApi';
+import {
+  diceRollPreviewText,
+  parseDiceRollPayload,
+} from '@/utils/chat-dice-roll';
+import {
+  getDiceAnimationsEnabledSync,
+  loadDiceAnimationsEnabled,
+} from '@/utils/dice-animations-storage';
 import { localizeErrorMessage } from '@/utils/localizeError';
 import {
   getCachedFileTooLargeMessage,
@@ -324,7 +342,8 @@ function isSystemChatMessage(message: ChatMessage) {
     kind === 'favorite_received' ||
     kind === 'favorite_removed' ||
     kind === 'user_blocked' ||
-    kind === 'user_unblocked'
+    kind === 'user_unblocked' ||
+    kind === 'game_deleted'
   );
 }
 
@@ -817,6 +836,75 @@ function createStyles(colors: ThemeColors, bottomPad: number) {
       borderBottomRightRadius: 4,
       backgroundColor: colors.primary,
     },
+    bubbleHighlighted: {
+      shadowColor: colors.primary,
+      shadowOpacity: 0.55,
+      shadowRadius: 10,
+      shadowOffset: { width: 0, height: 0 },
+      elevation: 6,
+      borderWidth: 1.5,
+      borderColor: colors.primaryLight,
+    },
+    forwardLabel: {
+      fontSize: 11,
+      fontWeight: '600',
+      color: colors.primary,
+      marginBottom: 4,
+    },
+    forwardLabelMine: {
+      color: 'rgba(255,255,255,0.88)',
+    },
+    replyInBubble: {
+      marginBottom: 6,
+      minWidth: 120,
+    },
+    selectMark: {
+      width: 24,
+      alignItems: 'center',
+      justifyContent: 'center',
+      marginRight: 4,
+    },
+    selectionBar: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: Spacing.sm,
+      paddingHorizontal: Spacing.md,
+      paddingVertical: Spacing.sm,
+      borderTopWidth: StyleSheet.hairlineWidth,
+      borderTopColor: colors.borderLight,
+      backgroundColor: colors.surface,
+    },
+    selectionCancel: {
+      fontSize: FontSize.caption,
+      color: colors.textMuted,
+      fontWeight: '600',
+    },
+    selectionCount: {
+      flex: 1,
+      fontSize: FontSize.caption,
+      color: colors.text,
+      fontWeight: '600',
+    },
+    selectionForward: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+      backgroundColor: colors.primary,
+      borderRadius: Radius.pill,
+      paddingHorizontal: 12,
+      paddingVertical: 8,
+    },
+    selectionForwardDisabled: {
+      opacity: 0.45,
+    },
+    selectionForwardLabel: {
+      color: colors.onPrimary,
+      fontSize: FontSize.caption,
+      fontWeight: '700',
+    },
+    replyBar: {
+      marginBottom: Spacing.sm,
+    },
     bubbleContent: {
       flexDirection: 'row',
       flexWrap: 'wrap',
@@ -926,7 +1014,7 @@ function createStyles(colors: ThemeColors, bottomPad: number) {
       maxHeight: 120,
       paddingHorizontal: Spacing.sm,
       paddingVertical: Platform.OS === 'web' ? 10 : 8,
-      fontSize: FontSize.label,
+      fontSize: FontSize.input,
       color: colors.text,
       backgroundColor: 'transparent',
       borderWidth: 0,
@@ -1068,6 +1156,7 @@ export default function ChatThreadScreen() {
   const isDesktopWeb = useIsDesktopWeb();
   const hasDesktopSidebar = useIsDesktopSidebarVisible();
   const { user } = useAuth();
+  const { requestAfterFirstMessage } = usePushPrompt();
   const { lastConversationUpdate, lastConversationRead, lastConversationDeleted, lastPresence, subscribeMessages, publishConversationUpdate } =
     useRealtime();
   const bottomPad = hasDesktopSidebar ? Spacing.md : Math.max(insets.bottom, Spacing.sm);
@@ -1095,7 +1184,21 @@ export default function ChatThreadScreen() {
   const [membersOpen, setMembersOpen] = useState(false);
   const [members, setMembers] = useState<ChatMember[]>([]);
   const [membersLoading, setMembersLoading] = useState(false);
-  const listRef = useRef<FlatList<ChatMessage>>(null);
+  const [replyTo, setReplyTo] = useState<ChatReplyPreviewData | null>(null);
+  const [actionMessage, setActionMessage] = useState<ChatMessage | null>(null);
+  const [selectionMode, setSelectionMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [forwardOpen, setForwardOpen] = useState(false);
+  const [forwardBusy, setForwardBusy] = useState(false);
+  const [highlightedMessageId, setHighlightedMessageId] = useState<string | null>(null);
+  const [dicePopoverOpen, setDicePopoverOpen] = useState(false);
+  const [diceRollBusy, setDiceRollBusy] = useState(false);
+  const [diceOverlayRequest, setDiceOverlayRequest] = useState<ChatDiceOverlayRequest | null>(
+    null,
+  );
+  const listRef = useRef<FlatList<ChatTimelineItem>>(null);
+  const timelineRef = useRef<ChatTimelineItem[]>([]);
+  const highlightTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const stickToBottomRef = useRef(true);
   const loadingOlderRef = useRef(false);
   const pinningScrollRef = useRef(false);
@@ -1109,12 +1212,21 @@ export default function ChatThreadScreen() {
   const composerFieldWrapRef = useRef<View>(null);
   const composerInputRef = useRef<TextInput>(null);
   const selectionRef = useRef({ start: 0, end: 0 });
+  const heldDiceMessagesRef = useRef(new Map<string, ChatMessage>());
+  const diceAnimQueueRef = useRef<ChatDiceOverlayRequest[]>([]);
+  const diceAnimationsEnabledRef = useRef(getDiceAnimationsEnabledSync());
   const myId = user?.id;
 
   draftRef.current = draft;
   pendingAttachmentsRef.current = pendingAttachments;
   sendingRef.current = sending;
   blockedMeRef.current = Boolean(conversation?.blockedMe);
+
+  useEffect(() => {
+    void loadDiceAnimationsEnabled().then((enabled) => {
+      diceAnimationsEnabledRef.current = enabled;
+    });
+  }, []);
 
   const pinToBottom = useCallback(() => {
     const layoutHeight = layoutHeightRef.current;
@@ -1135,6 +1247,81 @@ export default function ChatThreadScreen() {
     stickToBottomRef.current = true;
     pinToBottom();
   }, [pinToBottom]);
+
+  const appendMessage = useCallback((message: ChatMessage) => {
+    setMessages((prev) => {
+      if (prev.some((item) => item.id === message.id)) {
+        return prev;
+      }
+      return [...prev, message];
+    });
+  }, []);
+
+  const startNextDiceAnimation = useCallback(() => {
+    const next = diceAnimQueueRef.current.shift() ?? null;
+    setDiceOverlayRequest(next);
+  }, []);
+
+  const revealHeldDiceMessage = useCallback(
+    (messageId: string) => {
+      const held = heldDiceMessagesRef.current.get(messageId);
+      if (held) {
+        heldDiceMessagesRef.current.delete(messageId);
+        appendMessage(held);
+        scrollToBottom();
+      }
+      startNextDiceAnimation();
+    },
+    [appendMessage, scrollToBottom, startNextDiceAnimation],
+  );
+
+  const ingestIncomingMessage = useCallback(
+    (message: ChatMessage) => {
+      if (message.kind !== 'dice_roll') {
+        appendMessage(message);
+        return;
+      }
+
+      const payload = parseDiceRollPayload(message.body);
+      const canAnimate =
+        diceAnimationsEnabledRef.current &&
+        payload &&
+        !payload.redacted &&
+        payload.sum != null &&
+        (Platform.OS !== 'web' ||
+          (typeof document !== 'undefined' && document.visibilityState === 'visible'));
+
+      if (!canAnimate || !payload) {
+        appendMessage(message);
+        return;
+      }
+
+      if (heldDiceMessagesRef.current.has(message.id)) {
+        return;
+      }
+
+      heldDiceMessagesRef.current.set(message.id, message);
+      const request: ChatDiceOverlayRequest = {
+        messageId: message.id,
+        payload,
+        senderNickname: message.sender?.nickname ?? 'Игрок',
+      };
+
+      setDiceOverlayRequest((current) => {
+        if (current) {
+          if (
+            current.messageId !== request.messageId &&
+            !diceAnimQueueRef.current.some((item) => item.messageId === request.messageId)
+          ) {
+            diceAnimQueueRef.current.push(request);
+          }
+          return current;
+        }
+        return request;
+      });
+    },
+    [appendMessage],
+  );
 
   const clearPendingAttachments = useCallback(() => {
     for (const item of pendingAttachmentsRef.current) {
@@ -1361,12 +1548,7 @@ export default function ChatThreadScreen() {
       if (!conversationId || message.conversationId !== conversationId) {
         return;
       }
-      setMessages((prev) => {
-        if (prev.some((item) => item.id === message.id)) {
-          return prev;
-        }
-        return [...prev, message];
-      });
+      ingestIncomingMessage(message);
       if (message.kind === 'favorite_received') {
         if (message.senderId !== myId) {
           setSuppressFavoriteBack(false);
@@ -1396,11 +1578,13 @@ export default function ChatThreadScreen() {
         });
       }
       if (message.senderId === myId || stickToBottomRef.current) {
-        scrollToBottom();
+        if (message.kind !== 'dice_roll' || !heldDiceMessagesRef.current.has(message.id)) {
+          scrollToBottom();
+        }
       }
       void markConversationRead(conversationId);
     });
-  }, [conversationId, myId, scrollToBottom, subscribeMessages]);
+  }, [conversationId, ingestIncomingMessage, myId, scrollToBottom, subscribeMessages]);
 
   useEffect(() => {
     if (!lastConversationUpdate || lastConversationUpdate.id !== conversationId) {
@@ -1445,6 +1629,14 @@ export default function ChatThreadScreen() {
       };
     });
   }, [lastPresence]);
+
+  useEffect(() => {
+    return () => {
+      if (highlightTimerRef.current) {
+        clearTimeout(highlightTimerRef.current);
+      }
+    };
+  }, []);
 
   const isGroup = isGroupConversation(conversation);
   const title = isGroup
@@ -1641,11 +1833,13 @@ export default function ChatThreadScreen() {
       return;
     }
 
+    const replyToId = replyTo?.id;
     setSending(true);
     sendingRef.current = true;
     try {
       const message = await sendChatMessage(conversationId, {
         body,
+        replyToId,
         files: attachments.map((item) => ({
           uri: item.uri,
           name: item.name,
@@ -1656,6 +1850,7 @@ export default function ChatThreadScreen() {
       draftRef.current = '';
       selectionRef.current = { start: 0, end: 0 };
       setEmojiPanelOpen(false);
+      setReplyTo(null);
       clearPendingAttachments();
       setMessages((prev) => {
         if (prev.some((item) => item.id === message.id)) {
@@ -1664,13 +1859,152 @@ export default function ChatThreadScreen() {
         return [...prev, message];
       });
       scrollToBottom();
+      requestAfterFirstMessage();
     } catch (error) {
       toast.error(localizeErrorMessage(error, 'Не удалось отправить'));
     } finally {
       setSending(false);
       sendingRef.current = false;
     }
-  }, [clearPendingAttachments, conversationId, scrollToBottom]);
+  }, [clearPendingAttachments, conversationId, replyTo?.id, requestAfterFirstMessage, scrollToBottom]);
+
+  const handleDiceRoll = useCallback(
+    async (input: {
+      dice: { sides: number; qty: number }[];
+      modifier: number;
+      hidden: boolean;
+    }) => {
+      if (!conversationId || diceRollBusy || conversation?.blockedMe) {
+        return;
+      }
+      setDiceRollBusy(true);
+      try {
+        const message = await sendChatDiceRoll(conversationId, input);
+        setDicePopoverOpen(false);
+        setEmojiPanelOpen(false);
+        emojiPanelOpenRef.current = false;
+        ingestIncomingMessage(message);
+        if (!heldDiceMessagesRef.current.has(message.id)) {
+          scrollToBottom();
+        }
+      } catch (error) {
+        toast.error(localizeErrorMessage(error, 'Не удалось бросить кости'));
+      } finally {
+        setDiceRollBusy(false);
+      }
+    },
+    [conversation?.blockedMe, conversationId, diceRollBusy, ingestIncomingMessage, scrollToBottom],
+  );
+
+  const toReplyPreview = useCallback((message: ChatMessage): ChatReplyPreviewData => {
+    const attachments = normalizeMessageAttachments(message);
+    const dicePayload =
+      message.kind === 'dice_roll' ? parseDiceRollPayload(message.body) : null;
+    return {
+      id: message.id,
+      senderNickname: message.sender?.nickname ?? 'Игрок',
+      body: dicePayload ? diceRollPreviewText(dicePayload) : message.body,
+      hasMedia: attachments.length > 0,
+    };
+  }, []);
+
+  const clearSelection = useCallback(() => {
+    setSelectionMode(false);
+    setSelectedIds([]);
+  }, []);
+
+  const openMessageActions = useCallback((message: ChatMessage) => {
+    if (isSystemChatMessage(message)) {
+      return;
+    }
+    if (selectionMode) {
+      setSelectedIds((prev) =>
+        prev.includes(message.id)
+          ? prev.filter((id) => id !== message.id)
+          : [...prev, message.id],
+      );
+      return;
+    }
+    setActionMessage(message);
+  }, [selectionMode]);
+
+  const handleStartReply = useCallback(
+    (message: ChatMessage) => {
+      setActionMessage(null);
+      clearSelection();
+      setReplyTo(toReplyPreview(message));
+      requestAnimationFrame(() => composerInputRef.current?.focus());
+    },
+    [clearSelection, toReplyPreview],
+  );
+
+  const handleStartForward = useCallback((messageIds: string[]) => {
+    if (messageIds.length === 0) {
+      return;
+    }
+    setActionMessage(null);
+    setSelectedIds(messageIds);
+    setForwardOpen(true);
+  }, []);
+
+  const handleEnterSelection = useCallback((message: ChatMessage) => {
+    setActionMessage(null);
+    setSelectionMode(true);
+    setSelectedIds([message.id]);
+  }, []);
+
+  const scrollToMessage = useCallback((messageId: string) => {
+    const index = timelineRef.current.findIndex(
+      (item) => item.type === 'message' && item.id === messageId,
+    );
+    if (index < 0) {
+      toast.error('Исходное сообщение недоступно');
+      return;
+    }
+    stickToBottomRef.current = false;
+    listRef.current?.scrollToIndex({
+      index,
+      animated: true,
+      viewPosition: 0.35,
+    });
+    if (highlightTimerRef.current) {
+      clearTimeout(highlightTimerRef.current);
+    }
+    setHighlightedMessageId(messageId);
+    highlightTimerRef.current = setTimeout(() => {
+      setHighlightedMessageId(null);
+      highlightTimerRef.current = null;
+    }, 1600);
+  }, []);
+
+  const handleForwardToChat = useCallback(
+    async (targetConversationId: string) => {
+      if (selectedIds.length === 0 || forwardBusy) {
+        return;
+      }
+      setForwardBusy(true);
+      try {
+        const created = await forwardChatMessages(targetConversationId, selectedIds);
+        setForwardOpen(false);
+        clearSelection();
+        if (targetConversationId === conversationId) {
+          setMessages((prev) => {
+            const known = new Set(prev.map((item) => item.id));
+            return [...prev, ...created.filter((item) => !known.has(item.id))];
+          });
+          scrollToBottom();
+        }
+        toast.success(
+          created.length === 1 ? 'Сообщение переслано' : `Переслано: ${created.length}`,
+        );
+      } catch (error) {
+        toast.error(localizeErrorMessage(error, 'Не удалось переслать'));
+      } finally {
+        setForwardBusy(false);
+      }
+    },
+    [clearSelection, conversationId, forwardBusy, scrollToBottom, selectedIds],
+  );
 
   const handleAddBack = useCallback(async () => {
     const peerId = conversation?.peer?.id;
@@ -1903,6 +2237,7 @@ export default function ChatThreadScreen() {
     () => buildChatTimeline(messages, { isGroup, myId: myId ?? undefined }),
     [isGroup, messages, myId],
   );
+  timelineRef.current = renderedMessages;
   const peerId = conversation?.peer?.id;
   const myIdForBanner = myId;
   const peerRemovedMe = useMemo(() => {
@@ -2147,6 +2482,12 @@ export default function ChatThreadScreen() {
             contentContainerStyle={styles.listContent}
             data={renderedMessages}
             keyExtractor={(item) => item.id}
+            onScrollToIndexFailed={({ index }) => {
+              listRef.current?.scrollToOffset({
+                offset: Math.max(0, index * 72),
+                animated: true,
+              });
+            }}
             onLayout={(event) => {
               layoutHeightRef.current = event.nativeEvent.layout.height;
               if (!loadingOlderRef.current && stickToBottomRef.current) {
@@ -2297,7 +2638,21 @@ export default function ChatThreadScreen() {
               }
 
               return (
-                <View style={[styles.bubbleRow, mine && styles.bubbleRowMine]}>
+                <ChatMessagePressable
+                  selectionMode={selectionMode}
+                  onOpenActions={() => openMessageActions(item)}
+                  style={[styles.bubbleRow, mine && styles.bubbleRowMine]}>
+                  {selectionMode ? (
+                    <View style={styles.selectMark}>
+                      <Ionicons
+                        name={selectedIds.includes(item.id) ? 'checkbox' : 'square-outline'}
+                        size={20}
+                        color={
+                          selectedIds.includes(item.id) ? colors.primary : colors.textMuted
+                        }
+                      />
+                    </View>
+                  ) : null}
                   {isGroup && !mine ? (
                     <View style={styles.authorAvatarCol}>
                       {timelineItem.showAuthorMeta ? (
@@ -2331,7 +2686,34 @@ export default function ChatThreadScreen() {
                         {item.sender?.nickname ?? 'Игрок'}
                       </Text>
                     ) : null}
-                    <View style={[styles.bubble, mine && styles.bubbleMine]}>
+                    <View
+                      style={[
+                        styles.bubble,
+                        mine && styles.bubbleMine,
+                        highlightedMessageId === item.id && styles.bubbleHighlighted,
+                      ]}>
+                      {item.forwardedFrom ? (
+                        <Text
+                          style={[styles.forwardLabel, mine && styles.forwardLabelMine]}
+                          numberOfLines={1}>
+                          Переслано от: {item.forwardedFrom.nickname}
+                        </Text>
+                      ) : null}
+                      {item.replyTo ? (
+                        <View style={styles.replyInBubble}>
+                          <ChatReplyQuote
+                            preview={{
+                              id: item.replyTo.id,
+                              senderNickname: item.replyTo.senderNickname,
+                              body: item.replyTo.body,
+                              hasMedia: item.replyTo.hasMedia,
+                            }}
+                            mine={mine}
+                            compact
+                            onPress={() => scrollToMessage(item.replyTo!.id)}
+                          />
+                        </View>
+                      ) : null}
                       {imageAttachments.length > 0 ? (
                         <ChatAlbumGrid
                           images={imageAttachments}
@@ -2379,7 +2761,23 @@ export default function ChatThreadScreen() {
                         </Pressable>
                       ))}
                       <View style={styles.bubbleContent}>
-                        {bodyText ? (
+                        {item.kind === 'dice_roll' ? (
+                          (() => {
+                            const dicePayload = parseDiceRollPayload(item.body);
+                            return dicePayload ? (
+                              <ChatDiceBubble
+                                payload={dicePayload}
+                                mine={mine}
+                              />
+                            ) : bodyText ? (
+                              <ChatMessageBody
+                                text={bodyText}
+                                textStyle={[styles.bubbleText, mine && styles.bubbleTextMine]}
+                                linkStyle={mine ? styles.bubbleLinkMine : styles.bubbleLink}
+                              />
+                            ) : null;
+                          })()
+                        ) : bodyText ? (
                           <ChatMessageBody
                             text={bodyText}
                             textStyle={[styles.bubbleText, mine && styles.bubbleTextMine]}
@@ -2418,7 +2816,7 @@ export default function ChatThreadScreen() {
                     </View>
                     <BubbleTail color={bubbleColor} side={mine ? 'right' : 'left'} />
                   </View>
-                </View>
+                </ChatMessagePressable>
               );
             }}
           />
@@ -2470,6 +2868,26 @@ export default function ChatThreadScreen() {
           </View>
         ) : null}
 
+        {selectionMode ? (
+          <View style={styles.selectionBar}>
+            <Pressable accessibilityRole="button" onPress={clearSelection} hitSlop={8}>
+              <Text style={styles.selectionCancel}>Отмена</Text>
+            </Pressable>
+            <Text style={styles.selectionCount}>Выбрано: {selectedIds.length}</Text>
+            <Pressable
+              accessibilityRole="button"
+              disabled={selectedIds.length === 0}
+              onPress={() => handleStartForward(selectedIds)}
+              style={[
+                styles.selectionForward,
+                selectedIds.length === 0 && styles.selectionForwardDisabled,
+              ]}>
+              <Ionicons name="arrow-redo-outline" size={16} color={colors.onPrimary} />
+              <Text style={styles.selectionForwardLabel}>Переслать</Text>
+            </Pressable>
+          </View>
+        ) : null}
+
         {conversation?.blockedMe ? (
           <View style={styles.blockedBanner}>
             <Text style={styles.blockedBannerText}>
@@ -2478,6 +2896,11 @@ export default function ChatThreadScreen() {
           </View>
         ) : (
         <View style={styles.composerShell}>
+        {replyTo ? (
+          <View style={styles.replyBar}>
+            <ChatReplyQuote preview={replyTo} onClear={() => setReplyTo(null)} />
+          </View>
+        ) : null}
         {emojiPanelOpen ? <ChatEmojiPanel onSelect={insertEmoji} /> : null}
         <View style={styles.composer}>
           <Pressable
@@ -2525,6 +2948,22 @@ export default function ChatThreadScreen() {
               name={emojiPanelOpen ? 'happy' : 'happy-outline'}
               size={20}
               color={emojiPanelOpen ? colors.primary : colors.textMuted}
+            />
+          </Pressable>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Бросить кости"
+            accessibilityState={{ selected: dicePopoverOpen }}
+            onPress={() => {
+              setEmojiPanelOpen(false);
+              emojiPanelOpenRef.current = false;
+              setDicePopoverOpen(true);
+            }}
+            style={[styles.iconButton, dicePopoverOpen ? styles.iconButtonActive : null]}>
+            <Ionicons
+              name="dice-outline"
+              size={20}
+              color={dicePopoverOpen ? colors.primary : colors.textMuted}
             />
           </Pressable>
           <Pressable
@@ -2695,6 +3134,57 @@ export default function ChatThreadScreen() {
               setPendingBlock(false);
             }
           }}
+        />
+
+        <ChatMessageActionsSheet
+          visible={Boolean(actionMessage)}
+          onClose={() => setActionMessage(null)}
+          onReply={() => {
+            if (actionMessage) {
+              handleStartReply(actionMessage);
+            }
+          }}
+          onForward={() => {
+            if (actionMessage) {
+              handleStartForward([actionMessage.id]);
+            }
+          }}
+          onSelectMore={() => {
+            if (actionMessage) {
+              handleEnterSelection(actionMessage);
+            }
+          }}
+        />
+
+        <ChatForwardPicker
+          visible={forwardOpen}
+          excludeConversationId={null}
+          busy={forwardBusy}
+          onClose={() => {
+            if (!forwardBusy) {
+              setForwardOpen(false);
+              if (!selectionMode) {
+                setSelectedIds([]);
+              }
+            }
+          }}
+          onPick={(targetId) => void handleForwardToChat(targetId)}
+        />
+
+        <ChatDicePopover
+          visible={dicePopoverOpen}
+          busy={diceRollBusy}
+          onClose={() => {
+            if (!diceRollBusy) {
+              setDicePopoverOpen(false);
+            }
+          }}
+          onRoll={(input) => void handleDiceRoll(input)}
+        />
+
+        <ChatDiceOverlay
+          request={diceOverlayRequest}
+          onFinished={revealHeldDiceMessage}
         />
       </ScreenTransition>
   );
