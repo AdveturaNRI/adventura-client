@@ -36,8 +36,17 @@ function createStyles(colors: ThemeColors) {
       zIndex: 40,
       pointerEvents: 'none',
     },
-    rootHidden: {
+    rootCollapsed: {
+      // WKWebView/Android WebView игнорируют pointerEvents родителя и едят скролл чата,
+      // пока лежат absoluteFill даже с opacity: 0.
       opacity: 0,
+      width: 1,
+      height: 1,
+      top: 0,
+      left: 0,
+      right: undefined,
+      bottom: undefined,
+      overflow: 'hidden',
     },
     stage: {
       ...StyleSheet.absoluteFill,
@@ -195,13 +204,17 @@ export function ChatDiceOverlay({ request, onFinished, warm = false }: ChatDiceO
     isFocused &&
     Boolean(request && !request.payload.redacted && request.payload.sum != null);
 
+  // Держим движок тёплым при открытом меню / активном броске, иначе схлопываем,
+  // чтобы WebView не перехватывал скролл ленты.
+  const expanded = visible || warm;
+
   if (!engineMounted && !visible && !warm) {
     return null;
   }
 
   return (
     <View
-      style={[styles.root, !visible ? styles.rootHidden : null]}
+      style={[styles.root, !expanded ? styles.rootCollapsed : null]}
       pointerEvents="none"
       collapsable={false}>
       <View style={styles.stage} pointerEvents="none">

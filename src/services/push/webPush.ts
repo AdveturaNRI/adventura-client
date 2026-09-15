@@ -4,6 +4,9 @@ import { apiRequest } from '@/services/api/client';
 
 const SW_PATH = '/service-worker.js';
 
+/** Временно скрыто: пункт в настройках и все запросы разрешения. */
+export const WEB_PUSH_OPT_IN_ENABLED = false;
+
 type VapidPublicKeyResponse = {
   publicKey: string | null;
   enabled: boolean;
@@ -95,6 +98,9 @@ export async function fetchPushStatusForThisDevice(): Promise<boolean> {
 }
 
 export async function enableWebPush(): Promise<{ ok: boolean; reason?: string }> {
+  if (!WEB_PUSH_OPT_IN_ENABLED) {
+    return { ok: false, reason: 'unsupported' };
+  }
   if (!canUseWebPush()) {
     return { ok: false, reason: 'unsupported' };
   }
