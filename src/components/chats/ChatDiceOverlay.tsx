@@ -108,21 +108,39 @@ export function ChatDiceOverlay({ request, onFinished }: ChatDiceOverlayProps) {
   const onFinishedRef = useRef(onFinished);
   onFinishedRef.current = onFinished;
   const { accent: localAccent } = useDiceAccentColor();
-  // Цвет отправителя из payload; если API ещё не отдал — локальный выбор из меню.
-  const rollAccent = coerceDiceAccent(request?.payload.color ?? localAccent);
+
+  // Держим последний accent между бросками — иначе remount iframe + roll() в него до ready
+  // съедают все анимации после первой.
+  const requestAccent = request
+    ? coerceDiceAccent(request.payload.color ?? localAccent)
+    : null;
+  const accentRef = useRef(localAccent);
+  if (requestAccent) {
+    accentRef.current = requestAccent;
+  }
+  const rollAccent = accentRef.current;
 
   const [stageReady, setStageReady] = useState(false);
   const [showResult, setShowResult] = useState(false);
   const [animationsEnabled, setAnimationsEnabled] = useState(getDiceAnimationsEnabledSync);
   const [engineMounted, setEngineMounted] = useState(false);
 
+  const prevAccentRef = useRef(rollAccent);
+  // Сбрасываем ready синхронно при смене цвета, до эффектов — иначе roll() уходит в старый/новый iframe.
+  if (prevAccentRef.current !== rollAccent) {
+    prevAccentRef.current = rollAccent;
+    if (stageReady) {
+      setStageReady(false);
+    }
+  }
+
+  const handleStageReady = useRef(() => {
+    setStageReady(true);
+  }).current;
+
   useEffect(() => {
     void loadDiceAnimationsEnabled().then(setAnimationsEnabled);
   }, [request?.messageId]);
-
-  useEffect(() => {
-    setStageReady(false);
-  }, [rollAccent]);
 
   useEffect(() => {
     if (!request) {
@@ -164,7 +182,10 @@ export function ChatDiceOverlay({ request, onFinished }: ChatDiceOverlayProps) {
         setShowResult(true);
         await new Promise((resolve) => setTimeout(resolve, 900));
       } catch {
-        // reveal bubble anyway
+        // Не ready / сбой движка — если эффект ещё жив, просто покажем бабл.
+        if (cancelled) {
+          return;
+        }
       } finally {
         if (!cancelled) {
           stageRef.current?.clear();
@@ -200,7 +221,7 @@ export function ChatDiceOverlay({ request, onFinished }: ChatDiceOverlayProps) {
           ref={stageRef}
           accent={rollAccent}
           transparent
-          onReady={() => setStageReady(true)}
+          onReady={handleStageReady}
         />
       </View>
       {showResult && request?.payload.sum != null ? (

@@ -33,6 +33,8 @@ export const DiceStage = forwardRef<DiceStageHandle, DiceStageProps>(function Di
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
   const onDoneRef = useRef(onDone);
   onDoneRef.current = onDone;
+  const onReadyRef = useRef(onReady);
+  onReadyRef.current = onReady;
   const pendingRef = useRef<{
     resolve: (outcome: DiceRollOutcome) => void;
     reject: (error: Error) => void;
@@ -86,7 +88,7 @@ export const DiceStage = forwardRef<DiceStageHandle, DiceStageProps>(function Di
         }
         if (data.type === 'ready') {
           setReady(true);
-          onReady?.();
+          onReadyRef.current?.();
         }
         if (data.type === 'done' && data.outcome) {
           pendingRef.current?.resolve(data.outcome);
@@ -104,7 +106,7 @@ export const DiceStage = forwardRef<DiceStageHandle, DiceStageProps>(function Di
     };
     window.addEventListener('message', onWindowMessage);
     return () => window.removeEventListener('message', onWindowMessage);
-  }, [onReady]);
+  }, []);
 
   const src = `/dice-stage.html?accent=${encodeURIComponent(themeAccent)}${
     transparent ? '&transparent=1' : ''
