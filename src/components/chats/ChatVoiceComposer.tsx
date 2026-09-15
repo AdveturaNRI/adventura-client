@@ -47,6 +47,9 @@ type Props = {
   conversationId: string;
   disabled?: boolean;
   replyToId?: string;
+  /** Keep the composer input mounted; only the trailing mic/send control swaps. */
+  showMic?: boolean;
+  trailing?: ReactNode;
   idleChildren: ReactNode;
   onSent: (message: ChatMessage) => void;
 };
@@ -81,7 +84,7 @@ function resampleWaveform(values: number[], count: number) {
   });
 }
 
-export function ChatVoiceComposer({ conversationId, disabled, replyToId, idleChildren, onSent }: Props) {
+export function ChatVoiceComposer({ conversationId, disabled, replyToId, showMic = true, trailing, idleChildren, onSent }: Props) {
   const colors = useTheme();
   const recorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
   const [phase, setPhase] = useState<Phase>('idle');
@@ -393,12 +396,12 @@ export function ChatVoiceComposer({ conversationId, disabled, replyToId, idleChi
   }, [cancelBySwipe, lockRecording]);
 
   const beginHold = useCallback(() => {
-    if (disabled || sending || phaseRef.current !== 'idle') return;
+    if (!showMic || disabled || sending || phaseRef.current !== 'idle') return;
     pressingRef.current = true;
     phaseRef.current = 'holding';
     setPhase('holding');
     void startRecording();
-  }, [disabled, sending, startRecording]);
+  }, [disabled, sending, showMic, startRecording]);
 
   const endHold = useCallback(() => {
     pressingRef.current = false;
@@ -475,7 +478,9 @@ export function ChatVoiceComposer({ conversationId, disabled, replyToId, idleChi
         />
       ) : null}
 
-      {(showIdle || phase === 'holding') ? (
+      {showIdle && !showMic ? trailing : null}
+
+      {(showIdle && showMic) || phase === 'holding' ? (
         <GestureDetector gesture={micGesture}>
           <View
             accessibilityRole="button"

@@ -907,18 +907,17 @@ export function GameFeedCard({
         : null)}>
       <View style={[styles.card, hovered && !isDetail && styles.cardHovered]}>
         {coverBlock}
-        {onPress ? (
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={`Открыть игру ${item.title}`}
-            onPress={onPress}>
-            <View style={styles.body} pointerEvents="box-none">
-              {bodyContent}
-            </View>
-          </Pressable>
-        ) : (
-          <View style={styles.body}>{bodyContent}</View>
-        )}
+        <View style={styles.body}>
+          {onPress ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={`Открыть игру ${item.title}`}
+              onPress={onPress}
+              style={StyleSheet.absoluteFillObject}
+            />
+          ) : null}
+          <View pointerEvents="box-none">{bodyContent}</View>
+        </View>
 
         <View style={styles.actionsWrap}>{actions}</View>
       </View>
