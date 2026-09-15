@@ -2,7 +2,6 @@ import {
   createContext,
   useContext,
   useEffect,
-  useId,
   useRef,
   useState,
   type ReactNode,
@@ -195,10 +194,15 @@ function applyDieAccent(
   const theme = hexToBabylonColor3(BABYLON, hex);
   const luma = 0.2126 * theme.r + 0.7152 * theme.g + 0.0722 * theme.b;
   const diffuseName = luma > 0.55 ? 'diffuse-dark.png' : 'diffuse-light.png';
+  mat.setColor3('themeColor', theme);
+  // Не пересоздаём текстуру на каждый кадр/смену цвета в той же luma-зоне — иначе превью мигает.
+  if ((mat as { __adventuraDiffuse?: string }).__adventuraDiffuse === diffuseName) {
+    return;
+  }
+  (mat as { __adventuraDiffuse?: string }).__adventuraDiffuse = diffuseName;
   const diffuseTex = new BABYLON.Texture(`${themeRoot}${diffuseName}`, scene);
   diffuseTex.hasAlpha = true;
   mat.setTexture('diffuseSampler', diffuseTex);
-  mat.setColor3('themeColor', theme);
 }
 
 export function DieMeshPreview({
@@ -211,7 +215,6 @@ export function DieMeshPreview({
   const accent = themeColor?.trim() || colors.primary;
   const shared = useContext(SharedCtx);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const reactId = useId();
   const materialRef = useRef<{ BABYLON: any; themeRoot: string; scene: any; mat: any } | null>(
     null,
   );
@@ -435,7 +438,6 @@ export function DieMeshPreview({
         <DieTextFallback sides={sides} size={size} active themeColor={accent} />
       ) : null}
       <canvas
-        key={`${reactId}-${sides}`}
         ref={canvasRef}
         width={Math.max(128, Math.round(size * 2))}
         height={Math.max(128, Math.round(size * 2))}

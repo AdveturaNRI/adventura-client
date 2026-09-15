@@ -23,6 +23,9 @@ export type { DiceRollOutcome, DiceStageHandle };
  * Web: @3d-dice/dice-box via local public/dice-stage.html
  * Not under /dice-box (postinstall wipes that folder) and not /dice-roller.html
  * (browsers may still have a cached 301 to /dice-roller from serve cleanUrls).
+ *
+ * Accent is sent per roll via postMessage — never remount the iframe on color change
+ * (that leaks WebGL contexts and crashes the tab after many rolls).
  */
 export const DiceStage = forwardRef<DiceStageHandle, DiceStageProps>(function DiceStage(
   { onReady, onDone, transparent = false, accent },
@@ -31,6 +34,8 @@ export const DiceStage = forwardRef<DiceStageHandle, DiceStageProps>(function Di
   const colors = useTheme();
   const themeAccent = accent?.trim() || colors.primary || DEFAULT_DICE_ACCENT;
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
+  const accentRef = useRef(themeAccent);
+  accentRef.current = themeAccent;
   const onDoneRef = useRef(onDone);
   onDoneRef.current = onDone;
   const onReadyRef = useRef(onReady);
@@ -56,13 +61,21 @@ export const DiceStage = forwardRef<DiceStageHandle, DiceStageProps>(function Di
             return;
           }
           pendingRef.current = { resolve, reject };
-          postToIframe({ type: 'roll', notation });
+          postToIframe({
+            type: 'roll',
+            notation,
+            themeColor: accentRef.current,
+          });
         }),
       preview: (notation) => {
         if (!ready) {
           return;
         }
-        postToIframe({ type: 'preview', notation: notation ?? [] });
+        postToIframe({
+          type: 'preview',
+          notation: notation ?? [],
+          themeColor: accentRef.current,
+        });
       },
       clear: () => {
         pendingRef.current = null;
@@ -108,14 +121,20 @@ export const DiceStage = forwardRef<DiceStageHandle, DiceStageProps>(function Di
     return () => window.removeEventListener('message', onWindowMessage);
   }, []);
 
-  const src = `/dice-stage.html?accent=${encodeURIComponent(themeAccent)}${
-    transparent ? '&transparent=1' : ''
-  }`;
+  // Stable src: accent goes via postMessage, not URL — remounting the iframe OOMs the tab.
+  const src = `/dice-stage.html?transparent=${transparent ? '1' : '0'}`;
 
   useEffect(() => {
     setReady(false);
     setError(null);
   }, [src]);
+
+  useEffect(() => {
+    if (!ready) {
+      return;
+    }
+    postToIframe({ type: 'setAccent', themeColor: themeAccent });
+  }, [ready, themeAccent]);
 
   const shellBg = transparent ? 'transparent' : '#0B1220';
 
@@ -135,7 +154,6 @@ export const DiceStage = forwardRef<DiceStageHandle, DiceStageProps>(function Di
       },
     },
     createElement('iframe', {
-      key: src,
       ref: iframeRef,
       title: 'Dice roller',
       src,

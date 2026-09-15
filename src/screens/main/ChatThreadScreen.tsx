@@ -3341,6 +3341,7 @@ export default function ChatThreadScreen() {
 
         <ChatDiceOverlay
           request={diceOverlayRequest}
+          warm={dicePopoverOpen || diceRollBusy}
           onFinished={revealHeldDiceMessage}
         />
       </ScreenTransition>
