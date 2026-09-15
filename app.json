@@ -41,7 +41,8 @@
         {
           "photosPermission": "Приложению нужен доступ к фото, чтобы загрузить аватар анкеты."
         }
-      ]
+      ],
+      "expo-audio"
     ],
     "experiments": {
       "typedRoutes": true,

@@ -23,6 +23,7 @@ import { toast } from '@/components/ui';
 import { FontSize, Spacing, type ThemeColors } from '@/constants/theme';
 import { useAuth } from '@/context/AuthContext';
 import { useRealtime } from '@/context/RealtimeContext';
+import { useVoicePlayback } from '@/context/VoicePlaybackContext';
 import { useTheme } from '@/hooks/use-theme';
 import { useThemedStyles } from '@/hooks/use-themed-styles';
 import { useMainScreenStyles } from '@/screens/main/main-screen.styles';
@@ -395,6 +396,7 @@ type ChatsScreenProps = {
 export default function ChatsScreen({ variant = 'page' }: ChatsScreenProps) {
   const pageStyles = useMainScreenStyles();
   const colors = useTheme();
+  const { visible: voicePlayerVisible } = useVoicePlayback();
   const hasDesktopSidebar = useIsDesktopSidebarVisible();
   const isRail = variant === 'rail';
   const localStyles = useThemedStyles((themeColors) => createStyles(themeColors, isRail));
@@ -706,7 +708,11 @@ export default function ChatsScreen({ variant = 'page' }: ChatsScreenProps) {
       : null;
 
   const content = (
-      <View style={isRail ? localStyles.container : pageStyles.container}>
+      <View
+        style={[
+          isRail ? localStyles.container : pageStyles.container,
+          !isRail && voicePlayerVisible ? { paddingTop: Spacing.md } : null,
+        ]}>
         {showCompactNav ? (
           <View style={localStyles.headerRow}>
             <View style={{ flex: 1, minWidth: 0 }}>

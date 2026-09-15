@@ -26,6 +26,8 @@ export type ChatAttachment = {
   mimeType: string;
   url: string | null;
   image: Partial<Record<string, string>> | null;
+  durationSec?: number | null;
+  waveform?: number[] | null;
 };
 
 export type ChatMessageKind =
@@ -205,12 +207,20 @@ export async function sendChatMessage(
     fileName?: string;
     mimeType?: string;
     files?: ChatUploadFile[];
+    voiceDurationSec?: number;
+    voiceWaveform?: number[];
   },
 ) {
   const formData = new FormData();
 
   if (options.body?.trim()) {
     formData.append('body', options.body.trim());
+  }
+  if (options.voiceDurationSec) {
+    formData.append('voiceDurationSec', String(Math.round(options.voiceDurationSec)));
+  }
+  if (options.voiceWaveform?.length) {
+    formData.append('voiceWaveform', JSON.stringify(options.voiceWaveform));
   }
 
   const files: ChatUploadFile[] =

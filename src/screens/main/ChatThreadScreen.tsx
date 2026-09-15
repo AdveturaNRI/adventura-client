@@ -35,6 +35,8 @@ import { ChatAlbumGrid } from '@/components/chats/ChatAlbumGrid';
 import { ChatEmojiPanel } from '@/components/chats/ChatEmojiPanel';
 import { ChatImageLightbox } from '@/components/chats/ChatImageLightbox';
 import { ChatMessageBody } from '@/components/chats/ChatMessageBody';
+import { ChatAudioPlayer } from '@/components/chats/ChatAudioPlayer';
+import { ChatVoiceComposer } from '@/components/chats/ChatVoiceComposer';
 import { CrownOffIcon } from '@/components/chats/CrownOffIcon';
 import { DeleteChatDialog } from '@/components/chats/DeleteChatDialog';
 import { GroupMembersSheet } from '@/components/chats/GroupMembersSheet';
@@ -44,6 +46,7 @@ import type { ThemeColors } from '@/constants/theme';
 import { MAX_UPLOAD_SIZE_MB, MAX_UPLOAD_SIZE_MESSAGE } from '@/constants/upload.config';
 import { useAuth } from '@/context/AuthContext';
 import { useRealtime } from '@/context/RealtimeContext';
+import { useVoicePlayback, type ChatVoiceQueueItem } from '@/context/VoicePlaybackContext';
 import { useTheme } from '@/hooks/use-theme';
 import { useThemedStyles } from '@/hooks/use-themed-styles';
 import {
@@ -884,6 +887,8 @@ function createStyles(colors: ThemeColors, bottomPad: number) {
       color: 'rgba(255,255,255,0.72)',
     },
     composerShell: {
+      position: 'relative',
+      overflow: 'visible',
       borderTopWidth: StyleSheet.hairlineWidth,
       borderTopColor: colors.borderLight,
       backgroundColor: colors.background,
@@ -896,6 +901,7 @@ function createStyles(colors: ThemeColors, bottomPad: number) {
       alignItems: 'center',
       gap: 6,
       minHeight: 52,
+      overflow: 'visible',
       paddingHorizontal: 6,
       paddingVertical: 6,
       borderRadius: 26,
@@ -1079,6 +1085,14 @@ export default function ChatThreadScreen() {
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
+  const {
+    activeKey: activeVoiceKey,
+    playingKey: playingVoiceKey,
+    play: playVoice,
+    toggle: toggleVoice,
+    syncQueue: syncVoiceQueue,
+    visible: voicePlayerVisible,
+  } = useVoicePlayback();
   const [draft, setDraft] = useState('');
   const [pendingAttachments, setPendingAttachments] = useState<PendingAttachment[]>([]);
   const [lightbox, setLightbox] = useState<{ uris: string[]; index: number } | null>(null);
@@ -1457,8 +1471,9 @@ export default function ChatThreadScreen() {
       ? formatLastSeen(conversation.peer.online, conversation.peer.lastSeenAt)
       : '';
 
+  const hasMessageText = Boolean(draft.trim());
   const canSend =
-    Boolean(draft.trim() || pendingAttachments.length > 0) &&
+    Boolean(hasMessageText || pendingAttachments.length > 0) &&
     !sending &&
     !conversation?.blockedMe;
 
@@ -1896,13 +1911,34 @@ export default function ChatThreadScreen() {
     }
   }, [conversationId, nextCursor]);
 
-  const headerPadTop = isDesktopWeb ? Spacing.md : insets.top + Spacing.sm;
+  const headerPadTop = isDesktopWeb
+    ? Spacing.md
+    : voicePlayerVisible
+      ? Spacing.sm
+      : insets.top + Spacing.sm;
   const peerReadMs =
     !isGroup && peerLastReadAt ? new Date(peerLastReadAt).getTime() : 0;
   const renderedMessages = useMemo(
     () => buildChatTimeline(messages, { isGroup, myId: myId ?? undefined }),
     [isGroup, messages, myId],
   );
+  // Keep exactly the visual order of messages in the chat. Starting any voice
+  // therefore continues with the following voice below it and stops at the
+  // final one, instead of jumping between timestamps.
+  const voiceQueue = useMemo<ChatVoiceQueueItem[]>(() =>
+    messages.flatMap((message) =>
+        normalizeMessageAttachments(message)
+          .filter((attachment) => attachment.kind === 'audio')
+          .map((attachment, index) => ({
+            key: `${message.id}-audio-${index}`,
+            attachment: { ...attachment, url: fullUrlForAttachment(attachment) },
+          })),
+      ),
+    [messages],
+  );
+  useEffect(() => {
+    syncVoiceQueue(voiceQueue);
+  }, [syncVoiceQueue, voiceQueue]);
   const peerId = conversation?.peer?.id;
   const myIdForBanner = myId;
   const peerRemovedMe = useMemo(() => {
@@ -2217,7 +2253,10 @@ export default function ChatThreadScreen() {
               const bodyText = noticeText ?? item.body;
               const attachments = normalizeMessageAttachments(item);
               const imageAttachments = attachments.filter((entry) => entry.kind === 'image');
-              const fileAttachments = attachments.filter((entry) => entry.kind !== 'image');
+              const audioAttachments = attachments.filter((entry) => entry.kind === 'audio');
+              const fileAttachments = attachments.filter(
+                (entry) => entry.kind !== 'image' && entry.kind !== 'audio',
+              );
               const lightboxUris = imageAttachments
                 .map((entry) => fullUrlForAttachment(entry))
                 .filter((value): value is string => Boolean(value));
@@ -2343,6 +2382,31 @@ export default function ChatThreadScreen() {
                           }
                         />
                       ) : null}
+                      {audioAttachments.map((audioAttachment, audioIndex) => {
+                        const voiceKey = `${item.id}-audio-${audioIndex}`;
+                        return (
+                          <ChatAudioPlayer
+                            key={voiceKey}
+                            playbackKey={voiceKey}
+                            attachment={{
+                              ...audioAttachment,
+                              url: fullUrlForAttachment(audioAttachment),
+                            }}
+                            mine={mine}
+                            active={activeVoiceKey === voiceKey}
+                            playing={playingVoiceKey === voiceKey}
+                            onPress={() => {
+                              if (activeVoiceKey === voiceKey) {
+                                toggleVoice(voiceKey);
+                              } else {
+                                playVoice(voiceKey, voiceQueue);
+                              }
+                            }}
+                            accentColor={mine ? '#FFFFFF' : colors.primary}
+                            textColor={mine ? colors.onPrimary : colors.textSecondary}
+                          />
+                        );
+                      })}
                       {fileAttachments.map((fileAttachment, fileIndex) => (
                         <Pressable
                           key={`${item.id}-file-${fileIndex}`}
@@ -2479,66 +2543,132 @@ export default function ChatThreadScreen() {
         ) : (
         <View style={styles.composerShell}>
         {emojiPanelOpen ? <ChatEmojiPanel onSelect={insertEmoji} /> : null}
-        <View style={styles.composer}>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Прикрепить файл"
-            onPress={() => void pickAttachment()}
-            style={styles.iconButton}>
-            <Ionicons name="attach-outline" size={20} color={colors.textMuted} />
-          </Pressable>
-          <View ref={composerFieldWrapRef} collapsable={false} style={styles.composerField}>
-          <TextInput
-            ref={composerInputRef}
-            style={styles.input}
-            value={draft}
-            onChangeText={(value) => {
-              draftRef.current = value;
-              setDraft(value);
-            }}
-            onSelectionChange={(event) => {
-              selectionRef.current = event.nativeEvent.selection;
-            }}
-            onFocus={handleComposerFocus}
-            showSoftInputOnFocus={!emojiPanelOpen}
-            nativeID="chat-composer-input"
-            placeholder="Сообщение"
-            placeholderTextColor={colors.textMuted}
-            multiline
-            blurOnSubmit={false}
-            submitBehavior="newline"
-            onKeyPress={handleKeyPress}
-            onSubmitEditing={() => {
-              if (Platform.OS !== 'web') {
-                void handleSend();
+        <View style={[styles.composer, { overflow: 'visible' }]}>
+          {!hasMessageText && pendingAttachments.length === 0 && conversationId ? (
+            <ChatVoiceComposer
+              conversationId={conversationId}
+              disabled={sending}
+              onSent={(message) => {
+                setMessages((prev) =>
+                  prev.some((item) => item.id === message.id) ? prev : [...prev, message],
+                );
+                scrollToBottom();
+              }}
+              idleChildren={
+                <>
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel="Прикрепить файл"
+                    onPress={() => void pickAttachment()}
+                    style={styles.iconButton}>
+                    <Ionicons name="attach-outline" size={20} color={colors.textMuted} />
+                  </Pressable>
+                  <View ref={composerFieldWrapRef} collapsable={false} style={styles.composerField}>
+                    <TextInput
+                      ref={composerInputRef}
+                      style={styles.input}
+                      value={draft}
+                      onChangeText={(value) => {
+                        draftRef.current = value;
+                        setDraft(value);
+                      }}
+                      onSelectionChange={(event) => {
+                        selectionRef.current = event.nativeEvent.selection;
+                      }}
+                      onFocus={handleComposerFocus}
+                      showSoftInputOnFocus={!emojiPanelOpen}
+                      nativeID="chat-composer-input"
+                      placeholder="Сообщение"
+                      placeholderTextColor={colors.textMuted}
+                      multiline
+                      blurOnSubmit={false}
+                      submitBehavior="newline"
+                      onKeyPress={handleKeyPress}
+                      onSubmitEditing={() => {
+                        if (Platform.OS !== 'web') {
+                          void handleSend();
+                        }
+                      }}
+                    />
+                  </View>
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel={emojiPanelOpen ? 'Скрыть эмодзи' : 'Эмодзи'}
+                    accessibilityState={{ selected: emojiPanelOpen }}
+                    onPress={toggleEmojiPanel}
+                    style={[styles.iconButton, emojiPanelOpen ? styles.iconButtonActive : null]}>
+                    <Ionicons
+                      name={emojiPanelOpen ? 'happy' : 'happy-outline'}
+                      size={20}
+                      color={emojiPanelOpen ? colors.primary : colors.textMuted}
+                    />
+                  </Pressable>
+                </>
               }
-            }}
-          />
-          </View>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={emojiPanelOpen ? 'Скрыть эмодзи' : 'Эмодзи'}
-            accessibilityState={{ selected: emojiPanelOpen }}
-            onPress={toggleEmojiPanel}
-            style={[styles.iconButton, emojiPanelOpen ? styles.iconButtonActive : null]}>
-            <Ionicons
-              name={emojiPanelOpen ? 'happy' : 'happy-outline'}
-              size={20}
-              color={emojiPanelOpen ? colors.primary : colors.textMuted}
             />
-          </Pressable>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Отправить"
-            disabled={!canSend}
-            onPress={() => void handleSend()}
-            style={[styles.sendButton, canSend && styles.sendButtonReady]}>
-            <Ionicons
-              name="send"
-              size={18}
-              color={canSend ? colors.onPrimary : colors.textMuted}
-            />
-          </Pressable>
+          ) : (
+            <>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Прикрепить файл"
+                onPress={() => void pickAttachment()}
+                style={styles.iconButton}>
+                <Ionicons name="attach-outline" size={20} color={colors.textMuted} />
+              </Pressable>
+              <View ref={composerFieldWrapRef} collapsable={false} style={styles.composerField}>
+                <TextInput
+                  ref={composerInputRef}
+                  style={styles.input}
+                  value={draft}
+                  onChangeText={(value) => {
+                    draftRef.current = value;
+                    setDraft(value);
+                  }}
+                  onSelectionChange={(event) => {
+                    selectionRef.current = event.nativeEvent.selection;
+                  }}
+                  onFocus={handleComposerFocus}
+                  showSoftInputOnFocus={!emojiPanelOpen}
+                  nativeID="chat-composer-input"
+                  placeholder="Сообщение"
+                  placeholderTextColor={colors.textMuted}
+                  multiline
+                  blurOnSubmit={false}
+                  submitBehavior="newline"
+                  onKeyPress={handleKeyPress}
+                  onSubmitEditing={() => {
+                    if (Platform.OS !== 'web') {
+                      void handleSend();
+                    }
+                  }}
+                />
+              </View>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={emojiPanelOpen ? 'Скрыть эмодзи' : 'Эмодзи'}
+                accessibilityState={{ selected: emojiPanelOpen }}
+                onPress={toggleEmojiPanel}
+                style={[styles.iconButton, emojiPanelOpen ? styles.iconButtonActive : null]}>
+                <Ionicons
+                  name={emojiPanelOpen ? 'happy' : 'happy-outline'}
+                  size={20}
+                  color={emojiPanelOpen ? colors.primary : colors.textMuted}
+                />
+              </Pressable>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Отправить"
+                disabled={!canSend}
+                onPress={() => void handleSend()}
+                style={[styles.sendButton, canSend && styles.sendButtonReady]}>
+                <Ionicons
+                  name="send"
+                  size={18}
+                  color={canSend ? colors.onPrimary : colors.textMuted}
+                />
+              </Pressable>
+            </>
+          )}
         </View>
         </View>
         )}

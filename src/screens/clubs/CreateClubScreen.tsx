@@ -360,7 +360,10 @@ export default function CreateClubScreen() {
   const coverDropRef = useRef<View>(null);
   const galleryDropRef = useRef<View>(null);
   const galleryUrisRef = useRef(galleryUris);
-  galleryUrisRef.current = galleryUris;
+
+  useEffect(() => {
+    galleryUrisRef.current = galleryUris;
+  }, [galleryUris]);
 
   useEffect(() => {
     if (!clubId) {
