@@ -11,7 +11,7 @@ import {
   type ToastVariant,
 } from '@/components/ui/feedback/toast.config';
 import { FontSize, Layout, Spacing, type ThemeColors } from '@/constants/theme';
-import { useTheme } from '@/hooks/use-theme';
+import { useTheme, useThemePreference } from '@/hooks/use-theme';
 import { useThemedStyles } from '@/hooks/use-themed-styles';
 
 type ToastBannerProps = ToastConfigParams<Record<string, unknown>> & {
@@ -20,7 +20,11 @@ type ToastBannerProps = ToastConfigParams<Record<string, unknown>> & {
 
 type IconName = ComponentProps<typeof Ionicons>['name'];
 
-function createStyles(colors: ThemeColors) {
+function createStyles(colors: ThemeColors, isDark: boolean) {
+  const cardBg = isDark ? '#2C2C2E' : '#FFFFFF';
+  const titleColor = isDark ? '#FFFFFF' : '#000000';
+  const messageColor = isDark ? '#E5E5EA' : '#4C4C4C';
+
   return StyleSheet.create({
     outer: {
       width: '100%',
@@ -45,12 +49,12 @@ function createStyles(colors: ThemeColors) {
       paddingVertical: 12,
       paddingHorizontal: Spacing.md,
       borderRadius: 16,
-      backgroundColor: colors.surface,
+      backgroundColor: cardBg,
       borderWidth: 1,
-      borderColor: colors.borderLight,
+      borderColor: isDark ? 'rgba(255,255,255,0.14)' : colors.borderLight,
       shadowColor: colors.shadow,
       shadowOffset: { width: 0, height: 10 },
-      shadowOpacity: 0.14,
+      shadowOpacity: isDark ? 0.45 : 0.14,
       shadowRadius: 22,
       elevation: 8,
       overflow: 'hidden',
@@ -58,11 +62,9 @@ function createStyles(colors: ThemeColors) {
     },
     cardAlert: {
       borderColor: 'rgba(21, 122, 254, 0.28)',
-      backgroundColor: colors.surface,
     },
     cardChat: {
       borderColor: 'rgba(21, 122, 254, 0.28)',
-      backgroundColor: colors.surface,
     },
     cardWarningEmphasis: {
       borderColor: 'rgba(255, 159, 10, 0.35)',
@@ -100,7 +102,7 @@ function createStyles(colors: ThemeColors) {
       justifyContent: 'center',
       backgroundColor: colors.primary,
       borderWidth: 2,
-      borderColor: colors.surface,
+      borderColor: cardBg,
     },
     avatarSealWarning: {
       backgroundColor: '#FF9F0A',
@@ -116,7 +118,7 @@ function createStyles(colors: ThemeColors) {
     title: {
       fontSize: FontSize.label,
       fontWeight: '600',
-      color: colors.text,
+      color: titleColor,
       letterSpacing: -0.1,
     },
     titleEmphasis: {
@@ -124,7 +126,7 @@ function createStyles(colors: ThemeColors) {
     },
     message: {
       fontSize: FontSize.caption,
-      color: colors.textSecondary,
+      color: messageColor,
       lineHeight: 17,
     },
     actionButton: {
@@ -191,7 +193,10 @@ function resolveSealIcon(emphasis: ToastEmphasis, variant: ToastVariant): IconNa
 
 export function ToastBanner({ text1, text2, onPress, variant, props }: ToastBannerProps) {
   const colors = useTheme();
-  const styles = useThemedStyles(createStyles);
+  const { colorScheme } = useThemePreference();
+  const isDark = colorScheme === 'dark';
+  const styles = useThemedStyles((themeColors) => createStyles(themeColors, isDark));
+  const cardBg = isDark ? '#2C2C2E' : '#FFFFFF';
   const spec = getToastSpecs(colors).find((item) => item.variant === variant)!;
   const alignment = (props?.alignment as ToastAlignment | undefined) ?? 'center';
   const actionLabel = typeof props?.actionLabel === 'string' ? props.actionLabel : undefined;
@@ -244,7 +249,7 @@ export function ToastBanner({ text1, text2, onPress, variant, props }: ToastBann
         {text1 ? (
           <Text
             style={[styles.title, emphasis !== 'default' ? styles.titleEmphasis : null]}
-            numberOfLines={1}>
+            numberOfLines={2}>
             {text1}
           </Text>
         ) : null}
@@ -264,6 +269,7 @@ export function ToastBanner({ text1, text2, onPress, variant, props }: ToastBann
 
   const cardStyle = [
     styles.card,
+    { backgroundColor: cardBg },
     alignment !== 'center' ? styles.cardShrink : null,
     emphasis === 'alert' ? styles.cardAlert : null,
     emphasis === 'chat' ? styles.cardChat : null,

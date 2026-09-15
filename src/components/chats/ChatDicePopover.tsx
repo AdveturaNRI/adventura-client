@@ -54,6 +54,7 @@ type ChatDicePopoverProps = {
     dice: { sides: number; qty: number }[];
     modifier: number;
     hidden: boolean;
+    color: string;
   }) => void;
 };
 
@@ -264,7 +265,7 @@ export function ChatDicePopover({ visible, busy, onClose, onRoll }: ChatDicePopo
       sides,
       qty: pool[sides],
     }));
-    onRoll({ dice, modifier, hidden });
+    onRoll({ dice, modifier, hidden, color: accent });
   };
 
   return (

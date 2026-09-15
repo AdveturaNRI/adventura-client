@@ -52,6 +52,8 @@ async function performRequest<T>(
       method,
       headers,
       body: body !== undefined ? JSON.stringify(body) : undefined,
+      // Avoid empty 304 bodies that break JSON clients on some proxies/caches.
+      cache: method === 'GET' ? 'no-store' : 'default',
     });
   } catch (error) {
     throw new ApiError(

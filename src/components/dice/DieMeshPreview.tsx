@@ -177,6 +177,30 @@ export function DieMeshPreviewProvider({ children }: { children: ReactNode }) {
  * Real @3d-dice/dice-box theme mesh in a small WebGL canvas.
  * Text label (d4 / d20…) while loading or if 3D assets fail.
  */
+function hexToBabylonColor3(BABYLON: any, hex: string) {
+  try {
+    return BABYLON.Color3.FromHexString(hex);
+  } catch {
+    return new BABYLON.Color3(0.082, 0.478, 0.996);
+  }
+}
+
+function applyDieAccent(
+  BABYLON: any,
+  themeRoot: string,
+  scene: any,
+  mat: any,
+  hex: string,
+) {
+  const theme = hexToBabylonColor3(BABYLON, hex);
+  const luma = 0.2126 * theme.r + 0.7152 * theme.g + 0.0722 * theme.b;
+  const diffuseName = luma > 0.55 ? 'diffuse-dark.png' : 'diffuse-light.png';
+  const diffuseTex = new BABYLON.Texture(`${themeRoot}${diffuseName}`, scene);
+  diffuseTex.hasAlpha = true;
+  mat.setTexture('diffuseSampler', diffuseTex);
+  mat.setColor3('themeColor', theme);
+}
+
 export function DieMeshPreview({
   sides,
   size = 56,
@@ -188,9 +212,15 @@ export function DieMeshPreview({
   const shared = useContext(SharedCtx);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const reactId = useId();
+  const materialRef = useRef<{ BABYLON: any; themeRoot: string; scene: any; mat: any } | null>(
+    null,
+  );
+  const accentRef = useRef(accent);
+  accentRef.current = accent;
   const [ready, setReady] = useState(false);
   const [failed, setFailed] = useState(false);
 
+  // Build WebGL scene once per die — remounting all 7 on color change hits browser context limits.
   useEffect(() => {
     if (Platform.OS !== 'web' || !shared || !canvasRef.current) {
       return;
@@ -202,6 +232,10 @@ export function DieMeshPreview({
     let engine: any;
     let scene: any;
     const die = dieLabel(sides);
+
+    setReady(false);
+    setFailed(false);
+    materialRef.current = null;
 
     const failTimer = window.setTimeout(() => {
       if (!disposed) setFailed(true);
@@ -256,15 +290,6 @@ export function DieMeshPreview({
         mesh.scaling.set(10, 10, 10);
         mesh.rotation.set(0.35, 0.7, 0.1);
 
-        let theme: any;
-        try {
-          theme = BABYLON.Color3.FromHexString(accent);
-        } catch {
-          theme = new BABYLON.Color3(0.082, 0.478, 0.996);
-        }
-        const luma = 0.2126 * theme.r + 0.7152 * theme.g + 0.0722 * theme.b;
-        const diffuseName = luma > 0.55 ? 'diffuse-dark.png' : 'diffuse-light.png';
-
         if (!BABYLON.Effect.ShadersStore.adventuraDieVertexShader) {
           BABYLON.Effect.ShadersStore.adventuraDieVertexShader = `
             precision highp float;
@@ -312,16 +337,14 @@ export function DieMeshPreview({
             samplers: ['diffuseSampler'],
           },
         );
-        const diffuseTex = new BABYLON.Texture(`${themeRoot}${diffuseName}`, scene);
-        diffuseTex.hasAlpha = true;
-        mat.setTexture('diffuseSampler', diffuseTex);
-        mat.setColor3('themeColor', theme);
         mat.setVector3('lightDir', new BABYLON.Vector3(-0.45, -1, 0.55));
         mat.backFaceCulling = true;
+        applyDieAccent(BABYLON, themeRoot, scene, mat, accentRef.current);
         mesh.material = mat;
         mesh.getChildMeshes?.(true)?.forEach((child: any) => {
           child.material = mat;
         });
+        materialRef.current = { BABYLON, themeRoot, scene, mat };
 
         mesh.computeWorldMatrix(true);
         const bi = mesh.getHierarchyBoundingVectors(true);
@@ -363,7 +386,7 @@ export function DieMeshPreview({
       }
     } catch (err) {
       console.error('[DieMeshPreview]', err);
-      queueMicrotask(() => {
+      voidMicrotask(() => {
         if (!disposed) setFailed(true);
       });
     }
@@ -373,6 +396,7 @@ export function DieMeshPreview({
 
     return () => {
       disposed = true;
+      materialRef.current = null;
       window.clearTimeout(failTimer);
       window.removeEventListener('resize', onResize);
       try {
@@ -383,7 +407,15 @@ export function DieMeshPreview({
         // ignore
       }
     };
-  }, [accent, shared, sides]);
+  }, [shared, sides]);
+
+  useEffect(() => {
+    const handle = materialRef.current;
+    if (!handle) {
+      return;
+    }
+    applyDieAccent(handle.BABYLON, handle.themeRoot, handle.scene, handle.mat, accent);
+  }, [accent]);
 
   const showText = Platform.OS !== 'web' || failed || !shared || !ready;
 

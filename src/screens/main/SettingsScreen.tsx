@@ -205,6 +205,14 @@ export default function SettingsScreen() {
               toast.info('На iPhone пуши работают, если сайт добавлен на домашний экран.');
               return;
             }
+            if (result.reason === 'server_disabled') {
+              toast.error('Пуш-уведомления на сервере выключены. Попробуйте позже.');
+              return;
+            }
+            if (result.reason === 'subscribe_failed') {
+              toast.error('Браузер не смог оформить подписку на уведомления');
+              return;
+            }
             toast.error('Не удалось включить уведомления');
             return;
           }
