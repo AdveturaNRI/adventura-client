@@ -21,6 +21,7 @@
     "react": "19.2.3",
     "react-dom": "19.2.3",
     "react-native": "0.86.3",
+    "react-native-draggable-flatlist": "^4.0.3",
     "react-native-gesture-handler": "~2.32.0",
     "react-native-reanimated": "4.5.1",
     "react-native-safe-area-context": "~5.7.0",
@@ -48,7 +49,12 @@
     "web": "expo start --web",
     "build:web": "expo export -p web && cp dist/+not-found.html dist/404.html",
     "start:web": "npx serve -c serve.json dist -l tcp://0.0.0.0:8081",
-    "lint": "expo lint"
+    "lint": "expo lint",
+    "scrape:gm-toolkit": "node scripts/gm-toolkit/scrape-foundry.mjs",
+    "import:gm-pynames": "node scripts/gm-toolkit/import-pynames.mjs",
+    "import:gm-fantasy-names": "node scripts/gm-toolkit/import-fantasy-names.mjs",
+    "import:gm-places": "node scripts/gm-toolkit/import-places.mjs",
+    "build:gm-toolkit": "node scripts/gm-toolkit/import-pynames.mjs && node scripts/gm-toolkit/import-fantasy-names.mjs && node scripts/gm-toolkit/import-places.mjs && node scripts/gm-toolkit/build-tables.mjs"
   },
   "private": true
 }

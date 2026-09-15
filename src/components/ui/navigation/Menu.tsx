@@ -17,6 +17,8 @@ export type MenuItemProps = {
   icon?: MenuIconKey;
   navbarIcon?: NavbarIconKey;
   badge?: string;
+  /** Red exclamation overlay on the icon tile (e.g. push disabled). */
+  iconAlert?: boolean;
   variant?: MenuItemVariant;
   onPress?: () => void;
 };
@@ -55,6 +57,26 @@ function createStyles(colors: ThemeColors) {
       backgroundColor: colors.menuIconBg,
       alignItems: 'center',
       justifyContent: 'center',
+      position: 'relative',
+      overflow: 'visible',
+    },
+    iconAlert: {
+      position: 'absolute',
+      top: -4,
+      right: -4,
+      minWidth: 16,
+      height: 16,
+      borderRadius: 8,
+      paddingHorizontal: 3,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: colors.destructive,
+    },
+    iconAlertText: {
+      color: colors.onPrimary,
+      fontSize: 11,
+      fontWeight: '800',
+      lineHeight: 12,
     },
     itemBody: {
       flex: 1,
@@ -102,26 +124,39 @@ export function MenuItem({
   icon,
   navbarIcon,
   badge,
+  iconAlert = false,
   variant = 'default',
   onPress,
 }: MenuItemProps) {
   const styles = useThemedStyles(createStyles);
   const isDanger = variant === 'danger';
 
+  const iconNode = navbarIcon ? (
+    <View style={styles.iconTile}>
+      <NavbarIcon name={navbarIcon} inverted />
+      {iconAlert ? (
+        <View style={styles.iconAlert} accessibilityLabel="Требует внимания">
+          <Text style={styles.iconAlertText}>!</Text>
+        </View>
+      ) : null}
+    </View>
+  ) : icon ? (
+    <View style={styles.iconTile}>
+      <MenuIcon name={icon} />
+      {iconAlert ? (
+        <View style={styles.iconAlert} accessibilityLabel="Требует внимания">
+          <Text style={styles.iconAlertText}>!</Text>
+        </View>
+      ) : null}
+    </View>
+  ) : null;
+
   return (
     <Pressable
       onPress={onPress}
       style={({ pressed }) => [styles.item, pressed && styles.itemPressed]}
       accessibilityRole="button">
-      {navbarIcon ? (
-        <View style={styles.iconTile}>
-          <NavbarIcon name={navbarIcon} inverted />
-        </View>
-      ) : icon ? (
-        <View style={styles.iconTile}>
-          <MenuIcon name={icon} />
-        </View>
-      ) : null}
+      {iconNode}
       <View style={styles.itemBody}>
         <Text style={[styles.label, isDanger && styles.labelDanger]}>{label}</Text>
         {subtitle ? <Text style={styles.subtitle}>{subtitle}</Text> : null}

@@ -1,10 +1,12 @@
-import { useState, type ComponentProps } from 'react';
+import { useState, type ComponentProps, type ReactNode } from 'react';
 import {
   Platform,
   Pressable,
   StyleSheet,
   Text,
   View,
+  type StyleProp,
+  type ViewStyle,
 } from 'react-native';
 import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
@@ -17,6 +19,11 @@ import { useThemedStyles } from '@/hooks/use-themed-styles';
 import type { GameListItem } from '@/services/games/gamesApi';
 import { pickProfileCardUrl } from '@/services/profile/profileApi';
 import { formatCityLabel } from '@/utils/city-label';
+import {
+  patchGamesFiltersFromBadge,
+  type GameFeedFilterBadge,
+  type GamesFeedFilters,
+} from '@/utils/games-filters';
 import { DEFAULT_TIMEZONE, formatDateTimeInTimezone } from '@/utils/timezones';
 
 export type GameFeedCardVariant = 'compact' | 'detail';
@@ -26,6 +33,8 @@ type GameFeedCardProps = {
   variant?: GameFeedCardVariant;
   busy?: boolean;
   onPress?: () => void;
+  /** Клик по мета-бейджу: в каталоге применяет фильтр, на деталке — уводит в /games?… */
+  onFilterBadgePress?: (patch: Partial<GamesFeedFilters>) => void;
   onOpenMaster: (userId: string) => void;
   onApply: (item: GameListItem) => void;
   onCancel: (id: string) => void;
@@ -282,6 +291,21 @@ function createStyles(colors: ThemeColors, variant: GameFeedCardVariant) {
       alignItems: 'center',
       gap: 4,
       maxWidth: '100%',
+      borderRadius: Radius.pill,
+      paddingHorizontal: 2,
+      paddingVertical: 2,
+    },
+    metaItemInteractive: {
+      ...Platform.select({
+        web: { cursor: 'pointer' } as object,
+        default: {},
+      }),
+    },
+    metaItemHovered: {
+      backgroundColor: 'rgba(21, 122, 254, 0.08)',
+    },
+    metaItemPressed: {
+      opacity: 0.78,
     },
     metaItemText: {
       flexShrink: 1,
@@ -298,6 +322,14 @@ function createStyles(colors: ThemeColors, variant: GameFeedCardVariant) {
       backgroundColor: 'rgba(21, 122, 254, 0.08)',
       borderWidth: 1,
       borderColor: 'rgba(21, 122, 254, 0.16)',
+      ...Platform.select({
+        web: { cursor: 'pointer' } as object,
+        default: {},
+      }),
+    },
+    ageBadgeHovered: {
+      backgroundColor: 'rgba(21, 122, 254, 0.14)',
+      borderColor: 'rgba(21, 122, 254, 0.28)',
     },
     ageBadgeText: {
       fontSize: FontSize.caption,
@@ -340,6 +372,19 @@ function createStyles(colors: ThemeColors, variant: GameFeedCardVariant) {
       alignItems: 'center',
       gap: 4,
       paddingTop: isDetail ? 4 : 0,
+      paddingHorizontal: 6,
+      paddingVertical: 4,
+      borderRadius: Radius.pill,
+      ...Platform.select({
+        web: { cursor: 'pointer' } as object,
+        default: {},
+      }),
+    },
+    priceWrapHovered: {
+      backgroundColor: 'rgba(61, 171, 90, 0.12)',
+    },
+    priceWrapPressed: {
+      opacity: 0.78,
     },
     priceText: {
       fontSize: isDetail ? FontSize.button : FontSize.label,
@@ -351,7 +396,22 @@ function createStyles(colors: ThemeColors, variant: GameFeedCardVariant) {
     priceTextPaid: {
       color: colors.text,
     },
-    descriptionRow: {
+    kindBadgeInteractive: {
+      ...Platform.select({
+        web: { cursor: 'pointer' } as object,
+        default: {},
+      }),
+    },
+    kindBadgeHovered: {
+      opacity: 0.9,
+      transform: [{ scale: 1.03 }],
+    },
+    kindBadgePressed: {
+      opacity: 0.82,
+    },
+    filterBadgePressed: {
+      opacity: 0.82,
+    },    descriptionRow: {
       flexDirection: isDetail ? 'column' : 'row',
       alignItems: isDetail ? 'stretch' : 'flex-end',
       gap: Spacing.sm,
@@ -418,24 +478,78 @@ function createStyles(colors: ThemeColors, variant: GameFeedCardVariant) {
 
 type Styles = ReturnType<typeof createStyles>;
 
+function FilterBadgePressable({
+  label,
+  disabled,
+  onPress,
+  style,
+  hoveredStyle,
+  pressedStyle,
+  children,
+}: {
+  label: string;
+  disabled?: boolean;
+  onPress?: () => void;
+  style: StyleProp<ViewStyle> | StyleProp<ViewStyle>[];
+  hoveredStyle?: StyleProp<ViewStyle>;
+  pressedStyle?: StyleProp<ViewStyle>;
+  children: ReactNode;
+}) {
+  const [hovered, setHovered] = useState(false);
+
+  if (!onPress || disabled) {
+    return <View style={style}>{children}</View>;
+  }
+
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={`Фильтр: ${label}`}
+      onPress={(event) => {
+        event.stopPropagation?.();
+        onPress();
+      }}
+      {...(Platform.OS === 'web'
+        ? ({
+            onMouseEnter: () => setHovered(true),
+            onMouseLeave: () => setHovered(false),
+          } as object)
+        : null)}
+      style={({ pressed }) => [
+        style,
+        hovered && hoveredStyle,
+        pressed && pressedStyle,
+      ]}>
+      {children}
+    </Pressable>
+  );
+}
+
 function MetaItem({
   icon,
   label,
   styles,
   colors,
+  onPress,
 }: {
   icon: ComponentProps<typeof Ionicons>['name'];
   label: string;
   styles: Styles;
   colors: ThemeColors;
+  onPress?: () => void;
 }) {
   return (
-    <View style={styles.metaItem}>
+    <FilterBadgePressable
+      label={label}
+      onPress={onPress}
+      style={[styles.metaItem, onPress ? styles.metaItemInteractive : null]}
+      hoveredStyle={styles.metaItemHovered}
+      pressedStyle={styles.metaItemPressed}>
       <Ionicons name={icon} size={13} color={colors.textMuted} />
       <Text style={styles.metaItemText} numberOfLines={1}>
         {label}
       </Text>
-    </View>
+    </FilterBadgePressable>
   );
 }
 
@@ -444,6 +558,7 @@ export function GameFeedCard({
   variant = 'compact',
   busy = false,
   onPress,
+  onFilterBadgePress,
   onOpenMaster,
   onApply,
   onCancel,
@@ -455,6 +570,13 @@ export function GameFeedCard({
   const viewerTimezone = profile?.timezone?.trim() || DEFAULT_TIMEZONE;
   const [hovered, setHovered] = useState(false);
   const isDetail = variant === 'detail';
+
+  const emitFilterBadge = (badge: GameFeedFilterBadge) => {
+    if (!onFilterBadgePress) {
+      return;
+    }
+    onFilterBadgePress(patchGamesFiltersFromBadge(item, badge));
+  };
 
   const coverUrl = pickProfileCardUrl(item.cover, item.updatedAt);
   const isCampaign = item.kind === 'CAMPAIGN';
@@ -492,6 +614,7 @@ export function GameFeedCard({
   const relation = item.viewerRelation ?? 'none';
   const recruiting = item.status === 'RECRUITING';
   const status = feedStatusMeta(item.status);
+  const canFilter = Boolean(onFilterBadgePress);
 
   const actions = (() => {
     if (relation === 'owner') {
@@ -615,21 +738,26 @@ export function GameFeedCard({
   );
 
   const coverBottom = (
-    <View style={styles.coverBottomBar} pointerEvents="none">
-      <View style={styles.dateChip}>
+    <View style={styles.coverBottomBar} pointerEvents="box-none">
+      <View style={styles.dateChip} pointerEvents="none">
         <Ionicons name="today-outline" size={12} color="#FFFFFF" />
         <Text style={styles.dateChipText} numberOfLines={1}>
           {scheduleLabel}
         </Text>
       </View>
-      <View
+      <FilterBadgePressable
+        label={kindLabel}
+        onPress={canFilter ? () => emitFilterBadge('kind') : undefined}
         style={[
           styles.kindBadge,
           isCampaign ? styles.kindBadgeCampaign : styles.kindBadgeOneshot,
-        ]}>
+          canFilter ? styles.kindBadgeInteractive : null,
+        ]}
+        hoveredStyle={styles.kindBadgeHovered}
+        pressedStyle={styles.kindBadgePressed}>
         <Ionicons name={kindIcon} size={13} color={colors.onPrimary} />
         <Text style={styles.kindBadgeText}>{kindLabel}</Text>
-      </View>
+      </FilterBadgePressable>
     </View>
   );
 
@@ -641,18 +769,25 @@ export function GameFeedCard({
           label={location}
           styles={styles}
           colors={colors}
+          onPress={canFilter ? () => emitFilterBadge('playMode') : undefined}
         />
         <MetaItem
           icon="layers-outline"
           label={item.systemName}
           styles={styles}
           colors={colors}
+          onPress={canFilter ? () => emitFilterBadge('system') : undefined}
         />
         <MetaItem
           icon={item.beginnersWelcome ? 'leaf-outline' : 'ribbon-outline'}
           label={experienceLabel}
           styles={styles}
           colors={colors}
+          onPress={
+            canFilter && item.beginnersWelcome
+              ? () => emitFilterBadge('beginnersWelcome')
+              : undefined
+          }
         />
         {durationLabel ? (
           <View style={styles.durationBadge}>
@@ -660,17 +795,27 @@ export function GameFeedCard({
             <Text style={styles.durationBadgeText}>{durationLabel}</Text>
           </View>
         ) : null}
-        <View style={styles.ageBadge}>
+        <FilterBadgePressable
+          label={ageLabel}
+          onPress={canFilter ? () => emitFilterBadge('age') : undefined}
+          style={styles.ageBadge}
+          hoveredStyle={styles.ageBadgeHovered}
+          pressedStyle={styles.filterBadgePressed}>
           <Ionicons name="id-card-outline" size={12} color={colors.primary} />
           <Text style={styles.ageBadgeText}>{ageLabel}</Text>
-        </View>
+        </FilterBadgePressable>
       </View>
 
       <View style={styles.titleRow}>
         <Text style={styles.title} numberOfLines={isDetail ? undefined : 2}>
           {item.title}
         </Text>
-        <View style={styles.priceWrap}>
+        <FilterBadgePressable
+          label={priceLabel}
+          onPress={canFilter ? () => emitFilterBadge('isFree') : undefined}
+          style={styles.priceWrap}
+          hoveredStyle={item.isFree ? styles.priceWrapHovered : undefined}
+          pressedStyle={styles.priceWrapPressed}>
           {item.isFree ? (
             <Ionicons name="pricetag-outline" size={15} color="#3DAB5A" />
           ) : null}
@@ -681,7 +826,7 @@ export function GameFeedCard({
             ]}>
             {priceLabel}
           </Text>
-        </View>
+        </FilterBadgePressable>
       </View>
 
       <View style={styles.descriptionRow}>

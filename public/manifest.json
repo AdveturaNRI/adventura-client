@@ -1,0 +1,25 @@
+{
+  "short_name": "Adventura",
+  "name": "Adventura",
+  "description": "Найти партию и игроков для настольных ролевых игр",
+  "icons": [
+    {
+      "src": "/icons/icon-192.png",
+      "type": "image/png",
+      "sizes": "192x192",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icons/icon-512.png",
+      "type": "image/png",
+      "sizes": "512x512",
+      "purpose": "any maskable"
+    }
+  ],
+  "start_url": "/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "theme_color": "#208AEF",
+  "background_color": "#0B1220",
+  "lang": "ru"
+}

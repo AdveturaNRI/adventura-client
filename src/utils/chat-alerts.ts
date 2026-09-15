@@ -13,7 +13,6 @@ let blinkTimer: ReturnType<typeof setInterval> | null = null;
 let baseTitle = SITE_TITLE;
 let showingAlertTitle = false;
 let alertTitle = MESSAGE_ALERT_TITLE;
-let permissionAsked = false;
 
 let audioContext: AudioContext | null = null;
 let notifyBuffer: AudioBuffer | null = null;
@@ -97,11 +96,6 @@ function playBuffer(context: AudioContext, buffer: AudioBuffer) {
 export function unlockChatAlerts() {
   if (!canUseWebAlerts()) {
     return;
-  }
-
-  if (!permissionAsked && typeof Notification !== 'undefined' && Notification.permission === 'default') {
-    permissionAsked = true;
-    void Notification.requestPermission();
   }
 
   const context = getAudioContext();

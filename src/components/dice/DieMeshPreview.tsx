@@ -17,6 +17,8 @@ type DieMeshPreviewProps = {
   sides: DieGlyphSides;
   size?: number;
   active?: boolean;
+  /** Hex body color; defaults to saved dice accent / theme primary. */
+  themeColor?: string;
 };
 
 type SharedAssets = {
@@ -110,14 +112,17 @@ function DieTextFallback({
   sides,
   size,
   active,
+  themeColor,
 }: {
   sides: DieGlyphSides;
   size: number;
   active: boolean;
+  themeColor: string;
 }) {
   const colors = useTheme();
   const label = dieLabel(sides);
   const fontSize = Math.max(12, Math.round(size * (label.length > 3 ? 0.28 : 0.34)));
+  const tint = themeColor || colors.primary;
 
   return (
     <View
@@ -127,11 +132,11 @@ function DieTextFallback({
           width: size,
           height: size,
           opacity: active ? 1 : 0.45,
-          borderColor: active ? colors.primary : colors.border,
-          backgroundColor: active ? 'rgba(21, 122, 254, 0.12)' : 'transparent',
+          borderColor: active ? tint : colors.border,
+          backgroundColor: active ? `${tint}22` : 'transparent',
         },
       ]}>
-      <Text style={[styles.textLabel, { color: colors.primaryLight, fontSize }]}>{label}</Text>
+      <Text style={[styles.textLabel, { color: tint, fontSize }]}>{label}</Text>
     </View>
   );
 }
@@ -172,8 +177,14 @@ export function DieMeshPreviewProvider({ children }: { children: ReactNode }) {
  * Real @3d-dice/dice-box theme mesh in a small WebGL canvas.
  * Text label (d4 / d20…) while loading or if 3D assets fail.
  */
-export function DieMeshPreview({ sides, size = 56, active = true }: DieMeshPreviewProps) {
+export function DieMeshPreview({
+  sides,
+  size = 56,
+  active = true,
+  themeColor,
+}: DieMeshPreviewProps) {
   const colors = useTheme();
+  const accent = themeColor?.trim() || colors.primary;
   const shared = useContext(SharedCtx);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const reactId = useId();
@@ -247,7 +258,7 @@ export function DieMeshPreview({ sides, size = 56, active = true }: DieMeshPrevi
 
         let theme: any;
         try {
-          theme = BABYLON.Color3.FromHexString(colors.primary);
+          theme = BABYLON.Color3.FromHexString(accent);
         } catch {
           theme = new BABYLON.Color3(0.082, 0.478, 0.996);
         }
@@ -372,12 +383,12 @@ export function DieMeshPreview({ sides, size = 56, active = true }: DieMeshPrevi
         // ignore
       }
     };
-  }, [colors.primary, shared, sides]);
+  }, [accent, shared, sides]);
 
   const showText = Platform.OS !== 'web' || failed || !shared || !ready;
 
   if (Platform.OS !== 'web') {
-    return <DieTextFallback sides={sides} size={size} active={active} />;
+    return <DieTextFallback sides={sides} size={size} active={active} themeColor={accent} />;
   }
 
   return (
@@ -388,7 +399,9 @@ export function DieMeshPreview({ sides, size = 56, active = true }: DieMeshPrevi
         position: 'relative',
         opacity: active ? 1 : 0.45,
       }}>
-      {showText ? <DieTextFallback sides={sides} size={size} active /> : null}
+      {showText ? (
+        <DieTextFallback sides={sides} size={size} active themeColor={accent} />
+      ) : null}
       <canvas
         key={`${reactId}-${sides}`}
         ref={canvasRef}

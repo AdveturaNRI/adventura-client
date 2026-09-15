@@ -4,13 +4,18 @@ import { useFocusEffect, usePathname, useRouter } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
-  FlatList,
   Modal,
+  Platform,
   Pressable,
   StyleSheet,
   Text,
   View,
 } from 'react-native';
+import DraggableFlatList, {
+  ScaleDecorator,
+  type RenderItemParams,
+} from 'react-native-draggable-flatlist';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 
 import { BlockUserDialog } from '@/components/chats/BlockUserDialog';
 import { CreateGroupDialog, contactsFromConversations } from '@/components/chats/CreateGroupDialog';
@@ -33,15 +38,37 @@ import {
   deleteConversation,
   leaveGroup,
   listConversations,
+  pinConversation,
+  reorderPinnedConversations,
   unblockPeer,
+  unpinConversation,
   type ConversationListItem,
 } from '@/services/chats/chatsApi';
 import { ApiError } from '@/services/api/api-error';
 import { upsertWandererReaction, clearWandererReaction } from '@/services/profile/wanderersApi';
+import { diceRollPreviewText, parseDiceRollPayload } from '@/utils/chat-dice-roll';
 import { localizeErrorMessage } from '@/utils/localizeError';
 
 function isGroupChat(item: ConversationListItem) {
   return item.type === 'group';
+}
+
+function sortConversations(items: ConversationListItem[]) {
+  return [...items].sort((left, right) => {
+    const leftPinned = Boolean(left.isPinned);
+    const rightPinned = Boolean(right.isPinned);
+    if (leftPinned !== rightPinned) {
+      return leftPinned ? -1 : 1;
+    }
+    if (leftPinned && rightPinned) {
+      const leftOrder = left.pinSortOrder ?? Number.MAX_SAFE_INTEGER;
+      const rightOrder = right.pinSortOrder ?? Number.MAX_SAFE_INTEGER;
+      if (leftOrder !== rightOrder) {
+        return leftOrder - rightOrder;
+      }
+    }
+    return right.updatedAt.localeCompare(left.updatedAt);
+  });
 }
 
 function conversationTitle(item: ConversationListItem) {
@@ -100,6 +127,57 @@ function createStyles(colors: ThemeColors, isRail: boolean) {
     rowFavorite: {
       borderBottomColor: 'rgba(201, 162, 39, 0.35)',
     },
+    rowPinned: {
+      backgroundColor: 'rgba(21, 122, 254, 0.04)',
+    },
+    rowDragging: {
+      backgroundColor: 'rgba(21, 122, 254, 0.12)',
+      ...Platform.select({
+        web: { boxShadow: '0 8px 24px rgba(0,0,0,0.18)' } as object,
+        default: {
+          shadowColor: '#000',
+          shadowOpacity: 0.18,
+          shadowRadius: 10,
+          shadowOffset: { width: 0, height: 4 },
+          elevation: 6,
+        },
+      }),
+    },
+    pinSeal: {
+      position: 'absolute',
+      right: -2,
+      top: -2,
+      width: 18,
+      height: 18,
+      borderRadius: 9,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: colors.surface,
+      borderWidth: 1,
+      borderColor: 'rgba(21, 122, 254, 0.35)',
+      zIndex: 3,
+      ...Platform.select({
+        web: { boxShadow: '0 1px 4px rgba(21, 122, 254, 0.2)' } as object,
+        default: {
+          shadowColor: colors.primary,
+          shadowOpacity: 0.2,
+          shadowRadius: 3,
+          shadowOffset: { width: 0, height: 1 },
+          elevation: 2,
+        },
+      }),
+    },
+    dragHandle: {
+      width: 22,
+      height: 28,
+      borderRadius: 8,
+      alignItems: 'center',
+      justifyContent: 'center',
+      marginTop: 2,
+      marginRight: -2,
+      flexShrink: 0,
+      opacity: 0.55,
+    },
     favoriteSeal: {
       position: 'absolute',
       right: -2,
@@ -112,6 +190,7 @@ function createStyles(colors: ThemeColors, isRail: boolean) {
       backgroundColor: colors.background,
       borderWidth: 1,
       borderColor: '#D4AF37',
+      zIndex: 3,
     },
     nameFavorite: {
       color: colors.text,
@@ -219,7 +298,7 @@ function createStyles(colors: ThemeColors, isRail: boolean) {
       flex: 1,
     },
     menuBackdrop: {
-      ...StyleSheet.absoluteFillObject,
+      ...StyleSheet.absoluteFill,
     },
     menu: {
       position: 'absolute',
@@ -347,6 +426,15 @@ function formatPreview(item: ConversationListItem) {
       ? 'Разблокировал вас'
       : 'Вы разблокировали пользователя';
   }
+  if (item.lastMessage.kind === 'dice_roll') {
+    const raw = item.lastMessage.body?.trim() || '';
+    const payload = parseDiceRollPayload(raw);
+    if (payload) {
+      return diceRollPreviewText(payload);
+    }
+    // Уже отформатированное превью с API / старый кэш
+    return raw || 'Бросок костей';
+  }
   if (item.lastMessage.body?.trim()) {
     return item.lastMessage.body.trim();
   }
@@ -434,21 +522,22 @@ export default function ChatsScreen({ variant = 'page' }: ChatsScreenProps) {
       setItems((prev) => {
         // Only merge onto conversations that still exist on the server.
         // Stale local rows (already deleted for everyone) must not resurrect.
-        return next
-          .map((incoming) => {
-            const local = prev.find((item) => item.id === incoming.id);
-            if (!local || local.updatedAt <= incoming.updatedAt) {
-              return incoming;
-            }
-            return {
-              ...local,
-              isFavorite: incoming.isFavorite,
-              peerFavoritedMe: incoming.peerFavoritedMe,
-              blockedByMe: incoming.blockedByMe,
-              blockedMe: incoming.blockedMe,
-            };
-          })
-          .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+        const merged = next.map((incoming) => {
+          const local = prev.find((item) => item.id === incoming.id);
+          if (!local || local.updatedAt <= incoming.updatedAt) {
+            return incoming;
+          }
+          return {
+            ...local,
+            isFavorite: incoming.isFavorite,
+            peerFavoritedMe: incoming.peerFavoritedMe,
+            blockedByMe: incoming.blockedByMe,
+            blockedMe: incoming.blockedMe,
+            isPinned: incoming.isPinned,
+            pinSortOrder: incoming.pinSortOrder,
+          };
+        });
+        return sortConversations(merged);
       });
     } catch (error) {
       toast.error(localizeErrorMessage(error, 'Не удалось загрузить чаты'));
@@ -468,8 +557,20 @@ export default function ChatsScreen({ variant = 'page' }: ChatsScreenProps) {
       return;
     }
     setItems((prev) => {
-      const without = prev.filter((item) => item.id !== lastConversationUpdate.id);
-      return [lastConversationUpdate, ...without];
+      const exists = prev.some((item) => item.id === lastConversationUpdate.id);
+      const next = exists
+        ? prev.map((item) =>
+            item.id === lastConversationUpdate.id
+              ? {
+                  ...lastConversationUpdate,
+                  isPinned: lastConversationUpdate.isPinned ?? item.isPinned,
+                  pinSortOrder:
+                    lastConversationUpdate.pinSortOrder ?? item.pinSortOrder ?? null,
+                }
+              : item,
+          )
+        : [lastConversationUpdate, ...prev];
+      return sortConversations(next);
     });
   }, [lastConversationUpdate]);
 
@@ -529,7 +630,7 @@ export default function ChatsScreen({ variant = 'page' }: ChatsScreenProps) {
       };
 
       const without = prev.filter((item) => item.id !== lastMessage.conversationId);
-      return [nextItem, ...without];
+      return sortConversations([nextItem, ...without]);
     });
   }, [lastMessage, load, user?.id]);
 
@@ -644,6 +745,88 @@ export default function ChatsScreen({ variant = 'page' }: ChatsScreenProps) {
     [publishConversationUpdate],
   );
 
+  const handlePin = useCallback(
+    async (item: ConversationListItem) => {
+      if (item.isPinned) {
+        return;
+      }
+      try {
+        const next = await pinConversation(item.id);
+        setItems((prev) =>
+          sortConversations(prev.map((row) => (row.id === next.id ? next : row))),
+        );
+        publishConversationUpdate(next);
+      } catch (error) {
+        toast.error(localizeErrorMessage(error, 'Не удалось закрепить чат'));
+      }
+    },
+    [publishConversationUpdate],
+  );
+
+  const handleUnpin = useCallback(
+    async (item: ConversationListItem) => {
+      if (!item.isPinned) {
+        return;
+      }
+      try {
+        const next = await unpinConversation(item.id);
+        setItems((prev) =>
+          sortConversations(
+            prev.map((row) =>
+              row.id === next.id
+                ? next
+                : row.isPinned
+                  ? row
+                  : row,
+            ),
+          ),
+        );
+        // Refresh pin order for remaining pinned after server renumbered them
+        void load();
+        publishConversationUpdate(next);
+      } catch (error) {
+        toast.error(localizeErrorMessage(error, 'Не удалось открепить чат'));
+      }
+    },
+    [load, publishConversationUpdate],
+  );
+
+  const handlePinnedReorder = useCallback(
+    (data: ConversationListItem[]) => {
+      const pinned = data.filter((item) => item.isPinned);
+      const unpinned = data
+        .filter((item) => !item.isPinned)
+        .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+      const nextPinned = pinned.map((item, index) => ({
+        ...item,
+        pinSortOrder: index,
+      }));
+      const next = [...nextPinned, ...unpinned];
+      const prevPinnedIds = itemsRef.current
+        .filter((item) => item.isPinned)
+        .map((item) => item.id);
+      const nextPinnedIds = nextPinned.map((item) => item.id);
+      const orderChanged =
+        prevPinnedIds.length === nextPinnedIds.length &&
+        prevPinnedIds.some((id, index) => id !== nextPinnedIds[index]);
+
+      setItems(next);
+      if (!orderChanged || nextPinnedIds.length === 0) {
+        return;
+      }
+
+      void reorderPinnedConversations(nextPinnedIds)
+        .then((serverItems) => {
+          setItems(sortConversations(serverItems));
+        })
+        .catch((error) => {
+          toast.error(localizeErrorMessage(error, 'Не удалось сохранить порядок'));
+          void load();
+        });
+    },
+    [load],
+  );
+
   const handleLeaveGroup = useCallback(
     async (item: ConversationListItem) => {
       setItems((prev) => prev.filter((row) => row.id !== item.id));
@@ -707,6 +890,162 @@ export default function ChatsScreen({ variant = 'page' }: ChatsScreenProps) {
       ? { top: 72, right: 16 }
       : null;
 
+  const renderChatRow = useCallback(
+    ({ item, drag, isActive }: RenderItemParams<ConversationListItem>) => {
+      const group = isGroupChat(item);
+      const title = conversationTitle(item);
+      const initial = [...title.trim()][0]?.toUpperCase() ?? '?';
+      const timeLabel = formatListTime(item.lastMessage?.createdAt ?? item.updatedAt);
+      const selected = Boolean(pathname?.includes(`/chats/${item.id}`));
+      const isFavorite =
+        !group && Boolean(item.isFavorite) && !item.blockedByMe && !item.blockedMe;
+      const isPinned = Boolean(item.isPinned);
+      const previewMembers = item.membersPreview ?? [];
+
+      return (
+        <ScaleDecorator>
+          <View
+            style={[
+              localStyles.row,
+              selected && localStyles.rowSelected,
+              isFavorite && localStyles.rowFavorite,
+              isPinned && localStyles.rowPinned,
+              isActive && localStyles.rowDragging,
+            ]}>
+            {isPinned ? (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Перетащить закреплённый чат"
+                onLongPress={drag}
+                delayLongPress={180}
+                style={({ pressed }) => [
+                  localStyles.dragHandle,
+                  pressed && { opacity: 0.9 },
+                ]}>
+                <Ionicons name="reorder-two" size={18} color={colors.textMuted} />
+              </Pressable>
+            ) : null}
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={title}
+              onPress={() => {
+                if (!isActive) {
+                  router.push(`/chats/${item.id}`);
+                }
+              }}
+              onLongPress={isPinned ? drag : undefined}
+              delayLongPress={220}
+              style={({ pressed }) => [
+                localStyles.rowMain,
+                pressed && !isActive && localStyles.rowPressed,
+              ]}>
+              <View style={localStyles.avatarWrap}>
+                {group ? (
+                  <View style={localStyles.groupAvatarStack}>
+                    {(previewMembers.length > 0 ? previewMembers.slice(0, 2) : [null]).map(
+                      (member, index) => {
+                        const chipInitial =
+                          [...(member?.nickname ?? title).trim()][0]?.toUpperCase() ?? '?';
+                        return (
+                          <View
+                            key={member?.id ?? `empty-${index}`}
+                            style={[
+                              localStyles.groupAvatarChip,
+                              {
+                                left: index * 14,
+                                top: index * 10,
+                                zIndex: 2 - index,
+                              },
+                            ]}>
+                            {member?.avatarUrl ? (
+                              <Image
+                                source={{ uri: member.avatarUrl }}
+                                style={localStyles.groupAvatarChipImage}
+                              />
+                            ) : (
+                              <Text style={localStyles.groupAvatarChipInitial}>{chipInitial}</Text>
+                            )}
+                          </View>
+                        );
+                      },
+                    )}
+                  </View>
+                ) : (
+                  <View style={[localStyles.avatar, isFavorite && localStyles.avatarFavorite]}>
+                    {item.peer?.avatarUrl ? (
+                      <Image
+                        source={{ uri: item.peer.avatarUrl }}
+                        style={localStyles.avatarImage}
+                      />
+                    ) : (
+                      <View style={localStyles.avatarFill}>
+                        <Text style={localStyles.avatarInitial}>{initial}</Text>
+                      </View>
+                    )}
+                  </View>
+                )}
+                {isPinned ? (
+                  <View style={localStyles.pinSeal} accessibilityLabel="Закреплён">
+                    <Ionicons
+                      name="attach"
+                      size={12}
+                      color={colors.primary}
+                      style={{ transform: [{ rotate: '-45deg' }] }}
+                    />
+                  </View>
+                ) : null}
+                {isFavorite ? (
+                  <View style={localStyles.favoriteSeal}>
+                    <MaterialCommunityIcons name="crown" size={11} color="#E4C56A" />
+                  </View>
+                ) : null}
+              </View>
+              <View style={localStyles.body}>
+                <View style={localStyles.nameRow}>
+                  <Text
+                    style={[localStyles.name, isFavorite && localStyles.nameFavorite]}
+                    numberOfLines={1}>
+                    {title}
+                  </Text>
+                  {isFavorite ? <Text style={localStyles.favoriteMark}>избранный</Text> : null}
+                  {group ? (
+                    <Text style={localStyles.groupMeta}>
+                      {item.memberCount ?? previewMembers.length}
+                    </Text>
+                  ) : null}
+                  {timeLabel ? <Text style={localStyles.time}>{timeLabel}</Text> : null}
+                </View>
+                <View style={localStyles.previewRow}>
+                  <Text
+                    style={[localStyles.preview, item.unread && localStyles.previewUnread]}
+                    numberOfLines={1}>
+                    {formatPreview(item)}
+                  </Text>
+                  {item.unread ? <View style={localStyles.unreadDot} /> : null}
+                </View>
+              </View>
+            </Pressable>
+            <View
+              ref={(node) => {
+                menuTriggerRefs.current[item.id] = node;
+              }}
+              collapsable={false}>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Ещё"
+                hitSlop={8}
+                onPress={() => openMenu(item)}
+                style={localStyles.menuButton}>
+                <Ionicons name="ellipsis-vertical" size={16} color={colors.textSubtle} />
+              </Pressable>
+            </View>
+          </View>
+        </ScaleDecorator>
+      );
+    },
+    [colors.primary, colors.textMuted, colors.textSubtle, localStyles, openMenu, pathname, router],
+  );
+
   const content = (
       <View
         style={[
@@ -753,143 +1092,17 @@ export default function ChatsScreen({ variant = 'page' }: ChatsScreenProps) {
             </Text>
           </View>
         ) : (
-          <FlatList
-            style={localStyles.list}
-            contentContainerStyle={localStyles.listContent}
-            data={items}
-            keyExtractor={(item) => item.id}
-            renderItem={({ item }) => {
-              const group = isGroupChat(item);
-              const title = conversationTitle(item);
-              const initial = [...title.trim()][0]?.toUpperCase() ?? '?';
-              const timeLabel = formatListTime(item.lastMessage?.createdAt ?? item.updatedAt);
-              const selected = Boolean(pathname?.includes(`/chats/${item.id}`));
-              const isFavorite =
-                !group && Boolean(item.isFavorite) && !item.blockedByMe && !item.blockedMe;
-              const previewMembers = item.membersPreview ?? [];
-              return (
-                <View
-                  style={[
-                    localStyles.row,
-                    selected && localStyles.rowSelected,
-                    isFavorite && localStyles.rowFavorite,
-                  ]}>
-                  <Pressable
-                    accessibilityRole="button"
-                    accessibilityLabel={title}
-                    onPress={() => router.push(`/chats/${item.id}`)}
-                    style={({ pressed }) => [
-                      localStyles.rowMain,
-                      pressed && localStyles.rowPressed,
-                    ]}>
-                    <View style={localStyles.avatarWrap}>
-                      {group ? (
-                        <View style={localStyles.groupAvatarStack}>
-                          {(previewMembers.length > 0 ? previewMembers.slice(0, 2) : [null]).map(
-                            (member, index) => {
-                              const chipInitial =
-                                [...(member?.nickname ?? title).trim()][0]?.toUpperCase() ?? '?';
-                              return (
-                                <View
-                                  key={member?.id ?? `empty-${index}`}
-                                  style={[
-                                    localStyles.groupAvatarChip,
-                                    {
-                                      left: index * 14,
-                                      top: index * 10,
-                                      zIndex: 2 - index,
-                                    },
-                                  ]}>
-                                  {member?.avatarUrl ? (
-                                    <Image
-                                      source={{ uri: member.avatarUrl }}
-                                      style={localStyles.groupAvatarChipImage}
-                                    />
-                                  ) : (
-                                    <Text style={localStyles.groupAvatarChipInitial}>
-                                      {chipInitial}
-                                    </Text>
-                                  )}
-                                </View>
-                              );
-                            },
-                          )}
-                        </View>
-                      ) : (
-                        <View
-                          style={[
-                            localStyles.avatar,
-                            isFavorite && localStyles.avatarFavorite,
-                          ]}>
-                          {item.peer?.avatarUrl ? (
-                            <Image
-                              source={{ uri: item.peer.avatarUrl }}
-                              style={localStyles.avatarImage}
-                            />
-                          ) : (
-                            <View style={localStyles.avatarFill}>
-                              <Text style={localStyles.avatarInitial}>{initial}</Text>
-                            </View>
-                          )}
-                        </View>
-                      )}
-                      {isFavorite ? (
-                        <View style={localStyles.favoriteSeal}>
-                          <MaterialCommunityIcons name="crown" size={11} color="#E4C56A" />
-                        </View>
-                      ) : null}
-                    </View>
-                    <View style={localStyles.body}>
-                      <View style={localStyles.nameRow}>
-                        <Text
-                          style={[
-                            localStyles.name,
-                            isFavorite && localStyles.nameFavorite,
-                          ]}
-                          numberOfLines={1}>
-                          {title}
-                        </Text>
-                        {isFavorite ? (
-                          <Text style={localStyles.favoriteMark}>избранный</Text>
-                        ) : null}
-                        {group ? (
-                          <Text style={localStyles.groupMeta}>
-                            {item.memberCount ?? previewMembers.length}
-                          </Text>
-                        ) : null}
-                        {timeLabel ? <Text style={localStyles.time}>{timeLabel}</Text> : null}
-                      </View>
-                      <View style={localStyles.previewRow}>
-                        <Text
-                          style={[
-                            localStyles.preview,
-                            item.unread && localStyles.previewUnread,
-                          ]}
-                          numberOfLines={1}>
-                          {formatPreview(item)}
-                        </Text>
-                        {item.unread ? <View style={localStyles.unreadDot} /> : null}
-                      </View>
-                    </View>
-                  </Pressable>
-                  <View
-                    ref={(node) => {
-                      menuTriggerRefs.current[item.id] = node;
-                    }}
-                    collapsable={false}>
-                    <Pressable
-                      accessibilityRole="button"
-                      accessibilityLabel="Ещё"
-                      hitSlop={8}
-                      onPress={() => openMenu(item)}
-                      style={localStyles.menuButton}>
-                      <Ionicons name="ellipsis-vertical" size={16} color={colors.textSubtle} />
-                    </Pressable>
-                  </View>
-                </View>
-              );
-            }}
-          />
+          <GestureHandlerRootView style={{ flex: 1, minHeight: 0 }}>
+            <DraggableFlatList
+              style={localStyles.list}
+              contentContainerStyle={localStyles.listContent}
+              data={items}
+              keyExtractor={(item) => item.id}
+              onDragEnd={({ data }) => handlePinnedReorder(data)}
+              activationDistance={12}
+              renderItem={renderChatRow}
+            />
+          </GestureHandlerRootView>
         )}
 
         <Modal
@@ -903,6 +1116,33 @@ export default function ChatsScreen({ variant = 'page' }: ChatsScreenProps) {
               <View style={[localStyles.menu, menuStyle]}>
                 {menuTarget && isGroupChat(menuTarget) ? (
                   <>
+                    <Pressable
+                      accessibilityRole="button"
+                      onPress={() => {
+                        const target = menuTarget;
+                        closeMenu();
+                        if (target) {
+                          if (target.isPinned) {
+                            void handleUnpin(target);
+                          } else {
+                            void handlePin(target);
+                          }
+                        }
+                      }}
+                      style={({ pressed }) => [
+                        localStyles.menuItem,
+                        pressed && localStyles.menuItemPressed,
+                      ]}>
+                      <Ionicons
+                        name={menuTarget.isPinned ? 'attach' : 'attach-outline'}
+                        size={18}
+                        color={colors.primary}
+                        style={menuTarget.isPinned ? { transform: [{ rotate: '-45deg' }] } : undefined}
+                      />
+                      <Text style={localStyles.menuItemLabel}>
+                        {menuTarget.isPinned ? 'Открепить' : 'Закрепить'}
+                      </Text>
+                    </Pressable>
                     <Pressable
                       accessibilityRole="button"
                       onPress={() => {
@@ -940,6 +1180,37 @@ export default function ChatsScreen({ variant = 'page' }: ChatsScreenProps) {
                   </>
                 ) : (
                   <>
+                    {menuTarget ? (
+                      <Pressable
+                        accessibilityRole="button"
+                        onPress={() => {
+                          const target = menuTarget;
+                          closeMenu();
+                          if (target) {
+                            if (target.isPinned) {
+                              void handleUnpin(target);
+                            } else {
+                              void handlePin(target);
+                            }
+                          }
+                        }}
+                        style={({ pressed }) => [
+                          localStyles.menuItem,
+                          pressed && localStyles.menuItemPressed,
+                        ]}>
+                        <Ionicons
+                          name={menuTarget.isPinned ? 'attach' : 'attach-outline'}
+                          size={18}
+                          color={colors.primary}
+                          style={
+                            menuTarget.isPinned ? { transform: [{ rotate: '-45deg' }] } : undefined
+                          }
+                        />
+                        <Text style={localStyles.menuItemLabel}>
+                          {menuTarget.isPinned ? 'Открепить' : 'Закрепить'}
+                        </Text>
+                      </Pressable>
+                    ) : null}
                     {menuTarget &&
                     !menuTarget.isFavorite &&
                     !menuTarget.blockedByMe &&

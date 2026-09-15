@@ -8,6 +8,7 @@ import {
 } from 'react';
 
 import { useTheme } from '@/hooks/use-theme';
+import { DEFAULT_DICE_ACCENT } from '@/utils/dice-color-storage';
 
 import type {
   DiceNotation,
@@ -24,10 +25,11 @@ export type { DiceRollOutcome, DiceStageHandle };
  * (browsers may still have a cached 301 to /dice-roller from serve cleanUrls).
  */
 export const DiceStage = forwardRef<DiceStageHandle, DiceStageProps>(function DiceStage(
-  { onReady, onDone },
+  { onReady, onDone, transparent = false, accent },
   ref,
 ) {
   const colors = useTheme();
+  const themeAccent = accent?.trim() || colors.primary || DEFAULT_DICE_ACCENT;
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
   const onDoneRef = useRef(onDone);
   onDoneRef.current = onDone;
@@ -104,7 +106,16 @@ export const DiceStage = forwardRef<DiceStageHandle, DiceStageProps>(function Di
     return () => window.removeEventListener('message', onWindowMessage);
   }, [onReady]);
 
-  const src = `/dice-stage.html?accent=${encodeURIComponent(colors.primary)}`;
+  const src = `/dice-stage.html?accent=${encodeURIComponent(themeAccent)}${
+    transparent ? '&transparent=1' : ''
+  }`;
+
+  useEffect(() => {
+    setReady(false);
+    setError(null);
+  }, [src]);
+
+  const shellBg = transparent ? 'transparent' : '#0B1220';
 
   return createElement(
     'div',
@@ -113,29 +124,32 @@ export const DiceStage = forwardRef<DiceStageHandle, DiceStageProps>(function Di
         flex: 1,
         width: '100%',
         height: '100%',
-        minHeight: 260,
-        borderRadius: 20,
+        minHeight: transparent ? 0 : 260,
+        borderRadius: transparent ? 0 : 20,
         overflow: 'hidden',
-        background: '#0B1220',
+        background: shellBg,
         position: 'relative',
+        pointerEvents: transparent ? 'none' : 'auto',
       },
     },
     createElement('iframe', {
+      key: src,
       ref: iframeRef,
       title: 'Dice roller',
       src,
       style: {
         width: '100%',
         height: '100%',
-        minHeight: 260,
+        minHeight: transparent ? 0 : 260,
         border: '0',
         display: 'block',
-        background: '#0B1220',
+        background: shellBg,
+        pointerEvents: 'none',
       },
       sandbox: 'allow-scripts allow-same-origin',
       allow: 'accelerometer; gyroscope',
     }),
-    !ready && !error
+    !ready && !error && !transparent
       ? createElement('div', {
           style: {
             position: 'absolute',
@@ -160,7 +174,8 @@ export const DiceStage = forwardRef<DiceStageHandle, DiceStageProps>(function Di
               fontSize: 14,
               padding: 24,
               textAlign: 'center',
-              background: 'rgba(11,18,32,0.92)',
+              background: transparent ? 'transparent' : 'rgba(11,18,32,0.92)',
+              pointerEvents: 'none',
             },
           },
           error,

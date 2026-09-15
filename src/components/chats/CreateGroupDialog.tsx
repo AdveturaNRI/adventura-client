@@ -9,6 +9,7 @@ import {
   StyleSheet,
   Text,
   TextInput,
+  useWindowDimensions,
   View,
 } from 'react-native';
 
@@ -47,17 +48,27 @@ function createStyles(colors: ThemeColors) {
       borderColor: colors.border,
       padding: Spacing.lg,
       gap: Spacing.md,
+      overflow: 'hidden',
     },
     title: {
       fontSize: FontSize.h1,
       fontWeight: '700',
       color: colors.text,
+      flexShrink: 0,
+    },
+    fieldBlock: {
+      flexShrink: 0,
+    },
+    listBlock: {
+      flexShrink: 1,
+      minHeight: 0,
     },
     label: {
       fontSize: FontSize.caption,
       fontWeight: '600',
       color: colors.textSecondary,
       marginBottom: 6,
+      flexShrink: 0,
     },
     input: {
       borderWidth: 1,
@@ -70,7 +81,6 @@ function createStyles(colors: ThemeColors) {
       backgroundColor: colors.surface,
     },
     list: {
-      maxHeight: 280,
       borderWidth: 1,
       borderColor: colors.border,
       borderRadius: 14,
@@ -133,6 +143,8 @@ function createStyles(colors: ThemeColors) {
       flexDirection: 'row',
       gap: Spacing.sm,
       justifyContent: 'flex-end',
+      flexShrink: 0,
+      paddingTop: Spacing.xs,
     },
     button: {
       paddingHorizontal: Spacing.md,
@@ -182,6 +194,9 @@ export function contactsFromConversations(items: ConversationListItem[]): Contac
   return [...map.values()].sort((a, b) => a.nickname.localeCompare(b.nickname, 'ru'));
 }
 
+/** Title, name field, actions and paddings — leave the rest for the list. */
+const CREATE_GROUP_CHROME_HEIGHT = 320;
+
 export function CreateGroupDialog({
   visible,
   contacts,
@@ -191,6 +206,11 @@ export function CreateGroupDialog({
 }: CreateGroupDialogProps) {
   const colors = useTheme();
   const styles = useThemedStyles(createStyles);
+  const { height: windowHeight } = useWindowDimensions();
+  const listMaxHeight = Math.min(
+    280,
+    Math.max(120, Math.round(windowHeight * 0.88 - CREATE_GROUP_CHROME_HEIGHT)),
+  );
   const [title, setTitle] = useState('');
   const [selected, setSelected] = useState<Set<string>>(new Set());
 
@@ -239,7 +259,7 @@ export function CreateGroupDialog({
         <View style={styles.card}>
           <Text style={styles.title}>Новая группа</Text>
 
-          <View>
+          <View style={styles.fieldBlock}>
             <Text style={styles.label}>Название</Text>
             <TextInput
               value={title}
@@ -252,9 +272,12 @@ export function CreateGroupDialog({
             />
           </View>
 
-          <View>
+          <View style={styles.listBlock}>
             <Text style={styles.label}>Участники из переписок</Text>
-            <ScrollView style={styles.list}>
+            <ScrollView
+              style={[styles.list, { maxHeight: listMaxHeight }]}
+              nestedScrollEnabled
+              keyboardShouldPersistTaps="handled">
               {sortedContacts.length === 0 ? (
                 <Text style={styles.empty}>
                   Сначала напишите кому-нибудь в личку — оттуда можно будет выбрать людей.

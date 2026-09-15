@@ -46,6 +46,7 @@ const VOICE_CONTROL_COLOR = '#1F4E8C';
 type Props = {
   conversationId: string;
   disabled?: boolean;
+  replyToId?: string;
   idleChildren: ReactNode;
   onSent: (message: ChatMessage) => void;
 };
@@ -80,7 +81,7 @@ function resampleWaveform(values: number[], count: number) {
   });
 }
 
-export function ChatVoiceComposer({ conversationId, disabled, idleChildren, onSent }: Props) {
+export function ChatVoiceComposer({ conversationId, disabled, replyToId, idleChildren, onSent }: Props) {
   const colors = useTheme();
   const recorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
   const [phase, setPhase] = useState<Phase>('idle');
@@ -343,6 +344,7 @@ export function ChatVoiceComposer({ conversationId, disabled, idleChildren, onSe
         // still sent; its UI falls back to a neutral waveform.
       }
       const message = await sendChatMessage(conversationId, {
+        replyToId,
         files: [{
           uri: file.uri,
           name: `voice-${Date.now()}.${file.mimeType.includes('wav') ? 'wav' : Platform.OS === 'web' ? 'webm' : 'm4a'}`,
@@ -359,7 +361,7 @@ export function ChatVoiceComposer({ conversationId, disabled, idleChildren, onSe
       setSending(false);
       busyRef.current = false;
     }
-  }, [conversationId, onSent, reset, sending, stopCurrent]);
+  }, [conversationId, onSent, replyToId, reset, sending, stopCurrent]);
 
   const releaseHold = useCallback(() => {
     if (cancelTriggeredRef.current) return;

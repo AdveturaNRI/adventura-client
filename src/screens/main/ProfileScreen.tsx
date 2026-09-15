@@ -10,6 +10,7 @@ import { ScreenTransition } from '@/components/navigation/ScreenTransition';
 import { Menu, MenuItem, PROFILE_MENU_SECTIONS, toast } from '@/components/ui';
 import { useAuth } from '@/context/AuthContext';
 import { useProfile, useMyAvatarUrl } from '@/context/ProfileContext';
+import { usePushPrompt } from '@/context/PushPromptContext';
 import { useRealtimeOptional } from '@/context/RealtimeContext';
 import { getQuestionnaireCompletion } from '@/utils/questionnaire-completion';
 import { formatUnreadBadge } from '@/utils/unread-badge';
@@ -59,6 +60,7 @@ export default function ProfileScreen() {
   const showCompactNav = !hasDesktopSidebar;
   const styles = useProfileScreenStyles();
   const realtime = useRealtimeOptional();
+  const { showSettingsAlert, refreshPushAttention } = usePushPrompt();
   const unreadNotifications = realtime?.unreadNotifications ?? 0;
   const completion = useMemo(() => getQuestionnaireCompletion(profile), [profile]);
   const notificationsBadge = formatUnreadBadge(unreadNotifications);
@@ -66,7 +68,8 @@ export default function ProfileScreen() {
   useFocusEffect(
     useCallback(() => {
       void refreshProfile();
-    }, [refreshProfile]),
+      refreshPushAttention();
+    }, [refreshProfile, refreshPushAttention]),
   );
 
   const handleSignOut = async () => {
@@ -124,6 +127,7 @@ export default function ProfileScreen() {
                       ? notificationsBadge
                       : item.badge
                   }
+                  iconAlert={item.key === 'settings' && showSettingsAlert}
                   variant={item.variant}
                   onPress={() => handleMenuPress(item.key, router)}
                 />

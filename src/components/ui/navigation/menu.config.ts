@@ -28,6 +28,13 @@ export type ProfileMenuSectionSpec = {
 
 export const MENU_SPECS: MenuItemSpec[] = [
   {
+    key: 'developer',
+    label: 'Поддержать разработку',
+    subtitle:
+      'Здесь вы можете поддержать проект денюжкой, что нам очень поможет',
+    icon: 'developer',
+  },
+  {
     key: 'profile',
     label: 'Анкета игрока',
     subtitle: 'Здесь вы можете настроить вашу анкету',
@@ -92,13 +99,6 @@ export const PROFILE_MENU_SECTIONS: ProfileMenuSectionSpec[] = [
         label: 'Поддержка',
         subtitle: 'Здесь вы можете написать нам и сообщить о проблеме или нарушении',
         icon: 'support',
-      },
-      {
-        key: 'developer',
-        label: 'Написать разработчику',
-        subtitle:
-          'Здесь вы можете напрямую предложить идею, сотрудничество или же просто поблагодарить',
-        icon: 'developer',
       },
     ],
   },

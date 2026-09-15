@@ -1,10 +1,12 @@
 /**
  * Native WebView HTML — same engine/API as public/dice-stage.html
  */
-export function buildDiceBoxNativeHtml(options?: { accent?: string }) {
+export function buildDiceBoxNativeHtml(options?: { accent?: string; transparent?: boolean }) {
   const accent = options?.accent ?? '#157AFE';
+  const transparent = Boolean(options?.transparent);
   const version = '1.1.4';
   const cdn = `https://cdn.jsdelivr.net/npm/@3d-dice/dice-box@${version}/dist`;
+  const bg = transparent ? 'transparent' : '#0B1220';
 
   return `<!DOCTYPE html>
 <html lang="ru">
@@ -12,13 +14,13 @@ export function buildDiceBoxNativeHtml(options?: { accent?: string }) {
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
   <style>
-    html, body, #dice-box { margin:0; width:100%; height:100%; background:#0B1220; overflow:hidden; }
+    html, body, #dice-box { margin:0; width:100%; height:100%; background:${bg}; overflow:hidden; pointer-events:none; }
     #dice-box { position:relative; }
-    #dice-box canvas { width:100% !important; height:100% !important; }
+    #dice-box canvas { width:100% !important; height:100% !important; pointer-events:none; }
     #status {
-      position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
+      position:absolute; inset:0; display:${transparent ? 'none' : 'flex'}; align-items:center; justify-content:center;
       color:rgba(255,255,255,0.7); font:600 14px/1.4 -apple-system,system-ui,sans-serif;
-      background:rgba(11,18,32,0.55); z-index:3;
+      background:rgba(11,18,32,0.55); z-index:3; pointer-events:none;
     }
     #status.hidden { display:none; }
   </style>
@@ -35,8 +37,8 @@ export function buildDiceBoxNativeHtml(options?: { accent?: string }) {
       const payload = JSON.stringify(msg);
       if (window.ReactNativeWebView?.postMessage) window.ReactNativeWebView.postMessage(payload);
     }
-    function setStatus(t){ statusEl.textContent=t; statusEl.classList.remove('hidden'); post({type:'status',message:t}); }
-    function hideStatus(){ statusEl.classList.add('hidden'); }
+    function setStatus(t){ if(!statusEl) return; statusEl.textContent=t; statusEl.classList.remove('hidden'); post({type:'status',message:t}); }
+    function hideStatus(){ statusEl?.classList.add('hidden'); }
     function flatten(results, notation) {
       const groups=[], values=[];
       (results||[]).forEach((group)=>{

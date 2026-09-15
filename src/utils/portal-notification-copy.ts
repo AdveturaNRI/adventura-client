@@ -1,6 +1,7 @@
 import type { ToastVariant } from '@/components/ui/feedback/toast.config';
 import type { ChatMessage } from '@/services/chats/chatsApi';
 import type { PortalNotification } from '@/services/notifications/notificationsApi';
+import { diceRollPreviewText, parseDiceRollPayload } from '@/utils/chat-dice-roll';
 
 export type PortalNotificationCopy = {
   title: string;
@@ -156,6 +157,13 @@ export function getChatMessageToastCopy(message: ChatMessage): PortalNotificatio
     return {
       title: 'Разблокировка',
       body: body || `${senderName} разблокировал вас`,
+    };
+  }
+  if (kind === 'dice_roll') {
+    const payload = parseDiceRollPayload(body);
+    return {
+      title: senderName,
+      body: diceRollPreviewText(payload),
     };
   }
 

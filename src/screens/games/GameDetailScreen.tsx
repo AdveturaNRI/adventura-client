@@ -29,6 +29,10 @@ import {
   getGame,
   type GameListItem,
 } from '@/services/games/gamesApi';
+import {
+  gamesCatalogHrefFromFilterPatch,
+  type GamesFeedFilters,
+} from '@/utils/games-filters';
 import { localizeErrorMessage } from '@/utils/localizeError';
 
 function createStyles(
@@ -262,6 +266,13 @@ export default function GameDetailScreen() {
     [router],
   );
 
+  const openCatalogWithFilter = useCallback(
+    (patch: Partial<GamesFeedFilters>) => {
+      router.push(gamesCatalogHrefFromFilterPatch(patch));
+    },
+    [router],
+  );
+
   const openChat = useCallback(async () => {
     if (!item || busy) {
       return;
@@ -366,6 +377,7 @@ export default function GameDetailScreen() {
                   item={item}
                   variant="detail"
                   busy={busy}
+                  onFilterBadgePress={openCatalogWithFilter}
                   onOpenMaster={openMaster}
                   onApply={() => openApply()}
                   onCancel={() => void handleCancel()}

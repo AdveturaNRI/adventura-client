@@ -1,10 +1,32 @@
-import { StyleSheet, Text, View } from 'react-native';
+import { useCallback, useEffect, useState } from 'react';
+import {
+  ActivityIndicator,
+  Platform,
+  Pressable,
+  StyleSheet,
+  Switch,
+  Text,
+  View,
+} from 'react-native';
+import { useFocusEffect } from 'expo-router';
 
 import { ThemeToggle, useIsDesktopSidebarVisible } from '@/components/navigation/DesktopThemeToggle';
 import { MobileScreenHeader } from '@/components/navigation/MobileScreenHeader';
 import { ScreenTransition } from '@/components/navigation/ScreenTransition';
+import { toast } from '@/components/ui';
 import { FontSize, Spacing, type ThemeColors } from '@/constants/theme';
+import { usePushPrompt } from '@/context/PushPromptContext';
+import { useTheme } from '@/hooks/use-theme';
 import { useThemedStyles } from '@/hooks/use-themed-styles';
+import {
+  disableWebPush,
+  enableWebPush,
+  fetchPushStatusForThisDevice,
+  getNotificationPermission,
+  isIosSafariNeedPwaHint,
+  isWebPushSupported,
+} from '@/services/push/webPush';
+import { localizeErrorMessage } from '@/utils/localizeError';
 
 import { useMainScreenStyles } from './main-screen.styles';
 
@@ -16,6 +38,48 @@ function createSettingsStyles(colors: ThemeColors) {
       borderColor: colors.borderLight,
       backgroundColor: colors.surface,
       overflow: 'hidden',
+    },
+    sectionGap: {
+      marginTop: Spacing.md,
+    },
+    alertCard: {
+      borderRadius: 16,
+      borderWidth: 1,
+      borderColor: colors.destructive,
+      backgroundColor: 'rgba(255, 59, 48, 0.12)',
+      padding: Spacing.md,
+      gap: Spacing.sm,
+      marginBottom: Spacing.md,
+    },
+    alertTitle: {
+      fontSize: FontSize.button,
+      fontWeight: '700',
+      color: colors.destructive,
+    },
+    alertBody: {
+      fontSize: FontSize.caption,
+      color: colors.text,
+      lineHeight: FontSize.caption * 1.45,
+    },
+    alertButton: {
+      alignSelf: 'flex-start',
+      marginTop: Spacing.xs,
+      minHeight: 36,
+      paddingHorizontal: Spacing.md,
+      borderRadius: 999,
+      borderWidth: 1,
+      borderColor: colors.destructive,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: colors.surface,
+    },
+    alertButtonPressed: {
+      opacity: 0.85,
+    },
+    alertButtonLabel: {
+      fontSize: FontSize.caption,
+      fontWeight: '600',
+      color: colors.destructive,
     },
     row: {
       flexDirection: 'row',
@@ -39,14 +103,131 @@ function createSettingsStyles(colors: ThemeColors) {
       color: colors.textMuted,
       lineHeight: FontSize.caption * 1.45,
     },
+    hint: {
+      marginTop: Spacing.sm,
+      marginBottom: Spacing.md,
+      paddingHorizontal: Spacing.lg,
+      fontSize: FontSize.caption,
+      color: colors.textMuted,
+      lineHeight: FontSize.caption * 1.45,
+    },
+    hintAccent: {
+      marginTop: Spacing.sm,
+      marginBottom: Spacing.md,
+      paddingHorizontal: Spacing.lg,
+      fontSize: FontSize.caption,
+      color: colors.primary,
+      lineHeight: FontSize.caption * 1.45,
+      fontWeight: '600',
+    },
   });
 }
 
 export default function SettingsScreen() {
   const mainStyles = useMainScreenStyles();
   const styles = useThemedStyles(createSettingsStyles);
+  const colors = useTheme();
   const hasDesktopSidebar = useIsDesktopSidebarVisible();
   const showCompactNav = !hasDesktopSidebar;
+  const {
+    showSettingsAlert,
+    dismissSettingsAlert,
+    notifyPushEnabled,
+    refreshPushAttention,
+  } = usePushPrompt();
+
+  const webPushAvailable = isWebPushSupported();
+  const iosHint = isIosSafariNeedPwaHint();
+  const [pushEnabled, setPushEnabled] = useState(false);
+  const [pushLoading, setPushLoading] = useState(webPushAvailable);
+  const [pushBusy, setPushBusy] = useState(false);
+  const [permission, setPermission] = useState(getNotificationPermission());
+
+  const refreshPushState = useCallback(async () => {
+    if (!webPushAvailable) {
+      setPushLoading(false);
+      return;
+    }
+    setPushLoading(true);
+    try {
+      setPermission(getNotificationPermission());
+      const subscribed = await fetchPushStatusForThisDevice();
+      const enabled = subscribed && getNotificationPermission() === 'granted';
+      setPushEnabled(enabled);
+      if (enabled) {
+        notifyPushEnabled();
+      } else {
+        refreshPushAttention();
+      }
+    } catch {
+      setPushEnabled(false);
+      refreshPushAttention();
+    } finally {
+      setPushLoading(false);
+    }
+  }, [notifyPushEnabled, refreshPushAttention, webPushAvailable]);
+
+  useEffect(() => {
+    void refreshPushState();
+  }, [refreshPushState]);
+
+  useFocusEffect(
+    useCallback(() => {
+      void refreshPushState();
+    }, [refreshPushState]),
+  );
+
+  const handleTogglePush = useCallback(
+    (next: boolean) => {
+      if (pushBusy || Platform.OS !== 'web') {
+        return;
+      }
+      void (async () => {
+        setPushBusy(true);
+        try {
+          if (next) {
+            // enableWebPush calls Notification.requestPermission() first (user gesture).
+            const result = await enableWebPush();
+            setPermission(getNotificationPermission());
+            if (result.ok) {
+              setPushEnabled(true);
+              notifyPushEnabled();
+              toast.success('Уведомления включены');
+              return;
+            }
+            setPushEnabled(false);
+            refreshPushAttention();
+            if (result.reason === 'denied') {
+              toast.info('Разрешите уведомления в настройках браузера');
+              return;
+            }
+            if (result.reason === 'ios_pwa') {
+              toast.info('На iPhone пуши работают, если сайт добавлен на домашний экран.');
+              return;
+            }
+            toast.error('Не удалось включить уведомления');
+            return;
+          }
+
+          await disableWebPush();
+          setPushEnabled(false);
+          refreshPushAttention();
+          toast.info('Уведомления на этом устройстве выключены');
+        } catch (error) {
+          toast.error(localizeErrorMessage(error, 'Не удалось изменить уведомления'));
+          await refreshPushState();
+        } finally {
+          setPushBusy(false);
+        }
+      })();
+    },
+    [notifyPushEnabled, pushBusy, refreshPushAttention, refreshPushState],
+  );
+
+  const handleKeepDisabled = useCallback(() => {
+    dismissSettingsAlert();
+    toast.info('Ок, напоминание скрыто. Включить можно в любой момент ниже.');
+  }, [dismissSettingsAlert]);
 
   return (
     <ScreenTransition animateOnFocus>
@@ -57,6 +238,24 @@ export default function SettingsScreen() {
           <Text style={mainStyles.title}>Настройки</Text>
         )}
 
+        {Platform.OS === 'web' && showSettingsAlert ? (
+          <View style={styles.alertCard}>
+            <Text style={styles.alertTitle}>Уведомления выключены</Text>
+            <Text style={styles.alertBody}>
+              Без пушей можно пропустить заявки на игры и сообщения в чатах, пока сайт закрыт.
+            </Text>
+            <Pressable
+              style={({ pressed }) => [
+                styles.alertButton,
+                pressed ? styles.alertButtonPressed : null,
+              ]}
+              onPress={handleKeepDisabled}
+              accessibilityRole="button">
+              <Text style={styles.alertButtonLabel}>Оставить выключенными</Text>
+            </Pressable>
+          </View>
+        ) : null}
+
         <View style={styles.section}>
           <View style={styles.row}>
             <View style={styles.rowText}>
@@ -66,6 +265,43 @@ export default function SettingsScreen() {
             <ThemeToggle />
           </View>
         </View>
+
+        {Platform.OS === 'web' ? (
+          <View style={[styles.section, styles.sectionGap]}>
+            <View style={styles.row}>
+              <View style={styles.rowText}>
+                <Text style={styles.rowTitle}>Браузерные уведомления на этом устройстве</Text>
+                <Text style={styles.rowSubtitle}>
+                  Заявки на игры и новые сообщения, даже когда вкладка закрыта
+                </Text>
+              </View>
+              {pushLoading ? (
+                <ActivityIndicator color={colors.primary} />
+              ) : (
+                <Switch
+                  value={pushEnabled}
+                  onValueChange={handleTogglePush}
+                  disabled={pushBusy || iosHint || !webPushAvailable}
+                  trackColor={{ false: colors.border, true: colors.primaryLight }}
+                  thumbColor={pushEnabled ? colors.primary : colors.surface}
+                />
+              )}
+            </View>
+            {iosHint ? (
+              <Text style={styles.hintAccent}>
+                На iPhone пуши работают, если сайт добавлен на домашний экран.
+              </Text>
+            ) : null}
+            {!iosHint && permission === 'denied' ? (
+              <Text style={styles.hint}>
+                Разрешение заблокировано. Включите уведомления в настройках браузера для этого сайта.
+              </Text>
+            ) : null}
+            {!webPushAvailable && !iosHint ? (
+              <Text style={styles.hint}>Этот браузер не поддерживает веб-пуши.</Text>
+            ) : null}
+          </View>
+        ) : null}
       </View>
     </ScreenTransition>
   );
