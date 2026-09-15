@@ -9,6 +9,11 @@ export type ClubScheduleDay = {
   close: string | null;
 };
 
+export type ClubLink = {
+  label: string;
+  url: string;
+};
+
 export type ClubListItem = {
   id: string;
   name: string;
@@ -17,6 +22,8 @@ export type ClubListItem = {
   lat: number;
   lng: number;
   city: { id: string; name: string; region: string | null } | null;
+  tags: string[];
+  links: ClubLink[];
   schedule: ClubScheduleDay[];
   isPublished: boolean;
   coverUrl: string | null;
@@ -26,6 +33,7 @@ export type ClubListItem = {
   mapAccentColor?: string | null;
   galleryUrls: string[];
   isOwner: boolean;
+  canManage: boolean;
   createdAt: string;
   updatedAt: string;
 };
@@ -38,6 +46,8 @@ export type CreateClubPayload = {
   lng: number;
   cityId?: string | null;
   schedule: ClubScheduleDay[];
+  tags?: string[];
+  links?: ClubLink[];
   isPublished?: boolean;
 };
 
@@ -67,6 +77,24 @@ export function defaultClubSchedule(): ClubScheduleDay[] {
   }));
 }
 
+/** Старые записи могли содержать не все дни; в форме нужны все семь. */
+export function normalizeClubSchedule(schedule?: ClubScheduleDay[] | null): ClubScheduleDay[] {
+  const savedByDay = new Map(schedule?.map((item) => [item.day, item]) ?? []);
+
+  return defaultClubSchedule().map((fallback) => {
+    const saved = savedByDay.get(fallback.day);
+    if (!saved) return fallback;
+    if (saved.closed) return { day: fallback.day, closed: true, open: null, close: null };
+
+    return {
+      day: fallback.day,
+      closed: false,
+      open: saved.open ?? fallback.open ?? '12:00',
+      close: saved.close ?? fallback.close ?? '22:00',
+    };
+  });
+}
+
 export async function listClubsMap() {
   return apiRequest<ClubListItem[]>('/clubs');
 }
@@ -93,9 +121,10 @@ export async function updateClub(id: string, payload: CreateClubPayload) {
   });
 }
 
-export async function deleteClub(id: string) {
+export async function deleteClub(id: string, confirmationName: string) {
   return apiRequest<{ ok: true }>(`/clubs/${encodeURIComponent(id)}`, {
     method: 'DELETE',
+    body: { confirmationName },
   });
 }
 
@@ -199,7 +228,99 @@ export async function uploadClubCover(clubId: string, localUri: string) {
   );
 }
 
-export async function uploadClubGallery(clubId: string, localUris: string[]) {
+export async function deleteClubCover(clubId: string) {
+  return apiRequest<ClubListItem>(`/clubs/${encodeURIComponent(clubId)}/cover`, {
+    method: 'DELETE',
+  });
+}
+
+export async function deleteClubGalleryItem(clubId: string, index: number) {
+  return apiRequest<ClubListItem>(
+    `/clubs/${encodeURIComponent(clubId)}/gallery/${index}`,
+    { method: 'DELETE' },
+  );
+}
+
+export async function reorderClubGallery(clubId: string, order: number[]) {
+  return apiRequest<ClubListItem>(`/clubs/${encodeURIComponent(clubId)}/gallery/order`, {
+    method: 'PATCH',
+    body: { order },
+  });
+}
+
+function isLocalGalleryUri(uri: string) {
+  return !/^https?:\/\//i.test(uri);
+}
+
+function sameUriList(left: string[], right: string[]) {
+  return left.length === right.length && left.every((uri, index) => uri === right[index]);
+}
+
+function isIdentityOrder(order: number[]) {
+  return order.every((value, index) => value === index);
+}
+
+export async function saveClubGallery(
+  clubId: string,
+  draftUris: string[],
+  originalUris: string[],
+) {
+  if (sameUriList(draftUris, originalUris)) {
+    return;
+  }
+
+  if (!draftUris.length) {
+    for (let index = originalUris.length - 1; index >= 0; index -= 1) {
+      await deleteClubGalleryItem(clubId, index);
+    }
+    return;
+  }
+
+  const locals = draftUris.filter(isLocalGalleryUri);
+  const keptRemotes = draftUris.filter((uri) => originalUris.includes(uri));
+  const unknownRemote = draftUris.some(
+    (uri) => !isLocalGalleryUri(uri) && !originalUris.includes(uri),
+  );
+
+  if (unknownRemote) {
+    throw new Error('Некоторые фото галереи нельзя сохранить. Загрузите их заново.');
+  }
+
+  if (!keptRemotes.length) {
+    await uploadClubGallery(clubId, locals);
+    return;
+  }
+
+  const keep = new Set(keptRemotes.map((uri) => originalUris.indexOf(uri)));
+  for (let index = originalUris.length - 1; index >= 0; index -= 1) {
+    if (!keep.has(index)) {
+      await deleteClubGalleryItem(clubId, index);
+    }
+  }
+
+  const remaining = originalUris.filter((_, index) => keep.has(index));
+  const remoteOrder = keptRemotes.map((uri) => remaining.indexOf(uri));
+  if (!isIdentityOrder(remoteOrder)) {
+    await reorderClubGallery(clubId, remoteOrder);
+  }
+
+  if (!locals.length) {
+    return;
+  }
+
+  await appendClubGallery(clubId, locals);
+  const afterAppend = [...keptRemotes, ...locals];
+  const finalOrder = draftUris.map((uri) => afterAppend.indexOf(uri));
+  if (!isIdentityOrder(finalOrder)) {
+    await reorderClubGallery(clubId, finalOrder);
+  }
+}
+
+async function buildGalleryFormData(localUris: string[]) {
+  if (localUris.some((uri) => !isLocalGalleryUri(uri))) {
+    throw new Error('Существующие фото галереи нельзя перезалить из браузера');
+  }
+
   const formData = new FormData();
 
   for (const [index, uri] of localUris.entries()) {
@@ -212,8 +333,13 @@ export async function uploadClubGallery(clubId: string, localUris: string[]) {
         : 'image/jpeg';
 
     if (Platform.OS === 'web') {
-      const response = await fetch(uri);
-      const blob = await response.blob();
+      let blob: Blob;
+      try {
+        const response = await fetch(uri);
+        blob = await response.blob();
+      } catch {
+        throw new Error('Не удалось прочитать локальный файл галереи');
+      }
       formData.append('gallery', blob, fileName);
     } else {
       formData.append(
@@ -227,8 +353,19 @@ export async function uploadClubGallery(clubId: string, localUris: string[]) {
     }
   }
 
+  return formData;
+}
+
+export async function uploadClubGallery(clubId: string, localUris: string[]) {
   return apiMultipart<ClubListItem>(
     `/clubs/${encodeURIComponent(clubId)}/gallery`,
-    formData,
+    await buildGalleryFormData(localUris),
+  );
+}
+
+export async function appendClubGallery(clubId: string, localUris: string[]) {
+  return apiMultipart<ClubListItem>(
+    `/clubs/${encodeURIComponent(clubId)}/gallery/items`,
+    await buildGalleryFormData(localUris),
   );
 }

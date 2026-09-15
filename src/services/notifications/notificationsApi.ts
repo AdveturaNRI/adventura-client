@@ -8,7 +8,9 @@ export type PortalNotification = {
     | 'game_application'
     | 'game_application_accepted'
     | 'game_application_rejected'
-    | 'game_player_removed';
+    | 'game_player_removed'
+    | 'game_deleted'
+    | 'club_deleted';
   actor: {
     id: string;
     nickname: string;

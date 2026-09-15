@@ -17,18 +17,30 @@ function formatTimeInput(raw: string) {
 }
 
 function completeTime(value: string) {
-  const trimmed = value.trim();
-  if (/^\d{2}:\d{2}$/.test(trimmed)) {
-    return trimmed;
+  const digits = value.replace(/\D/g, '').slice(0, 4);
+  if (!digits.length) {
+    return '';
   }
-  const digits = trimmed.replace(/\D/g, '');
-  if (digits.length === 3) {
-    return `0${digits[0]}:${digits.slice(1)}`;
+
+  let hours: number;
+  let minutes: number;
+  if (digits.length === 1) {
+    hours = Number(digits);
+    minutes = 0;
+  } else if (digits.length === 2) {
+    hours = Number(digits);
+    minutes = 0;
+  } else if (digits.length === 3) {
+    hours = Number(digits[0]);
+    minutes = Number(digits.slice(1));
+  } else {
+    hours = Number(digits.slice(0, 2));
+    minutes = Number(digits.slice(2));
   }
-  if (digits.length === 4) {
-    return `${digits.slice(0, 2)}:${digits.slice(2)}`;
-  }
-  return trimmed;
+
+  hours = Math.min(23, Math.max(0, hours));
+  minutes = Math.min(59, Math.max(0, minutes));
+  return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
 }
 
 function createStyles(colors: ThemeColors, isDesktopWeb: boolean) {
@@ -190,42 +202,46 @@ export function ClubScheduleEditor({ value, onChange }: Props) {
   const isDesktopWeb = useIsDesktopWeb();
   const styles = useThemedStyles((themeColors) => createStyles(themeColors, isDesktopWeb));
 
-  const workingDays = value.filter((day) => !day.closed).sort((a, b) => a.day - b.day);
+  const savedByDay = new Map(value.map((item) => [item.day, item]));
+  const schedule: ClubScheduleDay[] = WEEK_DAYS.map(
+    (day) => savedByDay.get(day) ?? { day, closed: true, open: null, close: null },
+  );
+  const workingDays = schedule.filter((day) => !day.closed).sort((a, b) => a.day - b.day);
 
   const updateDay = (day: number, patch: Partial<ClubScheduleDay>) => {
-    onChange(
-      value.map((item) => {
-        if (item.day !== day) {
-          return item;
-        }
-        const next = { ...item, ...patch };
-        if (next.closed) {
-          return { ...next, open: null, close: null };
-        }
-        return {
-          ...next,
-          open: next.open || '12:00',
-          close: next.close || '22:00',
-        };
-      }),
-    );
+    onChange(schedule.map((item) => (item.day === day ? { ...item, ...patch } : item)));
+  };
+
+  const setDayTime = (day: number, field: 'open' | 'close', raw: string) => {
+    updateDay(day, { [field]: formatTimeInput(raw) });
+  };
+
+  const commitDayTime = (day: number, field: 'open' | 'close') => {
+    const current = schedule.find((item) => item.day === day);
+    const completed = completeTime(current?.[field] ?? '');
+    updateDay(day, { [field]: completed });
   };
 
   const toggleDay = (day: number) => {
-    const current = value.find((item) => item.day === day);
-    if (!current) {
+    const current = schedule.find((item) => item.day === day)!;
+    if (current.closed) {
+      updateDay(day, {
+        closed: false,
+        open: current.open || '12:00',
+        close: current.close || '22:00',
+      });
       return;
     }
-    updateDay(day, { closed: !current.closed });
+    updateDay(day, { closed: true, open: null, close: null });
   };
 
   const applyWeekdaysFromMonday = () => {
-    const mon = value.find((d) => d.day === 1);
+    const mon = schedule.find((d) => d.day === 1);
     if (!mon || mon.closed) {
       return;
     }
     onChange(
-      value.map((item) =>
+      schedule.map((item) =>
         item.day >= 1 && item.day <= 5
           ? { ...item, closed: false, open: mon.open, close: mon.close }
           : item,
@@ -235,7 +251,7 @@ export function ClubScheduleEditor({ value, onChange }: Props) {
 
   const markWeekendOff = () => {
     onChange(
-      value.map((item) =>
+      schedule.map((item) =>
         item.day >= 6 ? { ...item, closed: true, open: null, close: null } : item,
       ),
     );
@@ -247,7 +263,7 @@ export function ClubScheduleEditor({ value, onChange }: Props) {
       return;
     }
     onChange(
-      value.map((item) =>
+      schedule.map((item) =>
         item.closed
           ? item
           : { ...item, open: source.open, close: source.close },
@@ -261,7 +277,7 @@ export function ClubScheduleEditor({ value, onChange }: Props) {
         <Text style={styles.blockHint}>Нажмите дни, когда клуб открыт</Text>
         <View style={styles.daysRow}>
           {WEEK_DAYS.map((day) => {
-            const item = value.find((entry) => entry.day === day);
+            const item = schedule.find((entry) => entry.day === day);
             const isSelected = Boolean(item && !item.closed);
 
             return (
@@ -320,13 +336,14 @@ export function ClubScheduleEditor({ value, onChange }: Props) {
                     <Text style={styles.timeLabel}>с</Text>
                     <TextInput
                       value={item.open ?? ''}
-                      onChangeText={(open) => updateDay(item.day, { open: formatTimeInput(open) })}
-                      onBlur={() =>
-                        updateDay(item.day, { open: completeTime(item.open ?? '') })
-                      }
-                      placeholder="12:00"
+                      onChangeText={(open) => setDayTime(item.day, 'open', open)}
+                      onBlur={() => commitDayTime(item.day, 'open')}
+                      placeholder="чч:мм"
                       placeholderTextColor={colors.textMuted}
                       keyboardType="number-pad"
+                      inputMode="numeric"
+                      selectTextOnFocus
+                      autoCorrect={false}
                       maxLength={5}
                       style={styles.timeInput}
                     />
@@ -336,15 +353,14 @@ export function ClubScheduleEditor({ value, onChange }: Props) {
                     <Text style={styles.timeLabel}>до</Text>
                     <TextInput
                       value={item.close ?? ''}
-                      onChangeText={(close) =>
-                        updateDay(item.day, { close: formatTimeInput(close) })
-                      }
-                      onBlur={() =>
-                        updateDay(item.day, { close: completeTime(item.close ?? '') })
-                      }
-                      placeholder="22:00"
+                      onChangeText={(close) => setDayTime(item.day, 'close', close)}
+                      onBlur={() => commitDayTime(item.day, 'close')}
+                      placeholder="чч:мм"
                       placeholderTextColor={colors.textMuted}
                       keyboardType="number-pad"
+                      inputMode="numeric"
+                      selectTextOnFocus
+                      autoCorrect={false}
                       maxLength={5}
                       style={styles.timeInput}
                     />

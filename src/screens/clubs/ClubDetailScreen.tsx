@@ -4,6 +4,7 @@ import { useCallback, useState } from 'react';
 import { useFocusEffect, useLocalSearchParams } from 'expo-router';
 import {
   ActivityIndicator,
+  Linking,
   Platform,
   Pressable,
   ScrollView,
@@ -83,6 +84,14 @@ function createStyles(
     headerSide: {
       width: 40,
       justifyContent: 'center',
+    },
+    headerAction: {
+      width: 40,
+      height: 40,
+      borderRadius: 20,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: colors.surfaceMuted,
     },
     headerTitle: {
       flex: 1,
@@ -273,6 +282,33 @@ function createStyles(
       color: colors.text,
       letterSpacing: -0.3,
     },
+    tagsRow: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: 8,
+    },
+    tag: {
+      borderRadius: Radius.pill,
+      paddingHorizontal: 10,
+      paddingVertical: 6,
+      backgroundColor: 'rgba(21, 122, 254, 0.1)',
+    },
+    tagText: {
+      color: colors.primary,
+      fontSize: FontSize.caption,
+      fontWeight: '600',
+    },
+    linkRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+      minHeight: 40,
+    },
+    linkText: {
+      color: colors.primary,
+      fontSize: FontSize.label,
+      fontWeight: '600',
+    },
     scheduleGrid: {
       flexDirection: 'row',
       flexWrap: 'wrap',
@@ -416,7 +452,17 @@ export default function ClubDetailScreen() {
             <Text style={styles.headerTitle} numberOfLines={1}>
               {club?.name ?? 'Клуб'}
             </Text>
-            <View style={styles.headerSide} />
+            <View style={styles.headerSide}>
+              {club?.canManage ? (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Настройки клуба"
+                  onPress={() => router.push({ pathname: '/clubs-edit', params: { id: club.id } })}
+                  style={({ pressed }) => [styles.headerAction, pressed && { opacity: 0.8 }]}>
+                  <Ionicons name="settings-outline" size={20} color={colors.primary} />
+                </Pressable>
+              ) : null}
+            </View>
           </View>
 
           {loading ? (
@@ -503,6 +549,16 @@ export default function ClubDetailScreen() {
                   <Text style={styles.description}>{club.description.trim()}</Text>
                 ) : null}
 
+                {club.tags.length > 0 ? (
+                  <View style={styles.tagsRow}>
+                    {club.tags.map((tag) => (
+                      <View key={tag} style={styles.tag}>
+                        <Text style={styles.tagText}>{tag}</Text>
+                      </View>
+                    ))}
+                  </View>
+                ) : null}
+
                 <View style={styles.metaLine}>
                   <View style={styles.metaIcon}>
                     <Ionicons name="location" size={16} color={colors.primary} />
@@ -542,6 +598,22 @@ export default function ClubDetailScreen() {
                       );
                     })}
                   </View>
+                </View>
+              ) : null}
+
+              {club.links.length > 0 ? (
+                <View style={styles.section}>
+                  <Text style={styles.sectionTitle}>Контакты</Text>
+                  {club.links.map((link) => (
+                    <Pressable
+                      key={`${link.label}:${link.url}`}
+                      accessibilityRole="link"
+                      onPress={() => void Linking.openURL(link.url)}
+                      style={({ pressed }) => [styles.linkRow, pressed && { opacity: 0.75 }]}>
+                      <Ionicons name="link-outline" size={18} color={colors.primary} />
+                      <Text style={styles.linkText}>{link.label}</Text>
+                    </Pressable>
+                  ))}
                 </View>
               ) : null}
 
