@@ -1,9 +1,10 @@
 import { type Href, useRouter } from 'expo-router';
-import { Platform, Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import { Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { NotFoundArt } from '@/components/errors/NotFoundArt';
 import { ScreenTransition } from '@/components/navigation/ScreenTransition';
+import { navigateBack } from '@/components/navigation/navigate-back';
 import { Button } from '@/components/ui';
 import { MAIN_APP_ENTRY } from '@/components/ui/navigation/navbar.config';
 import { FontSize, Radius, Spacing, type ThemeColors } from '@/constants/theme';
@@ -95,17 +96,7 @@ export default function NotFoundScreen() {
   };
 
   const goBack = () => {
-    if (Platform.OS === 'web' && typeof window !== 'undefined' && window.history.length > 1) {
-      window.history.back();
-      return;
-    }
-
-    if (router.canGoBack()) {
-      router.back();
-      return;
-    }
-
-    router.replace(MAIN_APP_ENTRY);
+    navigateBack({ router, fallbackHref: MAIN_APP_ENTRY });
   };
 
   return (

@@ -7,6 +7,7 @@ export type BadgeVariant =
   | 'role'
   | 'roleFilled'
   | 'filter'
+  | 'unread'
   | 'visibilityPrivate';
 
 export type BadgeSpec = {
@@ -103,6 +104,18 @@ export function getBadgeSpecs(colors: ThemeColors): BadgeSpec[] {
       backgroundColor: colors.surface,
       borderColor: colors.border,
       textColor: colors.textSecondary,
+      fontSize: FontSize.caption,
+      minHeight: 28,
+      borderRadius: Radius.pill,
+      paddingHorizontal: Spacing.sm,
+    },
+    {
+      variant: 'unread',
+      label: '1',
+      description: 'Счётчик непрочитанных',
+      backgroundColor: colors.destructive,
+      borderColor: 'transparent',
+      textColor: colors.onPrimary,
       fontSize: FontSize.caption,
       minHeight: 28,
       borderRadius: Radius.pill,

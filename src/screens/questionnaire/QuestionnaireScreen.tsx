@@ -1,9 +1,9 @@
 import { useLocalSearchParams, useNavigation, useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Platform, ScrollView, Text, View } from 'react-native';
-import type { NavigationAction } from '@react-navigation/native';
 
 import { useIsDesktopWeb } from '@/components/navigation/DesktopThemeToggle';
+import { navigateBack } from '@/components/navigation/navigate-back';
 import { DeleteQuestionnaireDialog } from '@/components/questionnaire/DeleteQuestionnaireDialog';
 import {
   QuestionnaireFooterActions,
@@ -73,6 +73,10 @@ import { useQuestionnaireScreenStyles, getQuestionnaireColumnWidth } from './que
 
 const LAST_IMPLEMENTED_STEP_INDEX = QUESTIONNAIRE_STEPS.length - 1;
 
+type PendingNavigationAction = Parameters<
+  ReturnType<typeof useNavigation>['dispatch']
+>[0];
+
 export default function QuestionnaireScreen() {
   const router = useRouter();
   const navigation = useNavigation();
@@ -104,7 +108,7 @@ export default function QuestionnaireScreen() {
   const [isDeleting, setIsDeleting] = useState(false);
   const hydratedProfileIdRef = useRef<string | null>(null);
   const allowLeaveWithoutPromptRef = useRef(false);
-  const pendingNavigationActionRef = useRef<NavigationAction | null>(null);
+  const pendingNavigationActionRef = useRef<PendingNavigationAction | null>(null);
   const consumedEditParamRef = useRef(false);
   const scrollRef = useRef<ScrollView>(null);
 
@@ -212,7 +216,13 @@ export default function QuestionnaireScreen() {
       return;
     }
 
-    router.back();
+    navigateBack({
+      router,
+      pathname: '/questionnaire',
+      fallbackHref: '/profile',
+      navigationCanGoBack: navigation.canGoBack(),
+      navigationGoBack: () => navigation.goBack(),
+    });
   }, [navigation, router]);
 
   useEffect(() => {
@@ -348,7 +358,7 @@ export default function QuestionnaireScreen() {
 
           if (navigateAwayOnExit) {
             allowLeaveWithoutPromptRef.current = true;
-            router.back();
+            navigateBack({ router, pathname: '/questionnaire', fallbackHref: '/profile' });
           }
 
           return true;
@@ -364,7 +374,7 @@ export default function QuestionnaireScreen() {
           if (mode === 'exit') {
             if (navigateAwayOnExit) {
               allowLeaveWithoutPromptRef.current = true;
-              router.back();
+              navigateBack({ router, pathname: '/questionnaire', fallbackHref: '/profile' });
             }
           } else if (stepIndex < LAST_IMPLEMENTED_STEP_INDEX) {
             setStepIndex(nextUiStepIndex);
@@ -439,7 +449,7 @@ export default function QuestionnaireScreen() {
         setIsDeleteDialogVisible(false);
         allowLeaveWithoutPromptRef.current = true;
         toast.success(QUESTIONNAIRE_DELETED_TOAST);
-        router.back();
+        navigateBack({ router, pathname: '/questionnaire', fallbackHref: '/profile' });
       } catch (error) {
         toast.error(localizeErrorMessage(error, 'Не удалось удалить анкету'));
       } finally {
@@ -477,7 +487,13 @@ export default function QuestionnaireScreen() {
       return;
     }
 
-    router.back();
+    navigateBack({
+      router,
+      pathname: '/questionnaire',
+      fallbackHref: '/profile',
+      navigationCanGoBack: navigation.canGoBack(),
+      navigationGoBack: () => navigation.goBack(),
+    });
   };
 
   const handleStepPress = useCallback(

@@ -1,11 +1,20 @@
 import { Ionicons } from '@expo/vector-icons';
 import { usePathname, useRouter } from 'expo-router';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { useEffect, useRef, useState } from 'react';
+import { Animated, Pressable, StyleSheet, Text } from 'react-native';
 
+import { createMobileHeaderButtonStyles } from '@/components/navigation/mobile-header-button.styles';
 import { type ThemeColors } from '@/constants/theme';
 import { useRealtimeOptional } from '@/context/RealtimeContext';
 import { useTheme } from '@/hooks/use-theme';
 import { useThemedStyles } from '@/hooks/use-themed-styles';
+import { formatUnreadBadge } from '@/utils/unread-badge';
+
+type NotificationButtonVariant = 'default' | 'compact';
+
+type NotificationButtonProps = {
+  variant?: NotificationButtonVariant;
+};
 
 function createStyles(colors: ThemeColors) {
   return StyleSheet.create({
@@ -43,6 +52,13 @@ function createStyles(colors: ThemeColors) {
       justifyContent: 'center',
       backgroundColor: colors.destructive,
     },
+    badgeCompact: {
+      top: 2,
+      right: 2,
+      minWidth: 15,
+      height: 15,
+      borderRadius: 8,
+    },
     badgeText: {
       fontSize: 10,
       fontWeight: '700',
@@ -51,15 +67,44 @@ function createStyles(colors: ThemeColors) {
   });
 }
 
-export function NotificationButton() {
+export function NotificationButton({ variant = 'default' }: NotificationButtonProps) {
   const router = useRouter();
   const pathname = usePathname();
   const colors = useTheme();
   const styles = useThemedStyles(createStyles);
+  const compactStyles = useThemedStyles(createMobileHeaderButtonStyles);
   const realtime = useRealtimeOptional();
   const unread = realtime?.unreadNotifications ?? 0;
+  const isCompact = variant === 'compact';
 
   const isActive = pathname.startsWith('/notifications');
+  const [displayedCount, setDisplayedCount] = useState(unread);
+  const badgeOpacity = useRef(new Animated.Value(unread > 0 ? 1 : 0)).current;
+  const badgeScale = useRef(new Animated.Value(unread > 0 ? 1 : 0.85)).current;
+
+  useEffect(() => {
+    const visible = unread > 0;
+    if (visible) {
+      setDisplayedCount(unread);
+    }
+
+    Animated.parallel([
+      Animated.timing(badgeOpacity, {
+        toValue: visible ? 1 : 0,
+        duration: 220,
+        useNativeDriver: true,
+      }),
+      Animated.timing(badgeScale, {
+        toValue: visible ? 1 : 0.85,
+        duration: 220,
+        useNativeDriver: true,
+      }),
+    ]).start(({ finished }) => {
+      if (finished && !visible) {
+        setDisplayedCount(0);
+      }
+    });
+  }, [unread, badgeOpacity, badgeScale]);
 
   const handlePress = () => {
     if (!isActive) {
@@ -67,26 +112,37 @@ export function NotificationButton() {
     }
   };
 
+  const badgeLabel = formatUnreadBadge(displayedCount);
+
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel="Уведомления"
+      accessibilityLabel={
+        unread > 0 ? `Уведомления, непрочитанных: ${unread}` : 'Уведомления'
+      }
       accessibilityState={{ selected: isActive }}
       onPress={handlePress}
-      style={({ pressed }) => [
-        styles.button,
-        isActive && styles.buttonActive,
-        pressed && styles.pressed,
-      ]}>
+      hitSlop={isCompact ? 8 : undefined}
+      style={({ pressed }) =>
+        isCompact
+          ? [compactStyles.button, pressed && compactStyles.buttonPressed]
+          : [styles.button, isActive && styles.buttonActive, pressed && styles.pressed]
+      }>
       <Ionicons
         name={isActive ? 'notifications' : 'notifications-outline'}
-        size={22}
-        color={isActive ? colors.primary : colors.textMuted}
+        size={isCompact ? 20 : 22}
+        color={isActive ? colors.primary : isCompact ? colors.text : colors.textMuted}
       />
-      {unread > 0 ? (
-        <View style={styles.badge}>
-          <Text style={styles.badgeText}>{unread > 9 ? '9+' : String(unread)}</Text>
-        </View>
+      {badgeLabel ? (
+        <Animated.View
+          pointerEvents="none"
+          style={[
+            styles.badge,
+            isCompact && styles.badgeCompact,
+            { opacity: badgeOpacity, transform: [{ scale: badgeScale }] },
+          ]}>
+          <Text style={styles.badgeText}>{badgeLabel}</Text>
+        </Animated.View>
       ) : null}
     </Pressable>
   );

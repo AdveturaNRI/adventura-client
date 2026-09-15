@@ -14,7 +14,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useIsDesktopWeb, useIsDesktopSidebarVisible } from '@/components/navigation/DesktopThemeToggle';
 import { DESKTOP_SIDEBAR_WIDTH } from '@/components/navigation/MainDesktopSidebar';
-import { MobileMenuButton } from '@/components/navigation/MobileMenuButton';
+import { MobileScreenHeader } from '@/components/navigation/MobileScreenHeader';
 import { Button, UserCard, toast, type SwipeDismissRequest } from '@/components/ui';
 import type { UserCardDeckSize } from '@/components/ui/cards/UserCard';
 import { FontSize, Spacing, type ThemeColors } from '@/constants/theme';
@@ -206,29 +206,6 @@ function createStyles(
       fontWeight: '700',
       color: colors.text,
       letterSpacing: -0.3,
-    },
-    mobileScreenTitle: {
-      flex: 1,
-      fontSize: 18,
-      fontWeight: '700',
-      color: colors.text,
-      textAlign: 'center',
-      letterSpacing: -0.2,
-    },
-    mobileHeaderRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      minHeight: 40,
-    },
-    mobileHeaderSide: {
-      width: 40,
-      justifyContent: 'center',
-    },
-    mobileHeaderSideLeft: {
-      alignItems: 'flex-start',
-    },
-    mobileHeaderSideRight: {
-      alignItems: 'flex-end',
     },
     subtitle: {
       fontSize: FontSize.caption,
@@ -1057,13 +1034,7 @@ export function WandererDeck({
     if (showCompactNav) {
       return (
         <View style={styles.header} onLayout={onHeaderLayout}>
-          <View style={styles.mobileHeaderRow}>
-            <View style={[styles.mobileHeaderSide, styles.mobileHeaderSideLeft]} />
-            <Text style={styles.mobileScreenTitle}>{WANDERERS_SCREEN.title}</Text>
-            <View style={[styles.mobileHeaderSide, styles.mobileHeaderSideRight]}>
-              <MobileMenuButton />
-            </View>
-          </View>
+          <MobileScreenHeader title={WANDERERS_SCREEN.title} />
           {filtersSlot}
         </View>
       );

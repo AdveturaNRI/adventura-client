@@ -126,7 +126,7 @@ export function MenuItem({
         <Text style={[styles.label, isDanger && styles.labelDanger]}>{label}</Text>
         {subtitle ? <Text style={styles.subtitle}>{subtitle}</Text> : null}
       </View>
-      {badge ? <Badge label={badge} variant="filter" /> : null}
+      {badge ? <Badge label={badge} variant="unread" /> : null}
     </Pressable>
   );
 }

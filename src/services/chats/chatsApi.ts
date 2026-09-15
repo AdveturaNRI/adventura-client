@@ -33,7 +33,8 @@ export type ChatMessageKind =
   | 'favorite_received'
   | 'favorite_removed'
   | 'user_blocked'
-  | 'user_unblocked';
+  | 'user_unblocked'
+  | 'game_deleted';
 
 export type ChatMessageSender = {
   id: string;
@@ -51,6 +52,7 @@ export type ChatMessage = {
   createdAt: string;
   image: Partial<Record<string, string>> | null;
   attachment: ChatAttachment | null;
+  attachments?: ChatAttachment[];
 };
 
 export type ConversationListItem = {
@@ -86,6 +88,35 @@ export type MessagesPage = {
   blockedByMe?: boolean;
   blockedMe?: boolean;
 };
+
+export const MAX_CHAT_ATTACHMENTS = 10;
+
+export function normalizeMessageAttachments(message: ChatMessage): ChatAttachment[] {
+  if (Array.isArray(message.attachments) && message.attachments.length > 0) {
+    return message.attachments;
+  }
+  if (message.attachment) {
+    return [message.attachment];
+  }
+  if (message.image) {
+    const url =
+      message.image.original ??
+      message.image.large ??
+      message.image.medium ??
+      message.image.thumb ??
+      null;
+    return [
+      {
+        kind: 'image',
+        name: 'Фото',
+        mimeType: 'image/*',
+        url,
+        image: message.image,
+      },
+    ];
+  }
+  return [];
+}
 
 export function listConversations() {
   return apiRequest<ConversationListItem[]>('/chats');
@@ -159,13 +190,21 @@ export function unblockPeerByUserId(userId: string) {
   });
 }
 
+export type ChatUploadFile = {
+  uri: string;
+  name: string;
+  mimeType: string;
+};
+
 export async function sendChatMessage(
   conversationId: string,
   options: {
     body?: string;
+    /** @deprecated Prefer `files` for albums. */
     fileUri?: string;
     fileName?: string;
     mimeType?: string;
+    files?: ChatUploadFile[];
   },
 ) {
   const formData = new FormData();
@@ -174,17 +213,30 @@ export async function sendChatMessage(
     formData.append('body', options.body.trim());
   }
 
-  if (options.fileUri) {
-    const fileName = options.fileName ?? 'attachment';
-    const mimeType = options.mimeType ?? 'application/octet-stream';
+  const files: ChatUploadFile[] =
+    options.files && options.files.length > 0
+      ? options.files
+      : options.fileUri
+        ? [
+            {
+              uri: options.fileUri,
+              name: options.fileName ?? 'attachment',
+              mimeType: options.mimeType ?? 'application/octet-stream',
+            },
+          ]
+        : [];
+
+  for (const file of files) {
+    const fileName = file.name || 'attachment';
+    const mimeType = file.mimeType || 'application/octet-stream';
 
     if (Platform.OS === 'web') {
-      const response = await fetch(options.fileUri);
+      const response = await fetch(file.uri);
       const blob = await response.blob();
-      formData.append('file', blob, fileName);
+      formData.append('files', blob, fileName);
     } else {
-      formData.append('file', {
-        uri: options.fileUri,
+      formData.append('files', {
+        uri: file.uri,
         name: fileName,
         type: mimeType,
       } as unknown as Blob);

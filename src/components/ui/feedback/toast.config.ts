@@ -9,6 +9,8 @@ export type ToastPosition = 'top' | 'bottom';
 
 export type ToastAlignment = 'left' | 'center' | 'right';
 
+export type ToastEmphasis = 'default' | 'alert' | 'chat';
+
 export type ToastVariantSpec = {
   variant: ToastVariant;
   label: string;

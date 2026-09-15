@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import { useCallback, useState } from 'react';
-import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
+import { useFocusEffect, useLocalSearchParams } from 'expo-router';
 import {
   ActivityIndicator,
   Linking,
@@ -388,7 +388,6 @@ function createStyles(
 }
 
 export default function ClubDetailScreen() {
-  const router = useRouter();
   const params = useLocalSearchParams<{ id?: string }>();
   const clubId =
     typeof params.id === 'string' ? params.id : Array.isArray(params.id) ? params.id[0] : '';
@@ -448,7 +447,7 @@ export default function ClubDetailScreen() {
         <View style={styles.inner}>
           <View style={styles.headerRow}>
             <View style={styles.headerSide}>
-              <MobileBackButton onPress={() => router.back()} />
+              <MobileBackButton />
             </View>
             <Text style={styles.headerTitle} numberOfLines={1}>
               {club?.name ?? 'Клуб'}

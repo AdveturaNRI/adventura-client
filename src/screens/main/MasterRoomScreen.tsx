@@ -785,12 +785,14 @@ export default function MasterRoomScreen() {
           {showCompactNav ? (
             <View style={styles.headerBlock}>
               <MobileScreenHeader title="Кабинет мастера" showBack />
-              <Button
-                label="Создать игру"
-                icon={<MenuIcon name="dragon" size={18} />}
-                onPress={openCreate}
-                style={styles.createButtonMobile}
-              />
+              {items.length > 0 ? (
+                <Button
+                  label="Создать игру"
+                  icon={<MenuIcon name="dragon" size={18} />}
+                  onPress={openCreate}
+                  style={styles.createButtonMobile}
+                />
+              ) : null}
             </View>
           ) : (
             <View style={styles.headerRow}>

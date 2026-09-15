@@ -10,7 +10,10 @@ import {
 
 import { useAuth } from '@/context/AuthContext';
 import type { ChatMessage, ConversationListItem } from '@/services/chats/chatsApi';
-import type { PortalNotification } from '@/services/notifications/notificationsApi';
+import {
+  getNotificationsUnreadCount,
+  type PortalNotification,
+} from '@/services/notifications/notificationsApi';
 import {
   bindRealtimeHandlers,
   connectRealtime,
@@ -97,6 +100,9 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
     }
 
     connectRealtime(token);
+    let cancelled = false;
+    let hasUnreadSynced = false;
+
     const unbind = bindRealtimeHandlers({
       onMessageNew: (message) => {
         setLastMessage(message);
@@ -129,19 +135,36 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
       onPresenceUpdate: setLastPresence,
       onNotificationNew: (notification) => {
         setLastNotification(notification);
+        if (!notification.readAt) {
+          setUnreadNotifications((prev) => prev + 1);
+        }
         notifyIncomingPortalNotification({
           type: notification.type,
           actorName: notification.actor.nickname,
           subject: notification.subject,
+          actionText: notification.actionText,
+          messageText: notification.messageText,
         });
       },
       onUnreadSync: (payload: UnreadSyncPayload) => {
+        hasUnreadSynced = true;
         setUnreadChats(payload.chats);
         setUnreadNotifications(payload.notifications);
       },
     });
 
+    void getNotificationsUnreadCount()
+      .then((result) => {
+        if (!cancelled && !hasUnreadSynced) {
+          setUnreadNotifications(result.count);
+        }
+      })
+      .catch(() => {
+        // Keep 0 until the first unread:sync from the socket.
+      });
+
     return () => {
+      cancelled = true;
       unbind();
     };
   }, [isAuthenticated, token]);
