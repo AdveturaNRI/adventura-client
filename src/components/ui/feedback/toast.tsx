@@ -30,10 +30,18 @@ const DEFAULT_TITLES: Record<ToastVariant, string> = {
 };
 
 function showToast(variant: ToastVariant, options: ShowToastOptions) {
+  const hasCustomTitle = Boolean(options.title?.trim());
+  const title = hasCustomTitle
+    ? options.title
+    : options.message?.trim()
+      ? options.message
+      : DEFAULT_TITLES[variant];
+  const message = hasCustomTitle ? options.message : undefined;
+
   Toast.show({
     type: variant,
-    text1: options.title ?? DEFAULT_TITLES[variant],
-    text2: options.message,
+    text1: title,
+    text2: message,
     position: options.position ?? 'top',
     visibilityTime: options.duration ?? 3500,
     props: {

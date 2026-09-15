@@ -15,6 +15,8 @@ export type DiceRollPayload = {
   sum: number | null;
   hidden: boolean;
   redacted?: boolean;
+  /** Hex `#RRGGBB` цвета кубов отправителя. */
+  color?: string;
 };
 
 export type DiceRollDieInput = {
@@ -63,6 +65,10 @@ export function parseDiceRollPayload(body: string | null | undefined): DiceRollP
     if (parsed?.v !== DICE_ROLL_PAYLOAD_VERSION || typeof parsed.formula !== 'string') {
       return null;
     }
+    const color =
+      typeof parsed.color === 'string' && /^#[0-9A-Fa-f]{6}$/.test(parsed.color.trim())
+        ? `#${parsed.color.trim().slice(1).toUpperCase()}`
+        : undefined;
     return {
       v: DICE_ROLL_PAYLOAD_VERSION,
       formula: parsed.formula,
@@ -72,6 +78,7 @@ export function parseDiceRollPayload(body: string | null | undefined): DiceRollP
       sum: typeof parsed.sum === 'number' ? parsed.sum : null,
       hidden: Boolean(parsed.hidden),
       redacted: Boolean(parsed.redacted),
+      ...(color ? { color } : {}),
     };
   } catch {
     return null;

@@ -117,7 +117,18 @@ export async function enableWebPush(): Promise<{ ok: boolean; reason?: string }>
   const vapid = await apiRequest<VapidPublicKeyResponse>('/push/vapid-public-key', {
     skipLoading: true,
   });
-  if (!vapid.enabled || !vapid.publicKey) {
+  if (!vapid?.enabled || !vapid.publicKey?.trim()) {
+    return { ok: false, reason: 'server_disabled' };
+  }
+
+  let applicationServerKey: Uint8Array;
+  try {
+    applicationServerKey = urlBase64ToUint8Array(vapid.publicKey.trim());
+    // VAPID public key is an uncompressed P-256 point (65 bytes).
+    if (applicationServerKey.byteLength !== 65) {
+      return { ok: false, reason: 'server_disabled' };
+    }
+  } catch {
     return { ok: false, reason: 'server_disabled' };
   }
 
@@ -129,11 +140,28 @@ export async function enableWebPush(): Promise<{ ok: boolean; reason?: string }>
   await navigator.serviceWorker.ready;
 
   let subscription = await registration.pushManager.getSubscription();
-  if (!subscription) {
-    subscription = await registration.pushManager.subscribe({
-      userVisibleOnly: true,
-      applicationServerKey: urlBase64ToUint8Array(vapid.publicKey) as BufferSource,
-    });
+  try {
+    if (!subscription) {
+      subscription = await registration.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: applicationServerKey as BufferSource,
+      });
+    }
+  } catch {
+    // Старая подписка могла быть на другой/битый VAPID — пересоздаём.
+    try {
+      await subscription?.unsubscribe();
+    } catch {
+      // ignore
+    }
+    try {
+      subscription = await registration.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: applicationServerKey as BufferSource,
+      });
+    } catch {
+      return { ok: false, reason: 'subscribe_failed' };
+    }
   }
 
   const json = subscription.toJSON();

@@ -1888,13 +1888,22 @@ export default function ChatThreadScreen() {
       dice: { sides: number; qty: number }[];
       modifier: number;
       hidden: boolean;
+      color: string;
     }) => {
       if (!conversationId || diceRollBusy || conversation?.blockedMe) {
         return;
       }
       setDiceRollBusy(true);
       try {
-        const message = await sendChatDiceRoll(conversationId, input);
+        let message = await sendChatDiceRoll(conversationId, input);
+        // Если бэкенд ещё не сохраняет color — всё равно анимируем выбранный цвет у себя.
+        const rolled = parseDiceRollPayload(message.body);
+        if (rolled && !rolled.color && input.color) {
+          message = {
+            ...message,
+            body: JSON.stringify({ ...rolled, color: input.color }),
+          };
+        }
         setDicePopoverOpen(false);
         setEmojiPanelOpen(false);
         emojiPanelOpenRef.current = false;

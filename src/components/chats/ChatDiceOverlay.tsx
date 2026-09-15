@@ -14,6 +14,7 @@ import {
   getDiceAnimationsEnabledSync,
   loadDiceAnimationsEnabled,
 } from '@/utils/dice-animations-storage';
+import { coerceDiceAccent } from '@/utils/dice-color-storage';
 
 export type ChatDiceOverlayRequest = {
   messageId: string;
@@ -106,7 +107,9 @@ export function ChatDiceOverlay({ request, onFinished }: ChatDiceOverlayProps) {
   const stageRef = useRef<DiceStageHandle>(null);
   const onFinishedRef = useRef(onFinished);
   onFinishedRef.current = onFinished;
-  const { accent } = useDiceAccentColor();
+  const { accent: localAccent } = useDiceAccentColor();
+  // Цвет отправителя из payload; если API ещё не отдал — локальный выбор из меню.
+  const rollAccent = coerceDiceAccent(request?.payload.color ?? localAccent);
 
   const [stageReady, setStageReady] = useState(false);
   const [showResult, setShowResult] = useState(false);
@@ -119,7 +122,7 @@ export function ChatDiceOverlay({ request, onFinished }: ChatDiceOverlayProps) {
 
   useEffect(() => {
     setStageReady(false);
-  }, [accent]);
+  }, [rollAccent]);
 
   useEffect(() => {
     if (!request) {
@@ -193,9 +196,9 @@ export function ChatDiceOverlay({ request, onFinished }: ChatDiceOverlayProps) {
       collapsable={false}>
       <View style={styles.stage} pointerEvents="none">
         <DiceStage
-          key={accent}
+          key={rollAccent}
           ref={stageRef}
-          accent={accent}
+          accent={rollAccent}
           transparent
           onReady={() => setStageReady(true)}
         />
