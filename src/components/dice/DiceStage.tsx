@@ -99,8 +99,10 @@ export const DiceStage = forwardRef<DiceStageHandle, DiceStageProps>(function Di
         send({ type: 'preview', notation: notation ?? [], speed: speedRef.current });
       },
       clear: () => {
+        const pending = pendingRef.current;
         pendingRef.current = null;
         send({ type: 'clear' });
+        pending?.reject(new Error('Dice roll cleared'));
       },
       resize: () => {
         send({ type: 'resize' });

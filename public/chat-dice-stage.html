@@ -4,15 +4,26 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
   <style>
-    html, body, #dice-box {
+    html, body {
       margin: 0;
       width: 100%;
       height: 100%;
+      position: absolute;
+      inset: 0;
       background: transparent;
       overflow: hidden;
       pointer-events: none;
     }
-    #dice-box { position: relative; }
+    #dice-box {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      margin: 0;
+      background: transparent;
+      overflow: hidden;
+      pointer-events: none;
+    }
     #dice-box canvas {
       width: 100% !important;
       height: 100% !important;
@@ -209,6 +220,8 @@
     try {
       box = new DiceBox('#dice-box', buildBoxConfig(true, currentSpeed));
       await box.initialize();
+      // Mobile Safari часто инициализирует iframe до layout → 0×0. Дожидаемся размера.
+      await syncWorldSize();
       ready = true;
       post({ type: 'ready' });
     } catch (err) {
@@ -217,6 +230,7 @@
         document.getElementById('dice-box')?.replaceChildren();
         box = new DiceBox('#dice-box', buildBoxConfig(false, currentSpeed));
         await box.initialize();
+        await syncWorldSize();
         ready = true;
         post({ type: 'ready' });
       } catch (err2) {
@@ -284,14 +298,71 @@
       }
     }
 
+    function readContainerSize() {
+      const el = box?.container;
+      if (!el) return { w: 0, h: 0 };
+      const w = el.clientWidth || el.offsetWidth || 0;
+      const h = el.clientHeight || el.offsetHeight || 0;
+      return { w, h };
+    }
+
+    /**
+     * resizeWorld() только вешает window.resize listener и сам размер не ставит.
+     * setDimensions() без аргументов берёт clientWidth/2 — мир и камера ломаются.
+     * Нужен Vector2 с полным clientWidth/Height, как при initialize().
+     */
+    function applyWorldSize(w, h) {
+      if (!box || w < 2 || h < 2) return false;
+      box.setDimensions({ x: w, y: h });
+      return true;
+    }
+
+    function waitForContainerSize(timeoutMs = 2500) {
+      return new Promise((resolve) => {
+        const immediate = readContainerSize();
+        if (immediate.w >= 2 && immediate.h >= 2) {
+          resolve(immediate);
+          return;
+        }
+        const started = Date.now();
+        let settled = false;
+        const finish = (size) => {
+          if (settled) return;
+          settled = true;
+          cleanup();
+          resolve(size);
+        };
+        const tick = () => {
+          const size = readContainerSize();
+          if (size.w >= 2 && size.h >= 2) {
+            finish(size);
+            return;
+          }
+          if (Date.now() - started >= timeoutMs) {
+            finish(size);
+          }
+        };
+        const ro =
+          typeof ResizeObserver !== 'undefined' && box?.container
+            ? new ResizeObserver(tick)
+            : null;
+        if (ro && box.container) ro.observe(box.container);
+        const interval = setInterval(tick, 50);
+        const onWin = () => tick();
+        window.addEventListener('resize', onWin);
+        const cleanup = () => {
+          ro?.disconnect();
+          clearInterval(interval);
+          window.removeEventListener('resize', onWin);
+        };
+        requestAnimationFrame(tick);
+      });
+    }
+
     async function syncWorldSize() {
-      if (!box?.container) return;
-      const w = box.container.clientWidth;
-      const h = box.container.clientHeight;
-      if (w < 2 || h < 2) return;
-      // resizeWorld() только вешает listener — размеры не трогает. setDimensions() без
-      // аргументов берёт clientWidth/Height контейнера.
-      box.setDimensions();
+      if (!box?.container) return false;
+      const size = await waitForContainerSize();
+      return applyWorldSize(size.w, size.h);
     }
 
     async function runRoll(notation, themeColor, speed) {
@@ -302,7 +373,10 @@
       await applyAccent(themeColor);
       unlockAudio();
       try {
-        await syncWorldSize();
+        const sized = await syncWorldSize();
+        if (!sized) {
+          throw new Error('Dice stage has no layout size');
+        }
         const normalized = normalizeNotation(notation);
         const forced = parseForcedValues(normalized);
         const results = await box.roll(normalized);

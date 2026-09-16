@@ -75,11 +75,16 @@ function createStyles(colors: ThemeColors) {
       pointerEvents: 'none',
     },
     // Warm-mount must stay full-screen: 1×1 WebGL init leaves an empty table forever.
+    // opacity:0 alone still hit-tests on mobile Safari (iframe/WebGL swallows the chat).
     rootCollapsed: {
       opacity: 0,
+      visibility: 'hidden',
     },
     stage: {
       ...StyleSheet.absoluteFill,
+      // RN Web: без явной высоты iframe/WebGL иногда остаются 0×0 на iOS.
+      minHeight: '100%',
+      width: '100%',
     },
     throwerBanner: {
       position: 'absolute',
@@ -317,10 +322,12 @@ export function ChatDiceOverlay({
   }, []);
 
   useEffect(() => {
-    if (warm || request || localRoll) {
+    // На мобильном web движок должен прогреться на полном экране до первого броска:
+    // cold-mount в момент «Бросает…» часто ловит 0×0 у iframe.
+    if (warm || request || localRoll || isFocused) {
       setEngineMounted(true);
     }
-  }, [warm, request, localRoll]);
+  }, [warm, request, localRoll, isFocused]);
 
   // --- Свой бросок: фронт = источник истины (строго один roll на token) ---
   const animationSpeedRef = useRef(animationSpeed);
@@ -349,10 +356,12 @@ export function ChatDiceOverlay({
     const animationsOn = speed !== 'off';
     const focused = isFocusedRef.current;
     const resultHoldMs = speed === 'fast' ? 500 : 1100;
+    const rollTimeoutMs = speed === 'fast' ? 6000 : 12000;
 
     let settled = false;
+    let cancelled = false;
     const finishOnce = (outcome: DiceRollOutcome | null) => {
-      if (settled) {
+      if (settled || cancelled) {
         return;
       }
       settled = true;
@@ -395,13 +404,14 @@ export function ChatDiceOverlay({
 
     if (!stageReady) {
       const readyTimeout = setTimeout(() => {
-        if (startedLocalTokensRef.current.has(active.token)) {
+        if (cancelled || startedLocalTokensRef.current.has(active.token)) {
           return;
         }
         startedLocalTokensRef.current.add(active.token);
         finishOnce(clientFallbackOutcome());
       }, 8000);
       return () => {
+        cancelled = true;
         clearTimeout(readyTimeout);
       };
     }
@@ -417,39 +427,62 @@ export function ChatDiceOverlay({
         await new Promise<void>((resolve) => {
           requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
         });
-        stageRef.current?.resize();
-        const raw = await stageRef.current?.roll(notation);
-        if (!raw) {
-          finishOnce(clientFallbackOutcome());
+        if (cancelled) {
           return;
         }
-        done = applyDiceKeepMode(
-          normalizeOutcomeGroups(raw, active.dice),
-          rollMode,
-          active.modifier,
-        );
-        // Куб уже на нужных гранях — карточка = тот же outcome.
-        const faceRows = done.groups.flatMap((group) =>
-          group.values.map((value) => ({ sides: group.sides, value })),
-        );
-        setResult({
-          messageId: `local-${active.token}`,
-          senderNickname: active.senderNickname,
-          formula: done.notation || formula,
-          faces: faceRows,
-          sum: done.sum,
-          modifier: active.modifier,
-          critLabels: diceRollCritLabels(done.groups, rollMode, active.modifier),
-        });
-        await new Promise((resolve) => setTimeout(resolve, resultHoldMs));
+        stageRef.current?.resize();
+        const rollPromise =
+          stageRef.current?.roll(notation) ?? Promise.resolve<DiceRollOutcome | null>(null);
+        const raw = await Promise.race([
+          // Таймаут/clear не должны давать unhandled rejection и второй finishOnce.
+          rollPromise.catch(() => null),
+          new Promise<null>((resolve) => {
+            setTimeout(() => resolve(null), rollTimeoutMs);
+          }),
+        ]);
+        if (cancelled) {
+          return;
+        }
+        if (!raw) {
+          done = clientFallbackOutcome();
+        } else {
+          done = applyDiceKeepMode(
+            normalizeOutcomeGroups(raw, active.dice),
+            rollMode,
+            active.modifier,
+          );
+          // Куб уже на нужных гранях — карточка = тот же outcome.
+          const faceRows = done.groups.flatMap((group) =>
+            group.values.map((value) => ({ sides: group.sides, value })),
+          );
+          setResult({
+            messageId: `local-${active.token}`,
+            senderNickname: active.senderNickname,
+            formula: done.notation || formula,
+            faces: faceRows,
+            sum: done.sum,
+            modifier: active.modifier,
+            critLabels: diceRollCritLabels(done.groups, rollMode, active.modifier),
+          });
+          await new Promise((resolve) => setTimeout(resolve, resultHoldMs));
+        }
       } catch {
-        done = clientFallbackOutcome();
+        if (!cancelled) {
+          done = clientFallbackOutcome();
+        }
       } finally {
         stageRef.current?.clear();
         setResult(null);
-        finishOnce(done ?? clientFallbackOutcome());
+        if (!cancelled) {
+          finishOnce(done ?? clientFallbackOutcome());
+        }
       }
     })();
+
+    return () => {
+      cancelled = true;
+      stageRef.current?.clear();
+    };
   }, [localRoll, stageReady]);
 
   // --- Чужой / очередь: forced `@` — те же грани, что у отправителя ---

@@ -29,6 +29,11 @@ function createStyles(colors: ThemeColors) {
       flexWrap: 'wrap',
       gap: 8,
     },
+    rowCompact: {
+      flexWrap: 'nowrap',
+      gap: 6,
+      justifyContent: 'space-between',
+    },
     swatch: {
       width: 28,
       height: 28,
@@ -37,8 +42,9 @@ function createStyles(colors: ThemeColors) {
       borderColor: 'transparent',
     },
     swatchCompact: {
-      width: 24,
-      height: 24,
+      width: 26,
+      height: 26,
+      flexShrink: 1,
     },
     swatchSelected: {
       borderColor: colors.text,
@@ -71,7 +77,7 @@ export function DiceColorPicker({
   return (
     <View style={styles.root}>
       {!compact ? <Text style={styles.label}>Цвет кубиков</Text> : null}
-      <View style={styles.row}>
+      <View style={[styles.row, compact && styles.rowCompact]}>
         {DICE_ACCENT_PALETTE.map((option: DiceAccentOption) => {
           const active = option.hex.toLowerCase() === selected;
           return (

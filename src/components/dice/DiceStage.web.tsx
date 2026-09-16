@@ -62,6 +62,9 @@ export const DiceStage = forwardRef<DiceStageHandle, DiceStageProps>(function Di
             reject(new Error('Dice box is not ready'));
             return;
           }
+          // Новый roll снимает предыдущий pending — иначе «белый» бросок
+          // потом всё равно resolve'ится и даёт повтор.
+          pendingRef.current?.reject(new Error('Dice roll superseded'));
           setError(null);
           pendingRef.current = { resolve, reject };
           postToIframe({
@@ -83,9 +86,12 @@ export const DiceStage = forwardRef<DiceStageHandle, DiceStageProps>(function Di
         });
       },
       clear: () => {
+        const pending = pendingRef.current;
         pendingRef.current = null;
         setError(null);
         postToIframe({ type: 'clear' });
+        // Не оставляем висящий Promise — иначе overlay ждёт done и шлёт fallback + поздний result.
+        pending?.reject(new Error('Dice roll cleared'));
       },
       resize: () => {
         if (!ready) {
@@ -157,8 +163,8 @@ export const DiceStage = forwardRef<DiceStageHandle, DiceStageProps>(function Di
   // Chat overlay uses threejs fork — supports forced `@values` for synced faces.
   // `v=` busts iframe cache after stage HTML / force-sync fixes.
   const src = transparent
-    ? `/chat-dice-stage.html?transparent=1&v=resize2`
-    : `/dice-stage.html?transparent=0&v=resize2`;
+    ? `/chat-dice-stage.html?transparent=1&v=resize3`
+    : `/dice-stage.html?transparent=0&v=resize3`;
 
   useEffect(() => {
     setReady(false);
@@ -188,22 +194,27 @@ export const DiceStage = forwardRef<DiceStageHandle, DiceStageProps>(function Di
         flex: 1,
         width: '100%',
         height: '100%',
-        minHeight: transparent ? 0 : 260,
+        minHeight: transparent ? 120 : 260,
         borderRadius: transparent ? 0 : 20,
         overflow: 'hidden',
         background: shellBg,
         position: 'relative',
-        pointerEvents: transparent ? 'none' : 'auto',
+        pointerEvents: 'none',
       },
     },
     createElement('iframe', {
       ref: iframeRef,
       title: 'Dice roller',
       src,
+      // iOS Safari: full-screen iframe can eat touches even under opacity:0 parents.
+      // Keep the stage visual-only; chat UI stays interactive underneath.
+      tabIndex: -1,
+      'aria-hidden': true,
       style: {
+        position: 'absolute',
+        inset: 0,
         width: '100%',
         height: '100%',
-        minHeight: transparent ? 0 : 260,
         border: '0',
         display: 'block',
         background: shellBg,

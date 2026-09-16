@@ -103,6 +103,8 @@ function createStyles(isDesktop: boolean) {
     },
     rootHidden: {
       opacity: 0,
+      // Keep WebGL previews warm, but leave the chat tappable (opacity:0 still hits on iOS).
+      visibility: 'hidden',
     },
     backdropPress: {
       ...StyleSheet.absoluteFillObject,

@@ -1231,6 +1231,7 @@ export default function ChatThreadScreen() {
   const [highlightedMessageId, setHighlightedMessageId] = useState<string | null>(null);
   const [dicePopoverOpen, setDicePopoverOpen] = useState(false);
   const [diceRollBusy, setDiceRollBusy] = useState(false);
+  const diceRollBusyRef = useRef(false);
   const [diceOverlayRequest, setDiceOverlayRequest] = useState<ChatDiceOverlayRequest | null>(
     null,
   );
@@ -1339,10 +1340,11 @@ export default function ChatThreadScreen() {
         skipDiceAnimIdsRef.current.has(message.id) ||
         (Boolean(myId) &&
           message.senderId === myId &&
-          suppressOwnDiceAnimRef.current);
+          (suppressOwnDiceAnimRef.current || diceRollBusyRef.current));
 
       if (skipAnim) {
-        skipDiceAnimIdsRef.current.delete(message.id);
+        // Не удаляем id: HTTP-ответ и socket могут прийти дважды — иначе второй
+        // доставкой снова крутится «Бросает…» после белого экрана/fallback.
         appendMessage(message);
         return;
       }
@@ -1966,6 +1968,7 @@ export default function ChatThreadScreen() {
       if (!conversationId || diceRollBusy || conversation?.blockedMe || localDiceRoll) {
         return;
       }
+      diceRollBusyRef.current = true;
       setDiceRollBusy(true);
       suppressOwnDiceAnimRef.current = true;
       // На всякий случай не крутить чужую очередь поверх своего броска.
@@ -2011,12 +2014,19 @@ export default function ChatThreadScreen() {
         }
         // Уже показали анимацию со своими цифрами — в ленту без повтора.
         skipDiceAnimIdsRef.current.add(message.id);
+        if (skipDiceAnimIdsRef.current.size > 80) {
+          const oldest = skipDiceAnimIdsRef.current.values().next().value;
+          if (oldest) {
+            skipDiceAnimIdsRef.current.delete(oldest);
+          }
+        }
         appendMessage(message);
         scrollToBottom();
       } catch (error) {
         toast.error(localizeErrorMessage(error, 'Не удалось бросить кости'));
       } finally {
         suppressOwnDiceAnimRef.current = false;
+        diceRollBusyRef.current = false;
         setDiceRollBusy(false);
       }
     },
