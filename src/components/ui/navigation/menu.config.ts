@@ -34,7 +34,7 @@ export const MENU_SPECS: MenuItemSpec[] = [
     subtitle:
       'Здесь вы можете поддержать проект денюжкой, что нам очень поможет',
     icon: 'developer',
-    externalUrl: 'https://boosty.to/adventuranring',
+    externalUrl: 'https://boosty.to/adventuranri',
   },
   {
     key: 'profile',
