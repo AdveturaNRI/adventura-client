@@ -417,11 +417,19 @@ export function ChatDiceOverlay({
     void (async () => {
       let revealed = false;
       try {
-        await stageRef.current?.roll(notation);
+        const rolled = await stageRef.current?.roll(notation);
         if (cancelled || sum == null) {
           return;
         }
-        // Грани уже forced под payload — куб и карточка совпадают.
+        // Карточка всегда из payload. Если 3D всё ещё врёт — убираем куб,
+        // чтобы не было двух разных чисел на экране.
+        const faceMismatch =
+          !rolled ||
+          faces.length === 0 ||
+          faces.some((value, index) => Number(rolled.values[index]) !== Number(value));
+        if (faceMismatch) {
+          stageRef.current?.clear();
+        }
         onRevealRef.current(active.messageId);
         revealed = true;
         setResult({

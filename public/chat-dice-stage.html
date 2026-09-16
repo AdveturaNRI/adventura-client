@@ -101,6 +101,85 @@
       return notation || '1d20';
     }
 
+    function parseForcedValues(notation) {
+      const text = String(notation || '');
+      const at = text.indexOf('@');
+      if (at < 0) return [];
+      const matches = text.slice(at + 1).match(/-?\d+/g);
+      return matches ? matches.map(Number) : [];
+    }
+
+    /**
+     * threejs делает swap по результату simulateThrow, а animateThrow может
+     * лечь другой гранью — у зрителя куб ≠ карточка. После остановки
+     * ещё раз выравниваем материалы под @values.
+     */
+    function enforceForcedFaces(forced) {
+      if (!forced.length || !box?.diceList?.length) return;
+      for (let i = 0; i < forced.length; i++) {
+        const die = box.diceList[i];
+        if (!die) continue;
+        const want = Number(forced[i]);
+        if (!Number.isFinite(want)) continue;
+        try {
+          if (!die.result || die.result.length < 1) {
+            die.storeRolledValue?.('forced');
+          }
+          const current = Number(die.getLastValue?.()?.value);
+          if (current === want) continue;
+          box.swapDiceFace?.(die, want);
+          die.resultReason = 'forced';
+          die.storeRolledValue?.('forced');
+          const after = Number(die.getLastValue?.()?.value);
+          if (after !== want && Array.isArray(die.result) && die.result.length > 0) {
+            const last = die.result[die.result.length - 1];
+            die.result[die.result.length - 1] = {
+              ...last,
+              value: want,
+              reason: 'forced',
+            };
+          }
+        } catch (err) {
+          console.warn('enforceForcedFaces', err);
+        }
+      }
+      try {
+        box.renderer?.render(box.scene, box.camera);
+      } catch {
+        // ignore
+      }
+    }
+
+    function outcomeWithForced(outcome, forced) {
+      if (!forced.length) return outcome;
+      let index = 0;
+      const groups = (outcome.groups || []).map((group) => {
+        const values = (group.values || []).map(() => {
+          const v = forced[index++];
+          return Number.isFinite(v) ? v : 0;
+        });
+        return {
+          ...group,
+          values,
+          sum: values.reduce((a, b) => a + b, 0),
+        };
+      });
+      if (index === 0) {
+        return {
+          ...outcome,
+          values: forced.slice(),
+          sum: forced.reduce((a, b) => a + b, 0),
+        };
+      }
+      const values = groups.flatMap((g) => g.values);
+      return {
+        ...outcome,
+        groups,
+        values,
+        sum: values.reduce((a, b) => a + b, 0),
+      };
+    }
+
     let currentAccent = '#157AFE';
     let ready = false;
     let generation = 0;
@@ -114,7 +193,8 @@
         theme_surface: 'green-felt',
         theme_colorset: 'white',
         theme_material: 'glass',
-        strength: 1,
+        // Сильнее бросок: library default = 1.
+        strength: 3,
         light_intensity: 1.1,
         // threejs ждёт hex-строки (#RRGGBB), не 0xRRGGBB — иначе куб чёрный.
         theme_customColorset: buildColorSet(currentAccent),
@@ -132,6 +212,7 @@
       if (box?.updateConfig) {
         await box.updateConfig({
           theme_customColorset: buildColorSet(currentAccent),
+          strength: 3,
         });
       }
       return currentAccent;
@@ -144,9 +225,17 @@
         // Warm-mount в 1×1 — перед броском подгоняем размер под оверлей.
         box.resizeWorld?.();
         const normalized = normalizeNotation(notation);
+        const forced = parseForcedValues(normalized);
         const results = await box.roll(normalized);
+        if (forced.length) {
+          enforceForcedFaces(forced);
+        }
         if (token === generation) {
-          post({ type: 'done', outcome: flattenThreejs(results, normalized) });
+          const outcome = outcomeWithForced(
+            flattenThreejs(results, normalized),
+            forced,
+          );
+          post({ type: 'done', outcome });
         }
       } catch (err) {
         if (token === generation) {
