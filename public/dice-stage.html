@@ -115,7 +115,7 @@
     }
 
     const params = new URLSearchParams(location.search);
-    const accent = params.get('accent') || '#157AFE';
+    let currentAccent = params.get('accent') || '#157AFE';
     const transparent = params.get('transparent') === '1';
 
     if (transparent) {
@@ -151,7 +151,7 @@
       // Copied from @3d-dice/dice-box package into public/dice-box (Metro blocks /assets/*)
       assetPath: '/dice-box/',
       theme: 'default',
-      themeColor: accent,
+      themeColor: currentAccent,
       scale: 6,
       gravity: 1,
       ...ROLL_CFG,
@@ -176,8 +176,16 @@
       post({ type: 'error', message: String(err && err.message || err) });
     }
 
-    async function runPreview(notation) {
+    function applyAccent(next) {
+      if (typeof next === 'string' && /^#[0-9A-Fa-f]{6}$/.test(next.trim())) {
+        currentAccent = next.trim();
+      }
+      return currentAccent;
+    }
+
+    async function runPreview(notation, themeColor) {
       const token = ++generation;
+      const color = applyAccent(themeColor);
       if (isEmptyNotation(notation)) {
         box.clear();
         return;
@@ -188,7 +196,7 @@
       try {
         await box.roll(normalizeNotation(notation), {
           theme: 'default',
-          themeColor: accent,
+          themeColor: color,
           // Keep our center startPosition — true would move spawn to an edge.
           newStartPoint: false,
         });
@@ -202,14 +210,15 @@
       }
     }
 
-    async function runRoll(notation) {
+    async function runRoll(notation, themeColor) {
       const token = ++generation;
+      const color = applyAccent(themeColor);
       box.updateConfig(ROLL_CFG);
       busy = true;
       try {
         const results = await box.roll(normalizeNotation(notation), {
           theme: 'default',
-          themeColor: accent,
+          themeColor: color,
           newStartPoint: true,
         });
         if (token === generation) {
@@ -228,17 +237,22 @@
         const data = typeof raw === 'string' ? JSON.parse(raw) : raw;
         if (!data || typeof data !== 'object' || !ready) return;
 
+        if (data.type === 'setAccent') {
+          applyAccent(data.themeColor);
+          return;
+        }
+
         if (data.type === 'preview') {
           // Don't stack previews while a real roll is in flight.
           if (busy && data.force !== true) {
             // Still bump generation so an in-flight preview is ignored after.
           }
-          await runPreview(data.notation);
+          await runPreview(data.notation, data.themeColor);
         }
 
         if (data.type === 'roll') {
           hintEl.style.display = 'none';
-          await runRoll(data.notation ?? '1d20');
+          await runRoll(data.notation ?? '1d20', data.themeColor);
         }
 
         if (data.type === 'clear') {

@@ -29,7 +29,7 @@ import { FontSize, Spacing, type ThemeColors } from '@/constants/theme';
 import { useAuth } from '@/context/AuthContext';
 import { useRealtime } from '@/context/RealtimeContext';
 import { useVoicePlayback } from '@/context/VoicePlaybackContext';
-import { useTheme } from '@/hooks/use-theme';
+import { useTheme, useThemePreference } from '@/hooks/use-theme';
 import { useThemedStyles } from '@/hooks/use-themed-styles';
 import { useMainScreenStyles } from '@/screens/main/main-screen.styles';
 import {
@@ -77,7 +77,7 @@ function conversationTitle(item: ConversationListItem) {
   }
   return item.peer?.nickname ?? 'Чат';
 }
-function createStyles(colors: ThemeColors, isRail: boolean) {
+function createStyles(colors: ThemeColors, isRail: boolean, isDark: boolean) {
   return StyleSheet.create({
     container: {
       flex: 1,
@@ -198,13 +198,13 @@ function createStyles(colors: ThemeColors, isRail: boolean) {
     favoriteMark: {
       fontSize: 10,
       fontWeight: '700',
-      color: '#9A7518',
+      color: isDark ? '#FFE9A8' : '#9A7518',
       letterSpacing: 0.3,
       paddingHorizontal: 6,
       paddingVertical: 2,
       borderRadius: 8,
       overflow: 'hidden',
-      backgroundColor: 'rgba(212, 175, 55, 0.16)',
+      backgroundColor: isDark ? 'rgba(240, 215, 140, 0.18)' : 'rgba(212, 175, 55, 0.16)',
       flexShrink: 0,
     },
     avatarWrap: {
@@ -484,10 +484,12 @@ type ChatsScreenProps = {
 export default function ChatsScreen({ variant = 'page' }: ChatsScreenProps) {
   const pageStyles = useMainScreenStyles();
   const colors = useTheme();
+  const { colorScheme } = useThemePreference();
+  const isDark = colorScheme === 'dark';
   const { visible: voicePlayerVisible } = useVoicePlayback();
   const hasDesktopSidebar = useIsDesktopSidebarVisible();
   const isRail = variant === 'rail';
-  const localStyles = useThemedStyles((themeColors) => createStyles(themeColors, isRail));
+  const localStyles = useThemedStyles((themeColors) => createStyles(themeColors, isRail, isDark));
   // На среднем экране (768–1023) чаты уже в split/rail, но сайдбара ещё нет —
   // оставляем MobileScreenHeader с меню вкладок.
   const showCompactNav = !hasDesktopSidebar;

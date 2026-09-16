@@ -55,6 +55,25 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   const colorScheme: ColorScheme =
     preference === 'system' ? (systemScheme === 'dark' ? 'dark' : 'light') : preference;
 
+  useEffect(() => {
+    if (Platform.OS !== 'web' || typeof document === 'undefined') {
+      return;
+    }
+    const root = document.documentElement;
+    const body = document.body;
+    const bg = colorScheme === 'dark' ? '#000000' : '#FFFFFF';
+    const fg = colorScheme === 'dark' ? '#FFFFFF' : '#000000';
+    root.style.colorScheme = colorScheme;
+    root.dataset.theme = colorScheme;
+    root.style.backgroundColor = bg;
+    root.style.color = fg;
+    if (body) {
+      body.style.backgroundColor = bg;
+      body.style.color = fg;
+      body.style.colorScheme = colorScheme;
+    }
+  }, [colorScheme]);
+
   const value = useMemo<ThemeContextValue>(
     () => ({
       colors: Palettes[colorScheme],

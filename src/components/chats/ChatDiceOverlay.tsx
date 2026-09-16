@@ -7,7 +7,7 @@ import { FontSize, Spacing, type ThemeColors } from '@/constants/theme';
 import { useDiceAccentColor } from '@/hooks/use-dice-accent-color';
 import { useThemedStyles } from '@/hooks/use-themed-styles';
 import {
-  payloadToNotationParts,
+  payloadToForcedNotation,
   type DiceRollPayload,
 } from '@/utils/chat-dice-roll';
 import {
@@ -25,6 +25,8 @@ export type ChatDiceOverlayRequest = {
 type ChatDiceOverlayProps = {
   request: ChatDiceOverlayRequest | null;
   onFinished: (messageId: string) => void;
+  /** Поднять iframe заранее (открыли меню броска) — без холодного старта на первом броске. */
+  warm?: boolean;
 };
 
 function createStyles(colors: ThemeColors) {
@@ -34,8 +36,17 @@ function createStyles(colors: ThemeColors) {
       zIndex: 40,
       pointerEvents: 'none',
     },
-    rootHidden: {
+    rootCollapsed: {
+      // WKWebView/Android WebView игнорируют pointerEvents родителя и едят скролл чата,
+      // пока лежат absoluteFill даже с opacity: 0.
       opacity: 0,
+      width: 1,
+      height: 1,
+      top: 0,
+      left: 0,
+      right: undefined,
+      bottom: undefined,
+      overflow: 'hidden',
     },
     stage: {
       ...StyleSheet.absoluteFill,
@@ -99,9 +110,9 @@ function canAnimateRequest(
 
 /**
  * Transparent dice animation over the chat thread.
- * DiceStage stays mounted after the first roll so the next throw doesn't race a cold iframe.
+ * One DiceStage iframe stays mounted — remounting on every color/roll OOMs Chrome.
  */
-export function ChatDiceOverlay({ request, onFinished }: ChatDiceOverlayProps) {
+export function ChatDiceOverlay({ request, onFinished, warm = false }: ChatDiceOverlayProps) {
   const styles = useThemedStyles(createStyles);
   const isFocused = useIsFocused();
   const stageRef = useRef<DiceStageHandle>(null);
@@ -109,30 +120,12 @@ export function ChatDiceOverlay({ request, onFinished }: ChatDiceOverlayProps) {
   onFinishedRef.current = onFinished;
   const { accent: localAccent } = useDiceAccentColor();
 
-  // Держим последний accent между бросками — иначе remount iframe + roll() в него до ready
-  // съедают все анимации после первой.
-  const requestAccent = request
-    ? coerceDiceAccent(request.payload.color ?? localAccent)
-    : null;
-  const accentRef = useRef(localAccent);
-  if (requestAccent) {
-    accentRef.current = requestAccent;
-  }
-  const rollAccent = accentRef.current;
+  const rollAccent = coerceDiceAccent(request?.payload.color ?? localAccent);
 
   const [stageReady, setStageReady] = useState(false);
   const [showResult, setShowResult] = useState(false);
   const [animationsEnabled, setAnimationsEnabled] = useState(getDiceAnimationsEnabledSync);
   const [engineMounted, setEngineMounted] = useState(false);
-
-  const prevAccentRef = useRef(rollAccent);
-  // Сбрасываем ready синхронно при смене цвета, до эффектов — иначе roll() уходит в старый/новый iframe.
-  if (prevAccentRef.current !== rollAccent) {
-    prevAccentRef.current = rollAccent;
-    if (stageReady) {
-      setStageReady(false);
-    }
-  }
 
   const handleStageReady = useRef(() => {
     setStageReady(true);
@@ -143,9 +136,17 @@ export function ChatDiceOverlay({ request, onFinished }: ChatDiceOverlayProps) {
   }, [request?.messageId]);
 
   useEffect(() => {
+    if (warm || request) {
+      setEngineMounted(true);
+    }
+  }, [warm, request]);
+
+  useEffect(() => {
     if (!request) {
       setShowResult(false);
-      stageRef.current?.clear();
+      if (stageReady) {
+        stageRef.current?.clear();
+      }
       return;
     }
 
@@ -153,8 +154,6 @@ export function ChatDiceOverlay({ request, onFinished }: ChatDiceOverlayProps) {
       onFinishedRef.current(request.messageId);
       return;
     }
-
-    setEngineMounted(true);
 
     if (!stageReady) {
       let cancelled = false;
@@ -171,7 +170,7 @@ export function ChatDiceOverlay({ request, onFinished }: ChatDiceOverlayProps) {
 
     let cancelled = false;
     const messageId = request.messageId;
-    const notation = payloadToNotationParts(request.payload);
+    const notation = payloadToForcedNotation(request.payload);
 
     void (async () => {
       try {
@@ -182,7 +181,6 @@ export function ChatDiceOverlay({ request, onFinished }: ChatDiceOverlayProps) {
         setShowResult(true);
         await new Promise((resolve) => setTimeout(resolve, 900));
       } catch {
-        // Не ready / сбой движка — если эффект ещё жив, просто покажем бабл.
         if (cancelled) {
           return;
         }
@@ -206,18 +204,21 @@ export function ChatDiceOverlay({ request, onFinished }: ChatDiceOverlayProps) {
     isFocused &&
     Boolean(request && !request.payload.redacted && request.payload.sum != null);
 
-  if (!engineMounted && !visible) {
+  // Держим движок тёплым при открытом меню / активном броске, иначе схлопываем,
+  // чтобы WebView не перехватывал скролл ленты.
+  const expanded = visible || warm;
+
+  if (!engineMounted && !visible && !warm) {
     return null;
   }
 
   return (
     <View
-      style={[styles.root, !visible ? styles.rootHidden : null]}
+      style={[styles.root, !expanded ? styles.rootCollapsed : null]}
       pointerEvents="none"
       collapsable={false}>
       <View style={styles.stage} pointerEvents="none">
         <DiceStage
-          key={rollAccent}
           ref={stageRef}
           accent={rollAccent}
           transparent

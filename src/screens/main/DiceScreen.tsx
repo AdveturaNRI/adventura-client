@@ -537,10 +537,6 @@ export default function DiceScreen() {
   const hoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isWeb = Platform.OS === 'web';
 
-  useEffect(() => {
-    setStageReady(false);
-  }, [accent]);
-
   const clearHoverTimer = useCallback(() => {
     if (hoverTimerRef.current) {
       clearTimeout(hoverTimerRef.current);
@@ -603,7 +599,7 @@ export default function DiceScreen() {
       } else {
         stageRef.current?.preview(parts.length === 1 ? parts[0] : parts);
       }
-    }, 200);
+    }, 60);
     return () => clearTimeout(timer);
   }, [parts, rolling, stageReady]);
 
@@ -841,7 +837,6 @@ export default function DiceScreen() {
             <View style={styles.stageFill}>
               {isFocused ? (
                 <DiceStage
-                  key={accent}
                   ref={stageRef}
                   accent={accent}
                   onReady={() => setStageReady(true)}

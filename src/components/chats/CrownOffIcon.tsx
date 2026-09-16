@@ -4,13 +4,21 @@ import { StyleSheet, View, type StyleProp, type ViewStyle } from 'react-native';
 type CrownOffIconProps = {
   size?: number;
   color?: string;
+  /** Background behind the strike so it cuts the crown cleanly. */
+  haloColor?: string;
   style?: StyleProp<ViewStyle>;
 };
 
 /** Crown with a diagonal strike — MaterialCommunityIcons has no crown-off glyph. */
-export function CrownOffIcon({ size = 18, color = '#9A6B2F', style }: CrownOffIconProps) {
+export function CrownOffIcon({
+  size = 18,
+  color = '#9A6B2F',
+  haloColor,
+  style,
+}: CrownOffIconProps) {
   const slashHeight = Math.max(1.5, size * 0.12);
   const slashWidth = size * 1.15;
+  const resolvedHalo = haloColor ?? 'rgba(255, 248, 225, 0.92)';
 
   return (
     <View style={[styles.wrap, { width: size, height: size }, style]}>
@@ -23,6 +31,7 @@ export function CrownOffIcon({ size = 18, color = '#9A6B2F', style }: CrownOffIc
             width: slashWidth,
             height: slashHeight + 2,
             borderRadius: slashHeight,
+            backgroundColor: resolvedHalo,
             transform: [{ rotate: '-42deg' }],
           },
         ]}
@@ -51,7 +60,6 @@ const styles = StyleSheet.create({
   },
   slashHalo: {
     position: 'absolute',
-    backgroundColor: 'rgba(255, 248, 225, 0.92)',
   },
   slash: {
     position: 'absolute',

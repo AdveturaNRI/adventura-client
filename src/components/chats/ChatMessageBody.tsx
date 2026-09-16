@@ -55,17 +55,18 @@ export function ChatMessageBody({ text, textStyle, linkStyle }: ChatMessageBodyP
   }, [text]);
 
   return (
-    <Text style={textStyle}>
+    <Text style={textStyle} selectable={false}>
       {parts.map((part, index) =>
         part.type === 'link' ? (
           <Text
             key={`${part.type}-${index}`}
+            selectable={false}
             style={[textStyle, styles.linkBase, linkStyle]}
             onPress={() => openExternalLink(part.value)}>
             {part.value}
           </Text>
         ) : (
-          <Text key={`${part.type}-${index}`} style={textStyle}>
+          <Text key={`${part.type}-${index}`} selectable={false} style={textStyle}>
             {part.value}
           </Text>
         ),

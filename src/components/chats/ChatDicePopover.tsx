@@ -1,8 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
-  Modal,
   Pressable,
   StyleSheet,
   Text,
@@ -60,6 +59,14 @@ type ChatDicePopoverProps = {
 
 function createStyles(isDesktop: boolean) {
   return StyleSheet.create({
+    root: {
+      ...StyleSheet.absoluteFillObject,
+      zIndex: 55,
+      elevation: 55,
+    },
+    rootHidden: {
+      opacity: 0,
+    },
     backdrop: {
       flex: 1,
       backgroundColor: DICE_UI.backdrop,
@@ -224,13 +231,24 @@ function createStyles(isDesktop: boolean) {
   });
 }
 
+/**
+ * Не Modal: RN Modal при закрытии размонтирует детей и каждый раз заново
+ * поднимает 7 WebGL-превью. Держим шит в absolute overlay после первого открытия.
+ */
 export function ChatDicePopover({ visible, busy, onClose, onRoll }: ChatDicePopoverProps) {
   const isDesktop = useIsDesktopWeb();
   const styles = useMemo(() => createStyles(isDesktop), [isDesktop]);
   const { accent, setAccent } = useDiceAccentColor();
+  const [keptAlive, setKeptAlive] = useState(false);
   const [pool, setPool] = useState<Pool>({ ...EMPTY_POOL, 20: 1 });
   const [modifier, setModifier] = useState(0);
   const [hidden, setHidden] = useState(false);
+
+  useEffect(() => {
+    if (visible) {
+      setKeptAlive(true);
+    }
+  }, [visible]);
 
   const total = useMemo(
     () => CHAT_DIE_SIDES.reduce((sum, sides) => sum + pool[sides], 0),
@@ -268,13 +286,17 @@ export function ChatDicePopover({ visible, busy, onClose, onRoll }: ChatDicePopo
     onRoll({ dice, modifier, hidden, color: accent });
   };
 
+  if (!visible && !keptAlive) {
+    return null;
+  }
+
   return (
-    <Modal
-      visible={visible}
-      transparent
-      animationType={isDesktop ? 'fade' : 'slide'}
-      onRequestClose={onClose}>
-      <Pressable style={styles.backdrop} onPress={onClose}>
+    <View
+      style={[styles.root, !visible ? styles.rootHidden : null]}
+      pointerEvents={visible ? 'auto' : 'none'}
+      accessibilityElementsHidden={!visible}
+      importantForAccessibility={visible ? 'yes' : 'no-hide-descendants'}>
+      <Pressable style={styles.backdrop} onPress={visible && !busy ? onClose : undefined}>
         <Pressable style={styles.sheet} onPress={(e) => e.stopPropagation()}>
           <View style={styles.header}>
             <Text style={styles.title}>Быстрый бросок</Text>
@@ -390,6 +412,6 @@ export function ChatDicePopover({ visible, busy, onClose, onRoll }: ChatDicePopo
           </Pressable>
         </Pressable>
       </Pressable>
-    </Modal>
+    </View>
   );
 }

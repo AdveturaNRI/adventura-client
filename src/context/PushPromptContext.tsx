@@ -25,6 +25,7 @@ import {
   getNotificationPermission,
   isIosSafariNeedPwaHint,
   isWebPushSupported,
+  WEB_PUSH_OPT_IN_ENABLED,
 } from '@/services/push/webPush';
 import { localizeErrorMessage } from '@/utils/localizeError';
 
@@ -65,6 +66,9 @@ async function markSoftPromptDismissed() {
 }
 
 function shouldOfferSoftPrompt(): boolean {
+  if (!WEB_PUSH_OPT_IN_ENABLED) {
+    return false;
+  }
   if (!isWebPushSupported()) {
     return false;
   }
@@ -82,7 +86,7 @@ export function PushPromptProvider({ children }: { children: ReactNode }) {
   const [showSettingsAlert, setShowSettingsAlert] = useState(false);
 
   const refreshPushAttention = useCallback(() => {
-    if (Platform.OS !== 'web' || !isAuthenticated) {
+    if (!WEB_PUSH_OPT_IN_ENABLED || Platform.OS !== 'web' || !isAuthenticated) {
       setShowSettingsAlert(false);
       return;
     }
@@ -94,7 +98,7 @@ export function PushPromptProvider({ children }: { children: ReactNode }) {
   }, [refreshPushAttention]);
 
   useEffect(() => {
-    if (Platform.OS !== 'web') {
+    if (!WEB_PUSH_OPT_IN_ENABLED || Platform.OS !== 'web') {
       return;
     }
     const sub = AppState.addEventListener('change', (state) => {
@@ -106,7 +110,7 @@ export function PushPromptProvider({ children }: { children: ReactNode }) {
   }, [refreshPushAttention]);
 
   const tryShow = useCallback(async () => {
-    if (Platform.OS !== 'web') {
+    if (!WEB_PUSH_OPT_IN_ENABLED || Platform.OS !== 'web') {
       return;
     }
     if (!shouldOfferSoftPrompt()) {
@@ -119,7 +123,7 @@ export function PushPromptProvider({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => {
-    if (!isAuthenticated || Platform.OS !== 'web') {
+    if (!WEB_PUSH_OPT_IN_ENABLED || !isAuthenticated || Platform.OS !== 'web') {
       return;
     }
     void (async () => {
@@ -257,12 +261,14 @@ export function PushPromptProvider({ children }: { children: ReactNode }) {
   return (
     <PushPromptContext.Provider value={value}>
       {children}
-      <PushOptInDialog
-        visible={visible}
-        busy={busy}
-        onEnable={handleEnable}
-        onLater={handleLater}
-      />
+      {WEB_PUSH_OPT_IN_ENABLED ? (
+        <PushOptInDialog
+          visible={visible}
+          busy={busy}
+          onEnable={handleEnable}
+          onLater={handleLater}
+        />
+      ) : null}
     </PushPromptContext.Provider>
   );
 }

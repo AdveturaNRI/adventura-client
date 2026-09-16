@@ -25,6 +25,7 @@ import {
   getNotificationPermission,
   isIosSafariNeedPwaHint,
   isWebPushSupported,
+  WEB_PUSH_OPT_IN_ENABLED,
 } from '@/services/push/webPush';
 import { localizeErrorMessage } from '@/utils/localizeError';
 
@@ -136,8 +137,8 @@ export default function SettingsScreen() {
     refreshPushAttention,
   } = usePushPrompt();
 
-  const webPushAvailable = isWebPushSupported();
-  const iosHint = isIosSafariNeedPwaHint();
+  const webPushAvailable = WEB_PUSH_OPT_IN_ENABLED && isWebPushSupported();
+  const iosHint = WEB_PUSH_OPT_IN_ENABLED && isIosSafariNeedPwaHint();
   const [pushEnabled, setPushEnabled] = useState(false);
   const [pushLoading, setPushLoading] = useState(webPushAvailable);
   const [pushBusy, setPushBusy] = useState(false);
@@ -179,7 +180,7 @@ export default function SettingsScreen() {
 
   const handleTogglePush = useCallback(
     (next: boolean) => {
-      if (pushBusy || Platform.OS !== 'web') {
+      if (!WEB_PUSH_OPT_IN_ENABLED || pushBusy || Platform.OS !== 'web') {
         return;
       }
       void (async () => {
@@ -246,7 +247,7 @@ export default function SettingsScreen() {
           <Text style={mainStyles.title}>Настройки</Text>
         )}
 
-        {Platform.OS === 'web' && showSettingsAlert ? (
+        {WEB_PUSH_OPT_IN_ENABLED && Platform.OS === 'web' && showSettingsAlert ? (
           <View style={styles.alertCard}>
             <Text style={styles.alertTitle}>Уведомления выключены</Text>
             <Text style={styles.alertBody}>
@@ -274,7 +275,7 @@ export default function SettingsScreen() {
           </View>
         </View>
 
-        {Platform.OS === 'web' ? (
+        {WEB_PUSH_OPT_IN_ENABLED && Platform.OS === 'web' ? (
           <View style={[styles.section, styles.sectionGap]}>
             <View style={styles.row}>
               <View style={styles.rowText}>

@@ -5,7 +5,6 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
-  FlatList,
   Keyboard,
   KeyboardAvoidingView,
   Linking,
@@ -22,6 +21,7 @@ import type {
   NativeSyntheticEvent,
   TextInputKeyPressEventData,
 } from 'react-native';
+import { FlatList, Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Svg, { Path } from 'react-native-svg';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -55,7 +55,7 @@ import { useAuth } from '@/context/AuthContext';
 import { usePushPrompt } from '@/context/PushPromptContext';
 import { useRealtime } from '@/context/RealtimeContext';
 import { useVoicePlayback, type ChatVoiceQueueItem } from '@/context/VoicePlaybackContext';
-import { useTheme } from '@/hooks/use-theme';
+import { useTheme, useThemePreference } from '@/hooks/use-theme';
 import { useThemedStyles } from '@/hooks/use-themed-styles';
 import {
   listConversations,
@@ -471,7 +471,7 @@ function formatLastSeen(online: boolean, lastSeenAt: string | null) {
   });
 }
 
-function createStyles(colors: ThemeColors, bottomPad: number) {
+function createStyles(colors: ThemeColors, bottomPad: number, isDark: boolean) {
   return StyleSheet.create({
     root: {
       flex: 1,
@@ -592,8 +592,8 @@ function createStyles(colors: ThemeColors, bottomPad: number) {
       paddingHorizontal: 12,
       borderRadius: 14,
       borderWidth: 1,
-      borderColor: 'rgba(201, 162, 39, 0.28)',
-      backgroundColor: 'rgba(255, 248, 225, 0.95)',
+      borderColor: isDark ? 'rgba(240, 215, 140, 0.45)' : 'rgba(201, 162, 39, 0.28)',
+      backgroundColor: isDark ? '#3A3018' : 'rgba(255, 248, 225, 0.95)',
     },
     favoriteInviteIcon: {
       width: 36,
@@ -601,7 +601,7 @@ function createStyles(colors: ThemeColors, bottomPad: number) {
       borderRadius: 18,
       alignItems: 'center',
       justifyContent: 'center',
-      backgroundColor: 'rgba(201, 162, 39, 0.16)',
+      backgroundColor: isDark ? 'rgba(240, 215, 140, 0.16)' : 'rgba(201, 162, 39, 0.16)',
       flexShrink: 0,
     },
     favoriteInviteCopy: {
@@ -612,11 +612,11 @@ function createStyles(colors: ThemeColors, bottomPad: number) {
     favoriteInviteTitle: {
       fontSize: FontSize.label,
       fontWeight: '700',
-      color: '#8B6914',
+      color: isDark ? '#FFE9A8' : '#8B6914',
     },
     favoriteInviteHint: {
       fontSize: FontSize.caption,
-      color: '#A8842A',
+      color: isDark ? '#E8D48B' : '#A8842A',
       lineHeight: FontSize.caption * 1.35,
     },
     favoriteInviteButton: {
@@ -633,10 +633,10 @@ function createStyles(colors: ThemeColors, bottomPad: number) {
     favoriteInviteButtonCancel: {
       backgroundColor: 'transparent',
       borderWidth: 1,
-      borderColor: 'rgba(201, 162, 39, 0.55)',
+      borderColor: isDark ? 'rgba(240, 215, 140, 0.45)' : 'rgba(201, 162, 39, 0.55)',
     },
     favoriteInviteButtonRemove: {
-      borderColor: 'rgba(154, 107, 47, 0.5)',
+      borderColor: isDark ? 'rgba(232, 184, 122, 0.5)' : 'rgba(154, 107, 47, 0.5)',
     },
     favoriteInviteButtonPressed: {
       opacity: 0.88,
@@ -647,20 +647,20 @@ function createStyles(colors: ThemeColors, bottomPad: number) {
       color: '#FFFFFF',
     },
     favoriteInviteButtonLabelCancel: {
-      color: '#9A7518',
+      color: isDark ? '#FFE9A8' : '#9A7518',
     },
     favoriteInviteButtonLabelRemove: {
-      color: '#7A4E1D',
+      color: isDark ? '#FFD19A' : '#7A4E1D',
     },
     favoriteInviteRemoved: {
-      borderColor: 'rgba(154, 107, 47, 0.35)',
-      backgroundColor: 'rgba(255, 243, 224, 0.96)',
+      borderColor: isDark ? 'rgba(232, 184, 122, 0.45)' : 'rgba(154, 107, 47, 0.35)',
+      backgroundColor: isDark ? '#3A2818' : 'rgba(255, 243, 224, 0.96)',
     },
     favoriteInviteIconRemoved: {
-      backgroundColor: 'rgba(154, 107, 47, 0.14)',
+      backgroundColor: isDark ? 'rgba(232, 184, 122, 0.16)' : 'rgba(154, 107, 47, 0.14)',
     },
     favoriteInviteTitleRemoved: {
-      color: '#7A4E1D',
+      color: isDark ? '#FFD19A' : '#7A4E1D',
     },
     systemNoticeRow: {
       width: '100%',
@@ -696,12 +696,12 @@ function createStyles(colors: ThemeColors, bottomPad: number) {
       paddingHorizontal: 12,
       borderRadius: 14,
       borderWidth: 1,
-      borderColor: 'rgba(201, 162, 39, 0.22)',
-      backgroundColor: 'rgba(255, 248, 225, 0.92)',
+      borderColor: isDark ? 'rgba(240, 215, 140, 0.45)' : 'rgba(201, 162, 39, 0.22)',
+      backgroundColor: isDark ? '#3A3018' : 'rgba(255, 248, 225, 0.92)',
     },
     favoriteNoticeRemoved: {
-      borderColor: 'rgba(154, 107, 47, 0.28)',
-      backgroundColor: 'rgba(255, 243, 224, 0.94)',
+      borderColor: isDark ? 'rgba(232, 184, 122, 0.45)' : 'rgba(154, 107, 47, 0.28)',
+      backgroundColor: isDark ? '#3A2818' : 'rgba(255, 243, 224, 0.94)',
     },
     favoriteNoticeIconWrap: {
       width: 28,
@@ -709,11 +709,11 @@ function createStyles(colors: ThemeColors, bottomPad: number) {
       borderRadius: 14,
       alignItems: 'center',
       justifyContent: 'center',
-      backgroundColor: 'rgba(201, 162, 39, 0.16)',
+      backgroundColor: isDark ? 'rgba(240, 215, 140, 0.16)' : 'rgba(201, 162, 39, 0.16)',
       flexShrink: 0,
     },
     favoriteNoticeIconWrapRemoved: {
-      backgroundColor: 'rgba(154, 107, 47, 0.14)',
+      backgroundColor: isDark ? 'rgba(232, 184, 122, 0.16)' : 'rgba(154, 107, 47, 0.14)',
     },
     favoriteNoticeBody: {
       flexShrink: 1,
@@ -722,13 +722,14 @@ function createStyles(colors: ThemeColors, bottomPad: number) {
     },
     favoriteNoticeText: {
       fontSize: FontSize.label,
-      color: '#9A7518',
+      color: isDark ? '#E8D48B' : '#9A7518',
       lineHeight: FontSize.label * 1.4,
       flexShrink: 1,
     },
     favoriteNoticeName: {
       fontWeight: '700',
-      color: colors.text,
+      // Не colors.text: на светлой плашке в dark theme белый текст пропадает.
+      color: isDark ? '#FFF1C2' : '#5C4A10',
     },
     favoriteNoticeMeta: {
       flexDirection: 'row',
@@ -739,11 +740,11 @@ function createStyles(colors: ThemeColors, bottomPad: number) {
       width: 3,
       height: 3,
       borderRadius: 1.5,
-      backgroundColor: 'rgba(154, 117, 24, 0.35)',
+      backgroundColor: isDark ? 'rgba(232, 212, 139, 0.55)' : 'rgba(154, 117, 24, 0.35)',
     },
     favoriteNoticeTime: {
       fontSize: 11,
-      color: colors.textMuted,
+      color: isDark ? '#D4BC6E' : colors.textMuted,
     },
     menuRoot: {
       flex: 1,
@@ -782,7 +783,7 @@ function createStyles(colors: ThemeColors, bottomPad: number) {
       color: colors.destructive,
     },
     menuItemLabelFavorite: {
-      color: '#9A7518',
+      color: isDark ? '#FFE9A8' : '#9A7518',
     },
     blockedBanner: {
       paddingHorizontal: Spacing.md,
@@ -808,6 +809,9 @@ function createStyles(colors: ThemeColors, bottomPad: number) {
       flexDirection: 'row',
       alignItems: 'flex-end',
       paddingHorizontal: 4,
+      ...(Platform.OS === 'web'
+        ? ({ userSelect: 'none', WebkitUserSelect: 'none' } as object)
+        : null),
     },
     bubbleRowMine: {
       justifyContent: 'flex-end',
@@ -832,7 +836,8 @@ function createStyles(colors: ThemeColors, bottomPad: number) {
       paddingHorizontal: 10,
       paddingTop: 6,
       paddingBottom: 6,
-      backgroundColor: colors.surfaceMuted,
+      // На тёмной теме surfaceMuted почти сливается с фоном — чуть светлее.
+      backgroundColor: isDark ? '#2C2C2E' : colors.surfaceMuted,
     },
     bubbleMine: {
       borderBottomLeftRadius: 14,
@@ -917,7 +922,7 @@ function createStyles(colors: ThemeColors, bottomPad: number) {
     },
     bubbleText: {
       fontSize: FontSize.label,
-      color: colors.text,
+      color: isDark ? '#FFFFFF' : colors.text,
       lineHeight: FontSize.label * 1.35,
       flexShrink: 1,
     },
@@ -1158,6 +1163,8 @@ export default function ChatThreadScreen() {
   const backHref = resolveChatReturnHref(returnTo, returnToId);
   const router = useRouter();
   const colors = useTheme();
+  const { colorScheme } = useThemePreference();
+  const isDark = colorScheme === 'dark';
   const insets = useSafeAreaInsets();
   const isDesktopWeb = useIsDesktopWeb();
   const hasDesktopSidebar = useIsDesktopSidebarVisible();
@@ -1166,7 +1173,8 @@ export default function ChatThreadScreen() {
   const { lastConversationUpdate, lastConversationRead, lastConversationDeleted, lastPresence, subscribeMessages, publishConversationUpdate } =
     useRealtime();
   const bottomPad = hasDesktopSidebar ? Spacing.md : Math.max(insets.bottom, Spacing.sm);
-  const styles = useThemedStyles((themeColors) => createStyles(themeColors, bottomPad));
+  const styles = useThemedStyles((themeColors) => createStyles(themeColors, bottomPad, isDark));
+  const nativeScrollGesture = useMemo(() => Gesture.Native(), []);
 
   const [conversation, setConversation] = useState<ConversationListItem | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -2450,9 +2458,17 @@ export default function ChatThreadScreen() {
                 showRemoveBack && styles.favoriteInviteIconRemoved,
               ]}>
               {showRemoveBack ? (
-                <CrownOffIcon size={18} color="#9A6B2F" />
+                <CrownOffIcon
+                  size={18}
+                  color={isDark ? '#E8B87A' : '#9A6B2F'}
+                  haloColor={isDark ? '#3A2818' : undefined}
+                />
               ) : (
-                <MaterialCommunityIcons name="crown" size={18} color="#C9A227" />
+                <MaterialCommunityIcons
+                  name="crown"
+                  size={18}
+                  color={isDark ? '#FFE9A8' : '#C9A227'}
+                />
               )}
             </View>
             <View style={styles.favoriteInviteCopy}>
@@ -2521,6 +2537,7 @@ export default function ChatThreadScreen() {
             <ActivityIndicator color={colors.primary} />
           </View>
         ) : (
+          <GestureDetector gesture={nativeScrollGesture}>
           <FlatList
             ref={listRef}
             style={styles.list}
@@ -2612,7 +2629,7 @@ export default function ChatThreadScreen() {
                 .filter((value): value is string => Boolean(value));
               const isRead =
                 mine && peerReadMs > 0 && new Date(item.createdAt).getTime() <= peerReadMs;
-              const bubbleColor = mine ? colors.primary : colors.surfaceMuted;
+              const bubbleColor = mine ? colors.primary : isDark ? '#2C2C2E' : colors.surfaceMuted;
               const timeLabel = formatMessageTime(item.createdAt);
               const fullDateTimeLabel = formatMessageFullDateTime(item.createdAt);
               const timeAccessibilityProps = fullDateTimeLabel
@@ -2638,9 +2655,17 @@ export default function ChatThreadScreen() {
                           isFavoriteRemovedNotice && styles.favoriteNoticeIconWrapRemoved,
                         ]}>
                         {isFavoriteRemovedNotice ? (
-                          <CrownOffIcon size={15} color="#9A6B2F" />
+                          <CrownOffIcon
+                            size={15}
+                            color={isDark ? '#E8B87A' : '#9A6B2F'}
+                            haloColor={isDark ? '#3A2818' : undefined}
+                          />
                         ) : (
-                          <MaterialCommunityIcons name="crown" size={15} color="#C9A227" />
+                          <MaterialCommunityIcons
+                            name="crown"
+                            size={15}
+                            color={isDark ? '#FFE9A8' : '#C9A227'}
+                          />
                         )}
                       </View>
                       <View style={styles.favoriteNoticeBody}>
@@ -2689,6 +2714,7 @@ export default function ChatThreadScreen() {
                 <ChatMessagePressable
                   selectionMode={selectionMode}
                   onOpenActions={() => openMessageActions(item)}
+                  nativeScrollGesture={nativeScrollGesture}
                   style={[styles.bubbleRow, mine && styles.bubbleRowMine]}>
                   {selectionMode ? (
                     <View style={styles.selectMark}>
@@ -2730,7 +2756,7 @@ export default function ChatThreadScreen() {
                   ) : null}
                   <View style={[styles.bubbleShell, mine && styles.bubbleShellMine]}>
                     {isGroup && !mine && timelineItem.showAuthorMeta ? (
-                      <Text style={styles.senderName} numberOfLines={1}>
+                      <Text selectable={false} style={styles.senderName} numberOfLines={1}>
                         {item.sender?.nickname ?? 'Игрок'}
                       </Text>
                     ) : null}
@@ -2742,6 +2768,7 @@ export default function ChatThreadScreen() {
                       ]}>
                       {item.forwardedFrom ? (
                         <Text
+                          selectable={false}
                           style={[styles.forwardLabel, mine && styles.forwardLabelMine]}
                           numberOfLines={1}>
                           Переслано от: {item.forwardedFrom.nickname}
@@ -2823,6 +2850,7 @@ export default function ChatThreadScreen() {
                             color={mine ? colors.onPrimary : colors.primary}
                           />
                           <Text
+                            selectable={false}
                             style={[
                               styles.bubbleAttachmentName,
                               mine && styles.bubbleAttachmentNameMine,
@@ -2859,6 +2887,7 @@ export default function ChatThreadScreen() {
                         ) : null}
                         <View style={styles.metaRow}>
                           <Text
+                            selectable={false}
                             style={[styles.metaTime, mine && styles.metaTimeMine]}
                             {...timeAccessibilityProps}>
                             {timeLabel}
@@ -2893,6 +2922,7 @@ export default function ChatThreadScreen() {
               );
             }}
           />
+          </GestureDetector>
         )}
 
         <ChatImageLightbox
@@ -3148,7 +3178,11 @@ export default function ChatThreadScreen() {
                         void handleCancelFavorite();
                       }}
                       style={({ pressed }) => [styles.menuItem, pressed && styles.menuItemPressed]}>
-                      <CrownOffIcon size={18} color="#9A6B2F" />
+                      <CrownOffIcon
+                        size={18}
+                        color={isDark ? '#E8B87A' : '#9A6B2F'}
+                        haloColor={isDark ? colors.background : undefined}
+                      />
                       <Text style={[styles.menuItemLabel, styles.menuItemLabelFavorite]}>
                         {addingBack ? 'Убираем…' : 'Убрать из избранных'}
                       </Text>
@@ -3278,6 +3312,7 @@ export default function ChatThreadScreen() {
 
         <ChatDiceOverlay
           request={diceOverlayRequest}
+          warm={dicePopoverOpen || diceRollBusy}
           onFinished={revealHeldDiceMessage}
         />
       </ScreenTransition>

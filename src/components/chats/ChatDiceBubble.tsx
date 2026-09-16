@@ -145,21 +145,27 @@ export function ChatDiceBubble({ payload, mine }: ChatDiceBubbleProps) {
       <View style={styles.header}>
         <View style={[styles.badge, mine ? styles.badgeMine : null]}>
           <Ionicons name="dice-outline" size={12} color={badgeIconColor} />
-          <Text style={[styles.badgeText, mine ? styles.badgeTextMine : null]}>{rollLabel}</Text>
+          <Text selectable={false} style={[styles.badgeText, mine ? styles.badgeTextMine : null]}>
+            {rollLabel}
+          </Text>
         </View>
         {payload.hidden ? (
           <View style={[styles.badge, mine ? styles.badgeMine : null]}>
             <Ionicons name="eye-off-outline" size={12} color={badgeIconColor} />
-            <Text style={[styles.badgeText, mine ? styles.badgeTextMine : null]}>Скрытый</Text>
+            <Text selectable={false} style={[styles.badgeText, mine ? styles.badgeTextMine : null]}>
+              Скрытый
+            </Text>
           </View>
         ) : null}
       </View>
 
-      <Text style={[styles.formula, mine ? styles.formulaMine : null]}>{payload.formula}</Text>
+      <Text selectable={false} style={[styles.formula, mine ? styles.formulaMine : null]}>
+        {payload.formula}
+      </Text>
 
       {redacted ? (
         <View style={styles.hiddenBox}>
-          <Text style={[styles.hiddenTitle, mine ? styles.hiddenTitleMine : null]}>
+          <Text selectable={false} style={[styles.hiddenTitle, mine ? styles.hiddenTitleMine : null]}>
             Результат скрыт
           </Text>
         </View>
@@ -168,14 +174,18 @@ export function ChatDiceBubble({ payload, mine }: ChatDiceBubbleProps) {
           <View style={styles.groups}>
             {payload.groups.map((group) => (
               <View key={`${group.sides}-${group.values.join(',')}`} style={styles.groupRow}>
-                <Text style={[styles.groupLabel, mine ? styles.groupLabelMine : null]}>
+                <Text
+                  selectable={false}
+                  style={[styles.groupLabel, mine ? styles.groupLabelMine : null]}>
                   d{group.sides}
                 </Text>
                 {group.values.map((value, index) => (
                   <View
                     key={`${group.sides}-${index}-${value}`}
                     style={[styles.dieFace, mine ? styles.dieFaceMine : null]}>
-                    <Text style={[styles.dieFaceText, mine ? styles.dieFaceTextMine : null]}>
+                    <Text
+                      selectable={false}
+                      style={[styles.dieFaceText, mine ? styles.dieFaceTextMine : null]}>
                       {value}
                     </Text>
                   </View>
@@ -185,14 +195,16 @@ export function ChatDiceBubble({ payload, mine }: ChatDiceBubbleProps) {
           </View>
 
           {payload.modifier !== 0 ? (
-            <Text style={[styles.modLine, mine ? styles.modLineMine : null]}>
+            <Text selectable={false} style={[styles.modLine, mine ? styles.modLineMine : null]}>
               Модификатор {payload.modifier > 0 ? `+${payload.modifier}` : payload.modifier}
             </Text>
           ) : null}
 
           <View style={styles.totalRow}>
-            <Text style={[styles.totalLabel, mine ? styles.totalLabelMine : null]}>Итого</Text>
-            <Text style={[styles.totalValue, mine ? styles.totalValueMine : null]}>
+            <Text selectable={false} style={[styles.totalLabel, mine ? styles.totalLabelMine : null]}>
+              Итого
+            </Text>
+            <Text selectable={false} style={[styles.totalValue, mine ? styles.totalValueMine : null]}>
               {payload.sum ?? '—'}
             </Text>
           </View>

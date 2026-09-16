@@ -1,6 +1,12 @@
-import { type ReactNode, useMemo } from 'react';
-import { Platform, Pressable, type StyleProp, type ViewStyle } from 'react-native';
-import { Gesture, GestureDetector } from 'react-native-gesture-handler';
+import { type ReactNode, useCallback, useMemo } from 'react';
+import {
+  Platform,
+  Pressable,
+  type GestureResponderEvent,
+  type StyleProp,
+  type ViewStyle,
+} from 'react-native';
+import { Gesture, GestureDetector, type ComposedGesture, type GestureType } from 'react-native-gesture-handler';
 import Animated, {
   runOnJS,
   useAnimatedStyle,
@@ -8,17 +14,17 @@ import Animated, {
   withSpring,
 } from 'react-native-reanimated';
 
-import { useIsDesktopWeb } from '@/components/navigation/DesktopThemeToggle';
-
 type ChatMessagePressableProps = {
   children: ReactNode;
   style?: StyleProp<ViewStyle>;
   selectionMode: boolean;
   onOpenActions: () => void;
+  /** Жест скролла FlatList — чтобы горизонтальный свайп не блокировал ленту. */
+  nativeScrollGesture?: ComposedGesture | GestureType;
 };
 
-const LONG_PRESS_MS = 280;
-const PAN_ACTIVATE_X = 16;
+const LONG_PRESS_MS = 350;
+const PAN_ACTIVATE_X = 20;
 const PAN_FAIL_Y = 10;
 const PAN_HORIZONTAL_RATIO = 1.2;
 const OPEN_DRAG_DISTANCE = 52;
@@ -30,37 +36,58 @@ const SPRING = {
   mass: 0.75,
 };
 
+const NO_SELECT_WEB = Platform.OS === 'web'
+  ? ({
+      userSelect: 'none',
+      WebkitUserSelect: 'none',
+      WebkitTouchCallout: 'none',
+      cursor: 'pointer',
+      touchAction: 'pan-y',
+    } as ViewStyle)
+  : null;
+
+function clearDocumentSelection() {
+  if (Platform.OS !== 'web' || typeof window === 'undefined') {
+    return;
+  }
+  window.getSelection()?.removeAllRanges();
+}
+
 /**
- * ПК: меню по клику.
- * Телефон: long press или горизонтальное перетягивание пузыря.
+ * Как в Telegram:
+ * - long press → меню
+ * - горизонтальный свайп → меню
+ * - web: правый клик → меню
  */
 export function ChatMessagePressable({
   children,
   style,
   selectionMode,
   onOpenActions,
+  nativeScrollGesture,
 }: ChatMessagePressableProps) {
-  const isDesktopWeb = useIsDesktopWeb();
-  const openOnClick = selectionMode || isDesktopWeb;
   const translateX = useSharedValue(0);
   const touchStartX = useSharedValue(0);
   const touchStartY = useSharedValue(0);
   const isPanActivated = useSharedValue(false);
 
-  const composed = useMemo(() => {
-    if (openOnClick) {
-      return Gesture.Tap();
-    }
+  const openActions = useCallback(() => {
+    clearDocumentSelection();
+    onOpenActions();
+  }, [onOpenActions]);
 
+  const composed = useMemo(() => {
     const longPress = Gesture.LongPress()
       .minDuration(LONG_PRESS_MS)
-      .maxDistance(14)
+      .maxDistance(PAN_FAIL_Y)
       .onStart(() => {
-        runOnJS(onOpenActions)();
+        runOnJS(clearDocumentSelection)();
+        runOnJS(openActions)();
       });
 
     const pan = Gesture.Pan()
       .manualActivation(true)
+      .simultaneousWithExternalGesture(nativeScrollGesture ?? Gesture.Native())
       .onTouchesDown((event) => {
         'worklet';
         const touch = event.allTouches[0];
@@ -86,7 +113,7 @@ export function ChatMessagePressable({
         const absDx = Math.abs(dx);
         const absDy = Math.abs(dy);
 
-        if (absDy > PAN_FAIL_Y && absDy > absDx) {
+        if (absDy > PAN_FAIL_Y && absDy >= absDx / PAN_HORIZONTAL_RATIO) {
           state.fail();
           return;
         }
@@ -112,7 +139,7 @@ export function ChatMessagePressable({
         const shouldOpen = Math.abs(event.translationX) >= OPEN_DRAG_DISTANCE;
         translateX.value = withSpring(0, SPRING);
         if (shouldOpen) {
-          runOnJS(onOpenActions)();
+          runOnJS(openActions)();
         }
       })
       .onFinalize((_event, success) => {
@@ -122,23 +149,38 @@ export function ChatMessagePressable({
         }
       });
 
-    return Gesture.Exclusive(pan, longPress);
-  }, [isPanActivated, onOpenActions, openOnClick, touchStartX, touchStartY, translateX]);
+    return Gesture.Race(longPress, pan);
+  }, [
+    isPanActivated,
+    nativeScrollGesture,
+    openActions,
+    touchStartX,
+    touchStartY,
+    translateX,
+  ]);
 
   const animatedStyle = useAnimatedStyle(() => ({
     transform: [{ translateX: translateX.value }],
   }));
 
-  if (openOnClick) {
-    // Без role=button: внутри пузыря уже есть кнопки (ответ, файл, аватар),
-    // а на web Pressable+button даёт вложенный <button>.
+  const handleContextMenu = (event: GestureResponderEvent) => {
+    if (Platform.OS !== 'web' || selectionMode) {
+      return;
+    }
+    const native = event.nativeEvent as unknown as {
+      preventDefault?: () => void;
+      stopPropagation?: () => void;
+    };
+    native.preventDefault?.();
+    native.stopPropagation?.();
+    openActions();
+  };
+
+  if (selectionMode) {
     return (
       <Pressable
-        onPress={onOpenActions}
-        style={[
-          style,
-          Platform.OS === 'web' ? ({ cursor: 'pointer' } as ViewStyle) : null,
-        ]}>
+        onPress={openActions}
+        style={[style, NO_SELECT_WEB]}>
         {children}
       </Pressable>
     );
@@ -146,7 +188,12 @@ export function ChatMessagePressable({
 
   return (
     <GestureDetector gesture={composed}>
-      <Animated.View style={[style, animatedStyle]}>{children}</Animated.View>
+      <Animated.View
+        style={[style, animatedStyle, NO_SELECT_WEB]}
+        // @ts-expect-error RN Web: native context menu
+        onContextMenu={handleContextMenu}>
+        {children}
+      </Animated.View>
     </GestureDetector>
   );
 }
