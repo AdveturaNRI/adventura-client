@@ -7,7 +7,7 @@ import { FontSize, Spacing, type ThemeColors } from '@/constants/theme';
 import { useDiceAccentColor } from '@/hooks/use-dice-accent-color';
 import { useThemedStyles } from '@/hooks/use-themed-styles';
 import {
-  payloadToNotationParts,
+  payloadToForcedNotation,
   type DiceRollPayload,
 } from '@/utils/chat-dice-roll';
 import {
@@ -170,7 +170,7 @@ export function ChatDiceOverlay({ request, onFinished, warm = false }: ChatDiceO
 
     let cancelled = false;
     const messageId = request.messageId;
-    const notation = payloadToNotationParts(request.payload);
+    const notation = payloadToForcedNotation(request.payload);
 
     void (async () => {
       try {

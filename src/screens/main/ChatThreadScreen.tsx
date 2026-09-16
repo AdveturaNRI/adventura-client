@@ -5,7 +5,6 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
-  FlatList,
   Keyboard,
   KeyboardAvoidingView,
   Linking,
@@ -22,6 +21,7 @@ import type {
   NativeSyntheticEvent,
   TextInputKeyPressEventData,
 } from 'react-native';
+import { FlatList, Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Svg, { Path } from 'react-native-svg';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -809,6 +809,9 @@ function createStyles(colors: ThemeColors, bottomPad: number, isDark: boolean) {
       flexDirection: 'row',
       alignItems: 'flex-end',
       paddingHorizontal: 4,
+      ...(Platform.OS === 'web'
+        ? ({ userSelect: 'none', WebkitUserSelect: 'none' } as object)
+        : null),
     },
     bubbleRowMine: {
       justifyContent: 'flex-end',
@@ -1171,6 +1174,7 @@ export default function ChatThreadScreen() {
     useRealtime();
   const bottomPad = hasDesktopSidebar ? Spacing.md : Math.max(insets.bottom, Spacing.sm);
   const styles = useThemedStyles((themeColors) => createStyles(themeColors, bottomPad, isDark));
+  const nativeScrollGesture = useMemo(() => Gesture.Native(), []);
 
   const [conversation, setConversation] = useState<ConversationListItem | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -2533,6 +2537,7 @@ export default function ChatThreadScreen() {
             <ActivityIndicator color={colors.primary} />
           </View>
         ) : (
+          <GestureDetector gesture={nativeScrollGesture}>
           <FlatList
             ref={listRef}
             style={styles.list}
@@ -2709,6 +2714,7 @@ export default function ChatThreadScreen() {
                 <ChatMessagePressable
                   selectionMode={selectionMode}
                   onOpenActions={() => openMessageActions(item)}
+                  nativeScrollGesture={nativeScrollGesture}
                   style={[styles.bubbleRow, mine && styles.bubbleRowMine]}>
                   {selectionMode ? (
                     <View style={styles.selectMark}>
@@ -2750,7 +2756,7 @@ export default function ChatThreadScreen() {
                   ) : null}
                   <View style={[styles.bubbleShell, mine && styles.bubbleShellMine]}>
                     {isGroup && !mine && timelineItem.showAuthorMeta ? (
-                      <Text style={styles.senderName} numberOfLines={1}>
+                      <Text selectable={false} style={styles.senderName} numberOfLines={1}>
                         {item.sender?.nickname ?? 'Игрок'}
                       </Text>
                     ) : null}
@@ -2762,6 +2768,7 @@ export default function ChatThreadScreen() {
                       ]}>
                       {item.forwardedFrom ? (
                         <Text
+                          selectable={false}
                           style={[styles.forwardLabel, mine && styles.forwardLabelMine]}
                           numberOfLines={1}>
                           Переслано от: {item.forwardedFrom.nickname}
@@ -2843,6 +2850,7 @@ export default function ChatThreadScreen() {
                             color={mine ? colors.onPrimary : colors.primary}
                           />
                           <Text
+                            selectable={false}
                             style={[
                               styles.bubbleAttachmentName,
                               mine && styles.bubbleAttachmentNameMine,
@@ -2879,6 +2887,7 @@ export default function ChatThreadScreen() {
                         ) : null}
                         <View style={styles.metaRow}>
                           <Text
+                            selectable={false}
                             style={[styles.metaTime, mine && styles.metaTimeMine]}
                             {...timeAccessibilityProps}>
                             {timeLabel}
@@ -2913,6 +2922,7 @@ export default function ChatThreadScreen() {
               );
             }}
           />
+          </GestureDetector>
         )}
 
         <ChatImageLightbox
