@@ -62,6 +62,7 @@ import { useRealtime } from '@/context/RealtimeContext';
 import { useVoicePlayback, type ChatVoiceQueueItem } from '@/context/VoicePlaybackContext';
 import { useTheme, useThemePreference } from '@/hooks/use-theme';
 import { useThemedStyles } from '@/hooks/use-themed-styles';
+import { useWebKeyboardBottomInset } from '@/hooks/use-web-keyboard-inset';
 import {
   listConversations,
   listMessages,
@@ -1189,7 +1190,10 @@ export default function ChatThreadScreen() {
   const { requestAfterFirstMessage } = usePushPrompt();
   const { lastConversationUpdate, lastConversationRead, lastConversationDeleted, lastPresence, subscribeMessages, publishConversationUpdate } =
     useRealtime();
-  const bottomPad = hasDesktopSidebar ? Spacing.md : Math.max(insets.bottom, Spacing.sm);
+  const bottomSafe = hasDesktopSidebar ? Spacing.md : Math.max(insets.bottom, Spacing.sm);
+  const keyboardInset = useWebKeyboardBottomInset();
+  // Клавиатура уже перекрывает home indicator — не суммируем safe-area с inset.
+  const bottomPad = keyboardInset > 0 ? keyboardInset : bottomSafe;
   const styles = useThemedStyles((themeColors) => createStyles(themeColors, bottomPad, isDark));
 
   const [conversation, setConversation] = useState<ConversationListItem | null>(null);
@@ -2298,7 +2302,7 @@ export default function ChatThreadScreen() {
   }, [conversation, conversationId, loadMessages, unblocking]);
 
   useEffect(() => {
-    if (Platform.OS !== 'web' || typeof document === 'undefined') {
+    if (Platform.OS !== 'web' || typeof document === 'undefined' || !isDesktopWeb) {
       return;
     }
 
@@ -2333,12 +2337,13 @@ export default function ChatThreadScreen() {
       cancelAnimationFrame(frame);
       field?.removeEventListener('keydown', onKeyDown);
     };
-  }, [handleSend, loading]);
+  }, [handleSend, isDesktopWeb, loading]);
 
   const handleKeyPress = useCallback(
     (event: NativeSyntheticEvent<TextInputKeyPressEventData>) => {
-      // На телефоне Enter — новая строка; отправка только кнопкой.
-      if (Platform.OS !== 'web') {
+      // Десктоп: Enter — отправить, Shift+Enter — абзац.
+      // Телефон: Enter с клавиатуры всегда новая строка, отправка только кнопкой.
+      if (!isDesktopWeb) {
         return;
       }
       const key = event.nativeEvent.key;
@@ -2350,7 +2355,7 @@ export default function ChatThreadScreen() {
         void handleSend();
       }
     },
-    [handleSend],
+    [handleSend, isDesktopWeb],
   );
 
   const loadOlder = useCallback(async () => {
@@ -3179,8 +3184,9 @@ export default function ChatThreadScreen() {
                       multiline
                       blurOnSubmit={false}
                       submitBehavior="newline"
-                      returnKeyType={Platform.OS === 'web' ? undefined : 'default'}
-                      onKeyPress={Platform.OS === 'web' ? handleKeyPress : undefined}
+                      returnKeyType="default"
+                      enterKeyHint={isDesktopWeb ? 'send' : 'enter'}
+                      onKeyPress={isDesktopWeb ? handleKeyPress : undefined}
                     />
                   </View>
                   <Pressable

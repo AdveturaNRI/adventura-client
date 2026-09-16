@@ -31,7 +31,7 @@ function createStyles(colors: ThemeColors) {
     },
     rowCompact: {
       flexWrap: 'nowrap',
-      gap: 6,
+      gap: 5,
       justifyContent: 'space-between',
     },
     swatch: {
@@ -42,8 +42,8 @@ function createStyles(colors: ThemeColors) {
       borderColor: 'transparent',
     },
     swatchCompact: {
-      width: 26,
-      height: 26,
+      width: 22,
+      height: 22,
       flexShrink: 1,
     },
     swatchSelected: {

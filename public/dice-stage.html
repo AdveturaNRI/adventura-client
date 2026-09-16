@@ -3,10 +3,9 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
-  <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin />
-  <link rel="dns-prefetch" href="https://cdn.jsdelivr.net" />
-  <link rel="modulepreload" href="https://cdn.jsdelivr.net/npm/@3d-dice/dice-box@1.1.4/dist/dice-box.es.min.js" crossorigin />
-  <link rel="modulepreload" href="https://cdn.jsdelivr.net/npm/@3d-dice/dice-box@1.1.4/dist/world.onscreen.min.js" crossorigin />
+  <link rel="modulepreload" href="/vendor/dice-box/dice-box.es.min.js" />
+  <link rel="modulepreload" href="/vendor/dice-box/world.onscreen.min.js" />
+  <link rel="modulepreload" href="/vendor/dice-box/Dice.min.js" />
   <style>
     html, body, #dice-box {
       margin: 0;
@@ -53,8 +52,10 @@
     <div id="hint" style="display:none"></div>
   </div>
   <script type="module">
-    const VERSION = '1.1.4';
-    const CDN = `https://cdn.jsdelivr.net/npm/@3d-dice/dice-box@${VERSION}/dist`;
+    // Только локальные модули — CDN modulepreload на телефоне в LAN даёт
+    // «Importing a module script failed».
+    import DiceBox from '/vendor/dice-box/dice-box.es.min.js';
+
     const statusEl = document.getElementById('status');
     const hintEl = document.getElementById('hint');
 
@@ -135,8 +136,8 @@
     if (transparent) {
       document.documentElement.style.background = 'transparent';
       document.body.style.background = 'transparent';
-      const box = document.getElementById('dice-box');
-      if (box) box.style.background = 'transparent';
+      const boxEl = document.getElementById('dice-box');
+      if (boxEl) boxEl.style.background = 'transparent';
       document.body.style.pointerEvents = 'none';
     }
 
@@ -169,9 +170,6 @@
     function rollCfgForSpeed(speed) {
       return speed === 'fast' ? ROLL_CFG_FAST : ROLL_CFG_NORMAL;
     }
-
-    setStatus('Тянем 3D-движок…');
-    const DiceBox = (await import(`${CDN}/dice-box.es.min.js`)).default;
 
     setStatus('Собираем физику…');
     const box = new DiceBox('#dice-box', {
@@ -297,6 +295,20 @@
             if (!busy) {
               box.updateConfig(rollCfgForSpeed(currentSpeed));
             }
+          }
+          return;
+        }
+
+        if (data.type === 'ping') {
+          if (ready) post({ type: 'ready' });
+          return;
+        }
+
+        if (data.type === 'resize') {
+          try {
+            box?.resize?.();
+          } catch {
+            // ignore
           }
           return;
         }

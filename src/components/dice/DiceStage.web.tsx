@@ -145,6 +145,7 @@ export const DiceStage = forwardRef<DiceStageHandle, DiceStageProps>(function Di
         }
         if (data.type === 'error') {
           const message = data.message || 'Не удалось бросить кости';
+          console.warn('[DiceStage]', message);
           // В чате не рисуем сырой SyntaxError поверх ленты — бросок уйдёт в fallback.
           if (!transparent) {
             setError(message);
@@ -160,11 +161,9 @@ export const DiceStage = forwardRef<DiceStageHandle, DiceStageProps>(function Di
     return () => window.removeEventListener('message', onWindowMessage);
   }, [transparent]);
 
-  // Chat overlay uses threejs fork — supports forced `@values` for synced faces.
-  // `v=` busts iframe cache after stage HTML / force-sync fixes.
-  const src = transparent
-    ? `/chat-dice-stage.html?transparent=1&v=resize3`
-    : `/dice-stage.html?transparent=0&v=resize3`;
+  // Chat and DiceScreen share Babylon @3d-dice/dice-box (threejs chat fork is broken on mobile).
+  // Remote face sync: overlay clears die on mismatch and shows the result card.
+  const src = `/dice-stage.html?transparent=${transparent ? 1 : 0}&v=dicemin1`;
 
   useEffect(() => {
     setReady(false);
@@ -187,6 +186,11 @@ export const DiceStage = forwardRef<DiceStageHandle, DiceStageProps>(function Di
 
   const shellBg = transparent ? 'transparent' : '#0B1220';
 
+  const onIframeLoad = () => {
+    // Если ready ушёл до подписки родителя — переспросим.
+    postToIframe({ type: 'ping' });
+  };
+
   return createElement(
     'div',
     {
@@ -206,6 +210,7 @@ export const DiceStage = forwardRef<DiceStageHandle, DiceStageProps>(function Di
       ref: iframeRef,
       title: 'Dice roller',
       src,
+      onLoad: onIframeLoad,
       // iOS Safari: full-screen iframe can eat touches even under opacity:0 parents.
       // Keep the stage visual-only; chat UI stays interactive underneath.
       tabIndex: -1,
@@ -222,7 +227,9 @@ export const DiceStage = forwardRef<DiceStageHandle, DiceStageProps>(function Di
         colorScheme: 'normal',
         pointerEvents: 'none',
       },
-      sandbox: 'allow-scripts allow-same-origin',
+      // Без sandbox: WebKit роняет динамический import() внутри sandbox-iframe
+      // («Importing a module script failed»), а dice-box так тянет world.onscreen.
+      // allow-scripts + allow-same-origin на своём же origin защиты и не давали.
       allow: 'autoplay; accelerometer; gyroscope',
     }),
     !ready && !error && !transparent

@@ -16849,7 +16849,7 @@ class Cp {
     });
   }
   async updateConfig(e = {}) {
-    Object.apply(this, e), this.theme_customColorset = e.theme_customColorset ? e.theme_customColorset : null, e.theme_colorset && (this.theme_colorset = e.theme_colorset), e.theme_texture && (this.theme_texture = e.theme_texture), e.theme_material && (this.theme_material = e.theme_material), (e.theme_colorset || e.theme_texture || e.theme_material || e.theme_customColorset) && await this.loadTheme({
+    Object.assign(this, e), this.theme_customColorset = e.theme_customColorset ? e.theme_customColorset : null, e.theme_colorset && (this.theme_colorset = e.theme_colorset), e.theme_texture && (this.theme_texture = e.theme_texture), e.theme_material && (this.theme_material = e.theme_material), (e.theme_colorset || e.theme_texture || e.theme_material || e.theme_customColorset) && await this.loadTheme({
       colorset: this.theme_colorset,
       texture: this.theme_texture,
       material: this.theme_material

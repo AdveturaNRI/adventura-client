@@ -36,6 +36,7 @@ type Pool = Record<ChatDieSides, number>;
 const EMPTY_POOL: Pool = { 4: 0, 6: 0, 8: 0, 10: 0, 12: 0, 20: 0, 100: 0 };
 const ADVANTAGE_POOL: Pool = { ...EMPTY_POOL, 20: 2 };
 const PREVIEW_SIZE = 40;
+const PREVIEW_SIZE_COMPACT = 28;
 
 const DICE_SPEED_OPTIONS: {
   value: DiceAnimationSpeed;
@@ -103,8 +104,8 @@ function createStyles(isDesktop: boolean) {
     },
     rootHidden: {
       opacity: 0,
-      // Keep WebGL previews warm, but leave the chat tappable (opacity:0 still hits on iOS).
-      visibility: 'hidden',
+      zIndex: -1,
+      elevation: 0,
     },
     backdropPress: {
       ...StyleSheet.absoluteFillObject,
@@ -116,7 +117,7 @@ function createStyles(isDesktop: boolean) {
       borderTopRightRadius: 20,
       borderBottomLeftRadius: isDesktop ? 20 : 0,
       borderBottomRightRadius: isDesktop ? 20 : 0,
-      paddingTop: Spacing.md,
+      paddingTop: isDesktop ? Spacing.md : Spacing.sm,
       maxWidth: isDesktop ? 440 : undefined,
       width: isDesktop ? '100%' : undefined,
       borderWidth: 1,
@@ -130,24 +131,30 @@ function createStyles(isDesktop: boolean) {
       alignItems: 'center',
       justifyContent: 'space-between',
       gap: Spacing.sm,
-      paddingHorizontal: Spacing.lg,
+      paddingHorizontal: isDesktop ? Spacing.lg : Spacing.md,
+    },
+    sheetHeaderText: {
+      flex: 1,
+      gap: 2,
+      minWidth: 0,
     },
     sheetScroll: {
       flexGrow: 0,
       flexShrink: 1,
     },
     sheetScrollContent: {
-      paddingHorizontal: Spacing.lg,
+      paddingHorizontal: isDesktop ? Spacing.lg : Spacing.md,
       paddingTop: Spacing.sm,
-      paddingBottom: Spacing.md,
-      gap: Spacing.md,
+      paddingBottom: Spacing.sm,
+      gap: isDesktop ? Spacing.md : 8,
     },
     sheetFooter: {
-      paddingHorizontal: Spacing.lg,
-      paddingBottom: Spacing.lg,
+      paddingHorizontal: isDesktop ? Spacing.lg : Spacing.md,
+      paddingBottom: isDesktop ? Spacing.lg : Spacing.sm,
       paddingTop: Spacing.sm,
       borderTopWidth: StyleSheet.hairlineWidth,
       borderTopColor: 'rgba(21, 122, 254, 0.18)',
+      gap: 8,
     },
     closeBtn: {
       width: 36,
@@ -169,36 +176,42 @@ function createStyles(isDesktop: boolean) {
     colorRow: {
       gap: 4,
     },
+    toolsRow: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      alignItems: 'center',
+      gap: 6,
+    },
     grid: {
       flexDirection: 'row',
       flexWrap: 'wrap',
-      gap: 8,
+      gap: isDesktop ? 8 : 6,
     },
     dieChip: {
-      width: '31%',
-      minWidth: 96,
-      flexGrow: 1,
-      paddingVertical: 10,
-      paddingHorizontal: 8,
-      borderRadius: 14,
+      width: isDesktop ? '31%' : '23.5%',
+      minWidth: isDesktop ? 96 : 0,
+      flexGrow: isDesktop ? 1 : 0,
+      paddingVertical: isDesktop ? 10 : 6,
+      paddingHorizontal: isDesktop ? 8 : 4,
+      borderRadius: isDesktop ? 14 : 10,
       borderWidth: 1,
       borderColor: DICE_UI.chipBorder,
       backgroundColor: DICE_UI.chip,
       alignItems: 'center',
-      gap: 6,
+      gap: isDesktop ? 6 : 3,
     },
     dieChipActive: {
       borderColor: DICE_UI.chipBorderActive,
       backgroundColor: DICE_UI.chipActive,
     },
     diePreview: {
-      width: PREVIEW_SIZE,
-      height: PREVIEW_SIZE,
+      width: isDesktop ? PREVIEW_SIZE : PREVIEW_SIZE_COMPACT,
+      height: isDesktop ? PREVIEW_SIZE : PREVIEW_SIZE_COMPACT,
       alignItems: 'center',
       justifyContent: 'center',
     },
     dieLabel: {
-      fontSize: FontSize.caption,
+      fontSize: isDesktop ? FontSize.caption : 11,
       fontWeight: '700',
       color: DICE_UI.label,
       letterSpacing: 0.2,
@@ -209,12 +222,12 @@ function createStyles(isDesktop: boolean) {
     dieControls: {
       flexDirection: 'row',
       alignItems: 'center',
-      gap: 6,
+      gap: isDesktop ? 6 : 3,
     },
     qtyBtn: {
-      width: 28,
-      height: 28,
-      borderRadius: 14,
+      width: isDesktop ? 28 : 24,
+      height: isDesktop ? 28 : 24,
+      borderRadius: isDesktop ? 14 : 12,
       alignItems: 'center',
       justifyContent: 'center',
       backgroundColor: DICE_UI.control,
@@ -222,14 +235,21 @@ function createStyles(isDesktop: boolean) {
       borderColor: DICE_UI.controlBorder,
     },
     qtyText: {
-      minWidth: 16,
+      minWidth: isDesktop ? 16 : 14,
       textAlign: 'center',
       fontWeight: '700',
       color: DICE_UI.text,
-      fontSize: FontSize.label,
+      fontSize: isDesktop ? FontSize.label : 12,
     },
     row: {
+      gap: 6,
+    },
+    rowInline: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
       gap: 8,
+      flexWrap: 'wrap',
     },
     rowLabel: {
       fontSize: FontSize.caption,
@@ -239,10 +259,10 @@ function createStyles(isDesktop: boolean) {
     modControls: {
       flexDirection: 'row',
       alignItems: 'center',
-      gap: 10,
+      gap: 8,
     },
     modValue: {
-      minWidth: 36,
+      minWidth: 32,
       textAlign: 'center',
       fontWeight: '700',
       color: DICE_UI.label,
@@ -254,8 +274,8 @@ function createStyles(isDesktop: boolean) {
       gap: 6,
     },
     modeChip: {
-      paddingHorizontal: 10,
-      paddingVertical: 6,
+      paddingHorizontal: isDesktop ? 10 : 8,
+      paddingVertical: isDesktop ? 6 : 5,
       borderRadius: 8,
       borderWidth: 1,
       borderColor: DICE_UI.controlBorder,
@@ -268,7 +288,7 @@ function createStyles(isDesktop: boolean) {
       borderColor: DICE_UI.accent,
     },
     modeChipText: {
-      fontSize: 12,
+      fontSize: isDesktop ? 12 : 11,
       fontWeight: '700',
       color: DICE_UI.label,
     },
@@ -289,8 +309,8 @@ function createStyles(isDesktop: boolean) {
       gap: 6,
     },
     speedChip: {
-      width: 34,
-      height: 34,
+      width: isDesktop ? 34 : 30,
+      height: isDesktop ? 34 : 30,
       borderRadius: 8,
       borderWidth: 1,
       borderColor: DICE_UI.controlBorder,
@@ -306,8 +326,8 @@ function createStyles(isDesktop: boolean) {
       flexDirection: 'row',
       alignItems: 'center',
       gap: 8,
-      paddingVertical: 8,
-      paddingHorizontal: 12,
+      paddingVertical: isDesktop ? 8 : 6,
+      paddingHorizontal: isDesktop ? 12 : 10,
       borderRadius: 12,
       backgroundColor: DICE_UI.accentSoft,
       borderWidth: 1,
@@ -323,8 +343,8 @@ function createStyles(isDesktop: boolean) {
       color: DICE_UI.label,
     },
     rollButton: {
-      height: 48,
-      borderRadius: 16,
+      height: isDesktop ? 48 : 44,
+      borderRadius: 14,
       alignItems: 'center',
       justifyContent: 'center',
       backgroundColor: DICE_UI.accent,
@@ -344,7 +364,8 @@ function createStyles(isDesktop: boolean) {
 
 /**
  * Не Modal: RN Modal при закрытии размонтирует детей и каждый раз заново
- * поднимает 7 WebGL-превью. Держим шит в absolute overlay после первого открытия.
+ * поднимает 7 WebGL-превью. На desktop держим шит в absolute overlay.
+ * На mobile — нет: 7 Babylon + threejs iframe = лимит контекстов, куб в чате пустой.
  */
 export function ChatDicePopover({ visible, busy, onClose, onRoll }: ChatDicePopoverProps) {
   const isDesktop = useIsDesktopWeb();
@@ -455,7 +476,10 @@ export function ChatDicePopover({ visible, busy, onClose, onRoll }: ChatDicePopo
         ]}
         pointerEvents="box-none">
         <View style={styles.sheetHeader}>
-          <Text style={styles.title}>Быстрый бросок</Text>
+          <View style={styles.sheetHeaderText}>
+            <Text style={styles.title}>Быстрый бросок</Text>
+            <Text style={styles.formula}>{formula}</Text>
+          </View>
           <Pressable
             accessibilityRole="button"
             accessibilityLabel="Закрыть"
@@ -472,8 +496,6 @@ export function ChatDicePopover({ visible, busy, onClose, onRoll }: ChatDicePopo
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
           bounces={false}>
-          <Text style={styles.formula}>{formula}</Text>
-
           <View style={styles.colorRow}>
             <DiceColorPicker
               value={accent}
@@ -485,7 +507,7 @@ export function ChatDicePopover({ visible, busy, onClose, onRoll }: ChatDicePopo
             />
           </View>
 
-          <View style={styles.modeRow}>
+          <View style={styles.toolsRow}>
             <Pressable
               accessibilityRole="button"
               accessibilityState={{ selected: mode === 'advantage' }}
@@ -514,10 +536,6 @@ export function ChatDicePopover({ visible, busy, onClose, onRoll }: ChatDicePopo
                 Помеха
               </Text>
             </Pressable>
-          </View>
-
-          <View style={styles.speedRow}>
-            <Text style={styles.speedLabel}>Анимация</Text>
             <View style={styles.speedSegment}>
               {DICE_SPEED_OPTIONS.map((option) => {
                 const selected = animationSpeed === option.value;
@@ -533,11 +551,11 @@ export function ChatDicePopover({ visible, busy, onClose, onRoll }: ChatDicePopo
                     style={[styles.speedChip, selected ? styles.speedChipOn : null]}>
                     {option.value === 'fast' ? (
                       <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                        <Ionicons name="arrow-forward" size={12} color={iconColor} />
-                        <Ionicons name="arrow-forward" size={12} color={iconColor} />
+                        <Ionicons name="arrow-forward" size={11} color={iconColor} />
+                        <Ionicons name="arrow-forward" size={11} color={iconColor} />
                       </View>
                     ) : (
-                      <Ionicons name={option.icon} size={16} color={iconColor} />
+                      <Ionicons name={option.icon} size={14} color={iconColor} />
                     )}
                   </Pressable>
                 );
@@ -557,7 +575,7 @@ export function ChatDicePopover({ visible, busy, onClose, onRoll }: ChatDicePopo
                     <View style={styles.diePreview}>
                       <DieMeshPreview
                         sides={sides}
-                        size={PREVIEW_SIZE}
+                        size={isDesktop ? PREVIEW_SIZE : PREVIEW_SIZE_COMPACT}
                         active={active || total === 0}
                         themeColor={accent}
                       />
@@ -572,7 +590,7 @@ export function ChatDicePopover({ visible, busy, onClose, onRoll }: ChatDicePopo
                         disabled={busy || keepMode}
                         onPress={() => bump(sides, -1)}
                         style={styles.qtyBtn}>
-                        <Ionicons name="remove" size={14} color={DICE_UI.label} />
+                        <Ionicons name="remove" size={12} color={DICE_UI.label} />
                       </Pressable>
                       <Text style={styles.qtyText}>{qty}</Text>
                       <Pressable
@@ -581,7 +599,7 @@ export function ChatDicePopover({ visible, busy, onClose, onRoll }: ChatDicePopo
                         disabled={busy || keepMode}
                         onPress={() => bump(sides, 1)}
                         style={styles.qtyBtn}>
-                        <Ionicons name="add" size={14} color={DICE_UI.label} />
+                        <Ionicons name="add" size={12} color={DICE_UI.label} />
                       </Pressable>
                     </View>
                   </View>
@@ -589,15 +607,17 @@ export function ChatDicePopover({ visible, busy, onClose, onRoll }: ChatDicePopo
               })}
             </View>
           </DieMeshPreviewProvider>
+        </ScrollView>
 
-          <View style={styles.row}>
-            <Text style={styles.rowLabel}>Модификатор</Text>
+        <View style={styles.sheetFooter}>
+          <View style={styles.rowInline}>
             <View style={styles.modControls}>
+              <Text style={styles.rowLabel}>Мод.</Text>
               <Pressable
                 accessibilityRole="button"
                 onPress={() => setModifier((v) => Math.max(-99, v - 1))}
                 style={styles.qtyBtn}>
-                <Ionicons name="remove" size={14} color={DICE_UI.label} />
+                <Ionicons name="remove" size={12} color={DICE_UI.label} />
               </Pressable>
               <Text style={styles.modValue}>
                 {modifier > 0 ? `+${modifier}` : String(modifier)}
@@ -606,28 +626,22 @@ export function ChatDicePopover({ visible, busy, onClose, onRoll }: ChatDicePopo
                 accessibilityRole="button"
                 onPress={() => setModifier((v) => Math.min(99, v + 1))}
                 style={styles.qtyBtn}>
-                <Ionicons name="add" size={14} color={DICE_UI.label} />
+                <Ionicons name="add" size={12} color={DICE_UI.label} />
               </Pressable>
             </View>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityState={{ selected: hidden }}
+              onPress={() => setHidden((v) => !v)}
+              style={[styles.hiddenToggle, hidden ? styles.hiddenToggleOn : null]}>
+              <Ionicons
+                name={hidden ? 'eye-off' : 'eye-outline'}
+                size={14}
+                color={DICE_UI.label}
+              />
+              <Text style={styles.hiddenText}>{hidden ? 'Скрытый' : 'Всем'}</Text>
+            </Pressable>
           </View>
-
-          <Pressable
-            accessibilityRole="button"
-            accessibilityState={{ selected: hidden }}
-            onPress={() => setHidden((v) => !v)}
-            style={[styles.hiddenToggle, hidden ? styles.hiddenToggleOn : null]}>
-            <Ionicons
-              name={hidden ? 'eye-off' : 'eye-outline'}
-              size={16}
-              color={DICE_UI.label}
-            />
-            <Text style={styles.hiddenText}>
-              {hidden ? 'Скрытый бросок' : 'Результат видят все'}
-            </Text>
-          </Pressable>
-        </ScrollView>
-
-        <View style={styles.sheetFooter}>
           <Pressable
             accessibilityRole="button"
             disabled={!canRoll}

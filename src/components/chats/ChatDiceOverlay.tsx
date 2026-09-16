@@ -1,5 +1,6 @@
 import { useIsFocused } from 'expo-router';
-import { useEffect, useRef, useState } from 'react';
+import { createElement, useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { AppState, Platform, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -13,10 +14,9 @@ import {
   DICE_CRIT_FAIL_LABEL,
   DICE_CRIT_SUCCESS_LABEL,
   diceFaceMark,
-  diceInputsToNotation,
   diceRollCritLabels,
   formatDiceFormula,
-  payloadToForcedNotation,
+  payloadToStageNotation,
   type DiceRollDieInput,
   type DiceRollMode,
   type DiceRollPayload,
@@ -69,22 +69,40 @@ type ResultSnapshot = {
 function createStyles(colors: ThemeColors) {
   return StyleSheet.create({
     root: {
-      ...StyleSheet.absoluteFill,
+      ...StyleSheet.absoluteFillObject,
+      // Вне ScreenTransition (portal): fixed, иначе iOS не рисует WebGL в iframe
+      // под предком с transform/opacity.
+      ...(Platform.OS === 'web'
+        ? ({
+            position: 'fixed',
+            top: 0,
+            right: 0,
+            bottom: 0,
+            left: 0,
+            width: '100%',
+            height: '100%',
+          } as const)
+        : null),
       zIndex: 60,
       elevation: 60,
       pointerEvents: 'none',
     },
-    // Warm-mount must stay full-screen: 1×1 WebGL init leaves an empty table forever.
-    // opacity:0 alone still hit-tests on mobile Safari (iframe/WebGL swallows the chat).
+    // Не visibility:hidden — WebGL на iOS от этого дохнет.
+    // opacity:0 + zIndex:-1: тачи в чат, сцена тёплая на полном размере.
     rootCollapsed: {
       opacity: 0,
-      visibility: 'hidden',
+      zIndex: -1,
+      elevation: 0,
+    },
+    rootActive: {
+      opacity: 1,
+      zIndex: 10000,
+      elevation: 10000,
     },
     stage: {
-      ...StyleSheet.absoluteFill,
-      // RN Web: без явной высоты iframe/WebGL иногда остаются 0×0 на iOS.
-      minHeight: '100%',
+      ...StyleSheet.absoluteFillObject,
       width: '100%',
+      height: '100%',
     },
     throwerBanner: {
       position: 'absolute',
@@ -322,12 +340,15 @@ export function ChatDiceOverlay({
   }, []);
 
   useEffect(() => {
-    // На мобильном web движок должен прогреться на полном экране до первого броска:
-    // cold-mount в момент «Бросает…» часто ловит 0×0 у iframe.
-    if (warm || request || localRoll || isFocused) {
+    // Держим Babylon тёплым, пока чат в фокусе / открыт поповер / идёт бросок.
+    // Иначе каждый «Бросить» заново грузит iframe (1–3 с паузы на телефоне).
+    if (localRoll || request || warm || isFocused) {
       setEngineMounted(true);
+      return;
     }
-  }, [warm, request, localRoll, isFocused]);
+    setEngineMounted(false);
+    setStageReady(false);
+  }, [isFocused, localRoll, request, warm]);
 
   // --- Свой бросок: фронт = источник истины (строго один roll на token) ---
   const animationSpeedRef = useRef(animationSpeed);
@@ -417,7 +438,16 @@ export function ChatDiceOverlay({
     }
 
     startedLocalTokensRef.current.add(active.token);
-    const notation = diceInputsToNotation(active.dice);
+    const notationParts = [...active.dice]
+      .filter((die) => die.qty > 0)
+      .sort((a, b) => a.sides - b.sides)
+      .map((die) => `${die.qty}d${die.sides}`);
+    const notation =
+      notationParts.length === 0
+        ? '1d20'
+        : notationParts.length === 1
+          ? notationParts[0]
+          : notationParts;
     const formula = formatDiceFormula(active.dice, active.modifier, rollMode);
 
     void (async () => {
@@ -525,7 +555,15 @@ export function ChatDiceOverlay({
       setAnimationSpeed(liveSpeed);
     }
     const resultHoldMs = liveSpeed === 'fast' ? 500 : 1100;
-    const notation = payloadToForcedNotation(active.payload);
+    const notationParts = payloadToStageNotation(active.payload).map(
+      (part) => `${part.qty}d${part.sides}`,
+    );
+    const notation =
+      notationParts.length === 0
+        ? '1d20'
+        : notationParts.length === 1
+          ? notationParts[0]
+          : notationParts;
     const faces = active.payload.groups.flatMap((g) =>
       g.values.map((value) => ({ sides: g.sides, value })),
     );
@@ -605,23 +643,33 @@ export function ChatDiceOverlay({
       ? request?.payload.formula
       : null;
 
-  if (!engineMounted && !visible && !warm) {
+  if (!engineMounted && !visible && !warm && !isFocused) {
     return null;
   }
 
-  return (
+  const keepStageHot = Boolean(warm || isFocused || visible);
+
+  const overlay = (
     <View
-      style={[styles.root, !visible ? styles.rootCollapsed : null]}
+      style={[
+        styles.root,
+        visible ? styles.rootActive : styles.rootCollapsed,
+        // Тёплая сцена должна быть opacity:1 (хоть и за экраном) — иначе WebKit
+        // откладывает первый кадр и снова появляется пауза перед броском.
+        keepStageHot && !visible ? { opacity: 1 } : null,
+      ]}
       pointerEvents="none"
       collapsable={false}>
       <View style={styles.stage} pointerEvents="none">
-        <DiceStage
-          ref={stageRef}
-          accent={activeAccent}
-          transparent
-          animationSpeed={animationSpeed === 'off' ? 'normal' : animationSpeed}
-          onReady={handleStageReady}
-        />
+        {engineMounted || visible || keepStageHot ? (
+          <DiceStage
+            ref={stageRef}
+            accent={activeAccent}
+            transparent
+            animationSpeed={animationSpeed === 'off' ? 'normal' : animationSpeed}
+            onReady={handleStageReady}
+          />
+        ) : null}
       </View>
       {visible && throwerNickname && !result ? (
         <View
@@ -710,4 +758,36 @@ export function ChatDiceOverlay({
       ) : null}
     </View>
   );
+
+  // iOS: iframe/WebGL под ScreenTransition(transform) пустой. Portal + нативный fixed-shell.
+  if (Platform.OS === 'web' && typeof document !== 'undefined') {
+    const portalHidden = !visible;
+    return createPortal(
+      createElement(
+        'div',
+        {
+          id: 'adventura-chat-dice-portal',
+          style: {
+            position: 'fixed',
+            left: 0,
+            width: '100vw',
+            height: '100vh',
+            zIndex: visible ? 10000 : -1,
+            // Тёплую сцену не гасим opacity — только уводим за экран.
+            opacity: visible || keepStageHot ? 1 : 0,
+            pointerEvents: 'none',
+            overflow: 'hidden',
+            top: portalHidden ? '-100vh' : 0,
+            right: 0,
+            bottom: portalHidden ? 'auto' : 0,
+          },
+          'aria-hidden': true,
+        },
+        overlay,
+      ),
+      document.body,
+    );
+  }
+
+  return overlay;
 }

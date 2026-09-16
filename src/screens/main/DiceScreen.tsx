@@ -153,7 +153,7 @@ function createStyles(colors: ThemeColors) {
     },
     workspaceCompact: {
       flexDirection: 'column',
-      gap: Spacing.md,
+      gap: Spacing.sm,
       flexGrow: 0,
       flexShrink: 0,
     },
@@ -162,8 +162,8 @@ function createStyles(colors: ThemeColors) {
       minHeight: 0,
     },
     compactScrollContent: {
-      gap: Spacing.sm,
-      paddingBottom: Spacing.lg,
+      gap: 6,
+      paddingBottom: Spacing.md,
       flexGrow: 1,
     },
 
@@ -194,9 +194,9 @@ function createStyles(colors: ThemeColors) {
       width: '100%',
       height: 'auto',
       minHeight: 0,
-      borderRadius: 18,
-      paddingVertical: 10,
-      paddingHorizontal: 8,
+      borderRadius: 14,
+      paddingVertical: 6,
+      paddingHorizontal: 6,
       flexDirection: 'column',
       alignItems: 'stretch',
     },
@@ -218,7 +218,7 @@ function createStyles(colors: ThemeColors) {
       alignItems: 'flex-start',
       justifyContent: 'flex-start',
       gap: 0,
-      rowGap: 8,
+      rowGap: 4,
       paddingHorizontal: 0,
       width: '100%',
     },
@@ -235,8 +235,8 @@ function createStyles(colors: ThemeColors) {
       minWidth: 0,
       flexDirection: 'column',
       alignItems: 'center',
-      gap: 2,
-      paddingHorizontal: 2,
+      gap: 1,
+      paddingHorizontal: 1,
     },
     dieHit: {
       width: 54,
@@ -249,9 +249,9 @@ function createStyles(colors: ThemeColors) {
       ...(Platform.OS === 'web' ? ({ overflow: 'visible' } as object) : null),
     },
     dieHitCompact: {
-      width: 48,
-      height: 48,
-      borderRadius: 14,
+      width: 40,
+      height: 40,
+      borderRadius: 12,
     },
     dieHitActive: {
       backgroundColor: 'rgba(21, 122, 254, 0.18)',
@@ -346,12 +346,12 @@ function createStyles(colors: ThemeColors) {
       borderColor: 'rgba(21, 122, 254, 0.28)',
     },
     dieMinusCompact: {
-      width: 28,
-      height: 20,
-      borderRadius: 8,
+      width: 24,
+      height: 18,
+      borderRadius: 7,
     },
     dieMinusSpacerCompact: {
-      height: 20,
+      height: 18,
     },
     railDivider: {
       width: 32,
@@ -368,9 +368,9 @@ function createStyles(colors: ThemeColors) {
       backgroundColor: 'rgba(21, 122, 254, 0.12)',
     },
     railToolCompact: {
-      width: 48,
-      height: 48,
-      borderRadius: 14,
+      width: 40,
+      height: 40,
+      borderRadius: 12,
       marginTop: 0,
     },
     railToolDisabled: {
@@ -406,11 +406,12 @@ function createStyles(colors: ThemeColors) {
     trayCompact: {
       flexGrow: 0,
       flexShrink: 0,
-      minHeight: 240,
-      borderRadius: 18,
+      minHeight: 160,
+      borderRadius: 16,
+      borderWidth: 2,
     },
     trayCompactShort: {
-      minHeight: 200,
+      minHeight: 140,
     },
     trayInnerRing: {
       ...StyleSheet.absoluteFillObject,
@@ -446,6 +447,17 @@ function createStyles(colors: ThemeColors) {
       shadowOffset: { width: 0, height: 6 },
       elevation: 6,
     },
+    rollBtnCompact: {
+      minWidth: 0,
+      width: '100%',
+      minHeight: 44,
+      paddingHorizontal: 16,
+      borderRadius: 12,
+      shadowOpacity: 0.25,
+      shadowRadius: 8,
+      shadowOffset: { width: 0, height: 3 },
+      elevation: 3,
+    },
     rollBtnDisabled: {
       opacity: 0.5,
     },
@@ -454,6 +466,9 @@ function createStyles(colors: ThemeColors) {
       fontWeight: '800',
       color: colors.onPrimary,
       letterSpacing: 0.4,
+    },
+    rollLabelCompact: {
+      fontSize: 15,
     },
     statusChip: {
       position: 'absolute',
@@ -465,6 +480,11 @@ function createStyles(colors: ThemeColors) {
       alignItems: 'center',
       pointerEvents: 'none',
     },
+    statusChipCompact: {
+      top: 8,
+      left: 8,
+      right: 8,
+    },
     statusPill: {
       maxWidth: '92%',
       paddingHorizontal: 14,
@@ -473,6 +493,10 @@ function createStyles(colors: ThemeColors) {
       backgroundColor: 'rgba(8, 14, 28, 0.72)',
       borderWidth: 1,
       borderColor: 'rgba(21, 122, 254, 0.35)',
+    },
+    statusPillCompact: {
+      paddingHorizontal: 10,
+      paddingVertical: 4,
     },
     statusText: {
       fontSize: FontSize.caption,
@@ -499,8 +523,12 @@ function createStyles(colors: ThemeColors) {
       zIndex: 4,
     },
     lastResultCompact: {
-      marginTop: Spacing.sm,
+      marginTop: 0,
       backgroundColor: '#101820',
+      paddingHorizontal: 12,
+      paddingVertical: 8,
+      borderRadius: 12,
+      gap: 8,
     },
     lastResultMain: {
       flex: 1,
@@ -514,6 +542,10 @@ function createStyles(colors: ThemeColors) {
       fontWeight: '800',
       color: colors.primary,
       minWidth: 48,
+    },
+    lastResultSumCompact: {
+      fontSize: 22,
+      minWidth: 36,
     },
     lastResultSumCritFail: {
       color: colors.destructive,
@@ -615,15 +647,16 @@ function createStyles(colors: ThemeColors) {
       width: '100%',
       flexGrow: 0,
       flexShrink: 0,
-      borderRadius: 18,
-      maxHeight: 220,
-      marginTop: Spacing.xs,
+      borderRadius: 14,
+      maxHeight: 160,
+      marginTop: 0,
+      padding: 10,
     },
     historyScroll: {
       flexGrow: 0,
     },
     historyScrollCompact: {
-      maxHeight: 160,
+      maxHeight: 110,
       flexGrow: 0,
       flexShrink: 0,
     },
@@ -742,18 +775,18 @@ function createStyles(colors: ThemeColors) {
     colorBarCompact: {
       paddingHorizontal: 0,
       paddingBottom: 0,
-      gap: Spacing.sm,
+      gap: 6,
     },
     controlsStrip: {
       flexDirection: 'row',
       flexWrap: 'wrap',
       alignItems: 'center',
-      gap: 8,
+      gap: 6,
     },
     controlsStripGroup: {
       flexDirection: 'row',
       alignItems: 'center',
-      gap: 6,
+      gap: 4,
       flexWrap: 'wrap',
     },
     modRow: {
@@ -768,13 +801,13 @@ function createStyles(colors: ThemeColors) {
     modControls: {
       flexDirection: 'row',
       alignItems: 'center',
-      gap: 8,
+      gap: 6,
       alignSelf: 'flex-start',
     },
     modBtn: {
-      width: 32,
-      height: 32,
-      borderRadius: 10,
+      width: 28,
+      height: 28,
+      borderRadius: 8,
       alignItems: 'center',
       justifyContent: 'center',
       backgroundColor: 'rgba(21, 122, 254, 0.14)',
@@ -782,7 +815,7 @@ function createStyles(colors: ThemeColors) {
       borderColor: 'rgba(21, 122, 254, 0.28)',
     },
     modValue: {
-      minWidth: 40,
+      minWidth: 32,
       textAlign: 'center',
       fontSize: FontSize.label,
       fontWeight: '800',
@@ -795,8 +828,8 @@ function createStyles(colors: ThemeColors) {
       paddingHorizontal: 4,
     },
     modeChip: {
-      paddingHorizontal: 10,
-      paddingVertical: 5,
+      paddingHorizontal: 8,
+      paddingVertical: 4,
       borderRadius: 8,
       borderWidth: 1,
       borderColor: 'rgba(21, 122, 254, 0.28)',
@@ -809,7 +842,7 @@ function createStyles(colors: ThemeColors) {
       borderColor: colors.primary,
     },
     modeChipText: {
-      fontSize: 12,
+      fontSize: 11,
       fontWeight: '700',
       color: colors.primary,
       letterSpacing: 0.1,
@@ -829,11 +862,11 @@ function createStyles(colors: ThemeColors) {
     speedSegment: {
       flexDirection: 'row',
       alignSelf: 'flex-start',
-      gap: 6,
+      gap: 4,
     },
     speedChip: {
-      width: 34,
-      height: 34,
+      width: 30,
+      height: 30,
       borderRadius: 8,
       borderWidth: 1,
       borderColor: 'rgba(21, 122, 254, 0.28)',
@@ -864,9 +897,9 @@ export default function DiceScreen() {
   const large = width >= 1100;
   const shortViewport = height < 720;
   const trayHeight = compact
-    ? Math.round(Math.min(shortViewport ? 240 : 300, Math.max(220, height * 0.34)))
+    ? Math.round(Math.min(shortViewport ? 168 : 200, Math.max(150, height * 0.24)))
     : undefined;
-  const diePreviewSize = large ? 52 : medium ? 46 : 40;
+  const diePreviewSize = large ? 52 : medium ? 46 : compact ? 28 : 40;
 
   const [pool, setPool] = useState<Pool>(INITIAL_POOL);
   const [modifier, setModifier] = useState(0);
@@ -1142,7 +1175,7 @@ export default function DiceScreen() {
           ) : null}
           <DieMeshPreview
             sides={option.sides}
-            size={compact ? 34 : diePreviewSize}
+            size={compact ? diePreviewSize : diePreviewSize}
             active={active || totalDice === 0}
             themeColor={accent}
           />
@@ -1390,6 +1423,7 @@ export default function DiceScreen() {
           <Text
             style={[
               styles.lastResultSum,
+              compact ? styles.lastResultSumCompact : null,
               outcomeSingleMark === 'crit_fail' ? styles.lastResultSumCritFail : null,
               outcomeSingleMark === 'crit_success'
                 ? styles.lastResultSumCritSuccess
@@ -1613,6 +1647,31 @@ export default function DiceScreen() {
     </View>
   );
 
+  const rollButton = !rolling ? (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel="Сделать бросок"
+      disabled={parts.length === 0 || (animationSpeed !== 'off' && !stageReady)}
+      onPress={handleRoll}
+      style={({ pressed }) => [
+        styles.rollBtn,
+        compact && styles.rollBtnCompact,
+        !compact && showLast ? { marginBottom: 56 } : null,
+        (parts.length === 0 || (animationSpeed !== 'off' && !stageReady)) &&
+          styles.rollBtnDisabled,
+        pressed &&
+          (animationSpeed === 'off' || stageReady) &&
+          parts.length > 0 && { opacity: 0.92, transform: [{ scale: 0.98 }] },
+      ]}>
+      <Text style={[styles.rollLabel, compact && styles.rollLabelCompact]}>
+        {animationSpeed !== 'off' && !stageReady ? '…' : 'Бросок'}
+      </Text>
+      {animationSpeed === 'off' || stageReady ? (
+        <Ionicons name="arrow-forward" size={compact ? 16 : 18} color={colors.onPrimary} />
+      ) : null}
+    </Pressable>
+  ) : null;
+
   const trayBlock = (
     <View style={[styles.trayColumn, compact && styles.trayColumnCompact]}>
       <View
@@ -1635,11 +1694,11 @@ export default function DiceScreen() {
           ) : null}
         </View>
 
-        <View style={styles.statusChip}>
-          <View style={styles.statusPill}>
-            <Text style={styles.statusText} numberOfLines={2}>
+        <View style={[styles.statusChip, compact && styles.statusChipCompact]}>
+          <View style={[styles.statusPill, compact && styles.statusPillCompact]}>
+            <Text style={styles.statusText} numberOfLines={1}>
               {!stageReady
-                ? 'Подготовка игрового стола…'
+                ? 'Подготовка стола…'
                 : rolling
                   ? 'Идёт бросок…'
                   : notationLabel}
@@ -1647,34 +1706,15 @@ export default function DiceScreen() {
           </View>
         </View>
 
-        {!rolling ? (
+        {!compact && rollButton ? (
           <View style={styles.rollOverlay} pointerEvents="box-none">
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Сделать бросок"
-              disabled={parts.length === 0 || (animationSpeed !== 'off' && !stageReady)}
-              onPress={handleRoll}
-              style={({ pressed }) => [
-                styles.rollBtn,
-                showLast ? { marginBottom: compact ? 0 : 56 } : null,
-                (parts.length === 0 || (animationSpeed !== 'off' && !stageReady)) &&
-                  styles.rollBtnDisabled,
-                pressed &&
-                  (animationSpeed === 'off' || stageReady) &&
-                  parts.length > 0 && { opacity: 0.92, transform: [{ scale: 0.98 }] },
-              ]}>
-              <Text style={styles.rollLabel}>
-                {animationSpeed !== 'off' && !stageReady ? '…' : 'Бросок'}
-              </Text>
-              {animationSpeed === 'off' || stageReady ? (
-                <Ionicons name="arrow-forward" size={18} color={colors.onPrimary} />
-              ) : null}
-            </Pressable>
+            {rollButton}
           </View>
         ) : null}
 
         {!compact ? lastResultCard : null}
       </View>
+      {compact ? rollButton : null}
       {compact ? lastResultCard : null}
     </View>
   );
@@ -1692,7 +1732,7 @@ export default function DiceScreen() {
       style={[
         pageStyles.container,
         styles.root,
-        compact ? { paddingHorizontal: Spacing.md, gap: Spacing.sm } : null,
+        compact ? { paddingHorizontal: Spacing.sm, gap: 6 } : null,
       ]}>
       {hasDesktopSidebar ? (
         <Text style={pageStyles.title}>Дайсы</Text>
@@ -1705,7 +1745,7 @@ export default function DiceScreen() {
           style={styles.compactScroll}
           contentContainerStyle={[
             styles.compactScrollContent,
-            { paddingBottom: Math.max(insets.bottom, Spacing.lg) },
+            { paddingBottom: Math.max(insets.bottom, Spacing.md) },
           ]}
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"

@@ -313,6 +313,8 @@ export function diceRollCritLabels(
     }
   };
 
+  const dieCount = groups.reduce((sum, group) => sum + group.values.length, 0);
+
   if (mode === 'advantage' || mode === 'disadvantage') {
     const d20Values = collectD20Values(groups);
     if (d20Values.length >= 2) {
@@ -325,7 +327,8 @@ export function diceRollCritLabels(
         }
       }
     }
-  } else {
+  } else if (dieCount <= 1) {
+    // Несколько кубов без преимущества/помехи — крит по граням не пишем.
     for (const group of groups) {
       for (const value of group.values) {
         consider(group.sides, value);
