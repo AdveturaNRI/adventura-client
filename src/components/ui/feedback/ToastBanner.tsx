@@ -41,11 +41,6 @@ function createStyles(colors: ThemeColors) {
     card: {
       width: '100%',
       maxWidth: Layout.maxContentWidth,
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: Spacing.sm + 2,
-      paddingVertical: 12,
-      paddingHorizontal: Spacing.md,
       borderRadius: 16,
       backgroundColor: colors.surface,
       borderWidth: 1,
@@ -60,6 +55,21 @@ function createStyles(colors: ThemeColors) {
       ...(Platform.OS === 'web'
         ? ({
             color: colors.text,
+          } as object)
+        : null),
+    },
+    cardInner: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: Spacing.sm + 2,
+      paddingVertical: 12,
+      paddingHorizontal: Spacing.md,
+      backgroundColor: 'transparent',
+      ...(Platform.OS === 'web'
+        ? ({
+            appearance: 'none',
+            WebkitAppearance: 'none',
+            backgroundImage: 'none',
           } as object)
         : null),
     },
@@ -288,17 +298,23 @@ export function ToastBanner({ text1, text2, onPress, variant, props }: ToastBann
 
   return (
     <View pointerEvents="box-none" style={[styles.outer, getAlignmentStyle(alignment, styles)]}>
-      {isInteractive ? (
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={actionLabel ?? text1 ?? 'Уведомление'}
-          onPress={onAction ? handleAction : onPress}
-          style={({ pressed }) => [...cardStyle, pressed && styles.cardPressed]}>
-          {body}
-        </Pressable>
-      ) : (
-        <View style={cardStyle}>{body}</View>
-      )}
+      {/* Фон на View: Safari красит <button>/Pressable в белый и убивает контраст на dark. */}
+      <View style={[...cardStyle, { backgroundColor: colors.surface }]}>
+        {isInteractive ? (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={actionLabel ?? text1 ?? 'Уведомление'}
+            onPress={onAction ? handleAction : onPress}
+            style={({ pressed }) => [
+              styles.cardInner,
+              pressed && styles.cardPressed,
+            ]}>
+            {body}
+          </Pressable>
+        ) : (
+          <View style={styles.cardInner}>{body}</View>
+        )}
+      </View>
     </View>
   );
 }

@@ -98,6 +98,7 @@ import {
   subscribeDiceAnimationSpeed,
 } from '@/utils/dice-animations-storage';
 import { localizeErrorMessage } from '@/utils/localizeError';
+import { shouldSendChatOnEnter } from '@/utils/chat-enter-key';
 import {
   getCachedFileTooLargeMessage,
   getCachedUploadLimits,
@@ -2302,7 +2303,7 @@ export default function ChatThreadScreen() {
   }, [conversation, conversationId, loadMessages, unblocking]);
 
   useEffect(() => {
-    if (Platform.OS !== 'web' || typeof document === 'undefined' || !isDesktopWeb) {
+    if (!shouldSendChatOnEnter() || typeof document === 'undefined') {
       return;
     }
 
@@ -2337,13 +2338,13 @@ export default function ChatThreadScreen() {
       cancelAnimationFrame(frame);
       field?.removeEventListener('keydown', onKeyDown);
     };
-  }, [handleSend, isDesktopWeb, loading]);
+  }, [handleSend, loading]);
 
   const handleKeyPress = useCallback(
     (event: NativeSyntheticEvent<TextInputKeyPressEventData>) => {
-      // Десктоп: Enter — отправить, Shift+Enter — абзац.
-      // Телефон: Enter с клавиатуры всегда новая строка, отправка только кнопкой.
-      if (!isDesktopWeb) {
+      // ПК: Enter — отправить, Shift+Enter — абзац.
+      // Телефон: Enter с клавиатуры всегда новая строка.
+      if (!shouldSendChatOnEnter()) {
         return;
       }
       const key = event.nativeEvent.key;
@@ -2355,7 +2356,7 @@ export default function ChatThreadScreen() {
         void handleSend();
       }
     },
-    [handleSend, isDesktopWeb],
+    [handleSend],
   );
 
   const loadOlder = useCallback(async () => {
@@ -3185,8 +3186,8 @@ export default function ChatThreadScreen() {
                       blurOnSubmit={false}
                       submitBehavior="newline"
                       returnKeyType="default"
-                      enterKeyHint={isDesktopWeb ? 'send' : 'enter'}
-                      onKeyPress={isDesktopWeb ? handleKeyPress : undefined}
+                      enterKeyHint={shouldSendChatOnEnter() ? 'send' : 'enter'}
+                      onKeyPress={shouldSendChatOnEnter() ? handleKeyPress : undefined}
                     />
                   </View>
                   <Pressable
