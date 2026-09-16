@@ -102,6 +102,9 @@ export function buildDiceBoxNativeHtml(options?: { accent?: string; transparent?
           currentSpeed = data.speed;
           box.updateConfig(rollCfg(currentSpeed));
         }
+        if (data.type==='resize') {
+          try { box.resizeWorld?.(); } catch (_) { /* ignore */ }
+        }
         if (data.type==='preview') await runPreview(data.notation);
         if (data.type==='roll') await runRoll(data.notation ?? '1d20', data.speed);
         if (data.type==='clear') { generation+=1; box.clear(); }

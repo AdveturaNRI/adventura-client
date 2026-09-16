@@ -284,6 +284,16 @@
       }
     }
 
+    async function syncWorldSize() {
+      if (!box?.container) return;
+      const w = box.container.clientWidth;
+      const h = box.container.clientHeight;
+      if (w < 2 || h < 2) return;
+      // resizeWorld() только вешает listener — размеры не трогает. setDimensions() без
+      // аргументов берёт clientWidth/Height контейнера.
+      box.setDimensions();
+    }
+
     async function runRoll(notation, themeColor, speed) {
       const token = ++generation;
       if (speed === 'fast' || speed === 'normal') {
@@ -292,8 +302,7 @@
       await applyAccent(themeColor);
       unlockAudio();
       try {
-        // Warm-mount в 1×1 — перед броском подгоняем размер под оверлей.
-        box.resizeWorld?.();
+        await syncWorldSize();
         const normalized = normalizeNotation(notation);
         const forced = parseForcedValues(normalized);
         const results = await box.roll(normalized);
@@ -346,6 +355,11 @@
 
         if (data.type === 'setSpeed') {
           await applySpeed(data.speed);
+          return;
+        }
+
+        if (data.type === 'resize') {
+          await syncWorldSize();
           return;
         }
 

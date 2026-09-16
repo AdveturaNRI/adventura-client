@@ -3406,9 +3406,7 @@ export default function ChatThreadScreen() {
           visible={dicePopoverOpen}
           busy={diceRollBusy}
           onClose={() => {
-            if (!diceRollBusy) {
-              setDicePopoverOpen(false);
-            }
+            setDicePopoverOpen(false);
           }}
           onRoll={(input) => void handleDiceRoll(input)}
         />

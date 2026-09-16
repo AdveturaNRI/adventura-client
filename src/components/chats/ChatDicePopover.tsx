@@ -3,10 +3,13 @@ import { useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
+  useWindowDimensions,
   View,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { DieMeshPreview, DieMeshPreviewProvider } from '@/components/dice/DieMeshPreview';
 import { DiceColorPicker } from '@/components/dice/DiceColorPicker';
@@ -94,16 +97,16 @@ function createStyles(isDesktop: boolean) {
       ...StyleSheet.absoluteFillObject,
       zIndex: 55,
       elevation: 55,
+      justifyContent: isDesktop ? 'center' : 'flex-end',
+      alignItems: isDesktop ? 'center' : 'stretch',
+      padding: isDesktop ? Spacing.lg : 0,
     },
     rootHidden: {
       opacity: 0,
     },
-    backdrop: {
-      flex: 1,
+    backdropPress: {
+      ...StyleSheet.absoluteFillObject,
       backgroundColor: DICE_UI.backdrop,
-      justifyContent: isDesktop ? 'center' : 'flex-end',
-      alignItems: isDesktop ? 'center' : 'stretch',
-      padding: isDesktop ? Spacing.lg : 0,
     },
     sheet: {
       backgroundColor: DICE_UI.sheet,
@@ -111,20 +114,45 @@ function createStyles(isDesktop: boolean) {
       borderTopRightRadius: 20,
       borderBottomLeftRadius: isDesktop ? 20 : 0,
       borderBottomRightRadius: isDesktop ? 20 : 0,
-      paddingHorizontal: Spacing.lg,
       paddingTop: Spacing.md,
-      paddingBottom: Spacing.lg,
-      gap: Spacing.md,
       maxWidth: isDesktop ? 440 : undefined,
       width: isDesktop ? '100%' : undefined,
       borderWidth: 1,
       borderColor: DICE_UI.sheetBorder,
+      zIndex: 1,
+      maxHeight: '100%',
+      overflow: 'hidden',
     },
-    header: {
+    sheetHeader: {
       flexDirection: 'row',
       alignItems: 'center',
       justifyContent: 'space-between',
       gap: Spacing.sm,
+      paddingHorizontal: Spacing.lg,
+    },
+    sheetScroll: {
+      flexGrow: 0,
+      flexShrink: 1,
+    },
+    sheetScrollContent: {
+      paddingHorizontal: Spacing.lg,
+      paddingTop: Spacing.sm,
+      paddingBottom: Spacing.md,
+      gap: Spacing.md,
+    },
+    sheetFooter: {
+      paddingHorizontal: Spacing.lg,
+      paddingBottom: Spacing.lg,
+      paddingTop: Spacing.sm,
+      borderTopWidth: StyleSheet.hairlineWidth,
+      borderTopColor: 'rgba(21, 122, 254, 0.18)',
+    },
+    closeBtn: {
+      width: 36,
+      height: 36,
+      alignItems: 'center',
+      justifyContent: 'center',
+      borderRadius: 18,
     },
     title: {
       fontSize: FontSize.button,
@@ -293,7 +321,6 @@ function createStyles(isDesktop: boolean) {
       color: DICE_UI.label,
     },
     rollButton: {
-      marginTop: 4,
       height: 48,
       borderRadius: 16,
       alignItems: 'center',
@@ -320,6 +347,8 @@ function createStyles(isDesktop: boolean) {
 export function ChatDicePopover({ visible, busy, onClose, onRoll }: ChatDicePopoverProps) {
   const isDesktop = useIsDesktopWeb();
   const styles = useMemo(() => createStyles(isDesktop), [isDesktop]);
+  const insets = useSafeAreaInsets();
+  const { height: windowHeight } = useWindowDimensions();
   const { accent, setAccent } = useDiceAccentColor();
   const [keptAlive, setKeptAlive] = useState(false);
   const [pool, setPool] = useState<Pool>({ ...EMPTY_POOL, 20: 1 });
@@ -329,6 +358,10 @@ export function ChatDicePopover({ visible, busy, onClose, onRoll }: ChatDicePopo
   const [animationSpeed, setAnimationSpeed] = useState<DiceAnimationSpeed>(
     getDiceAnimationSpeedSync,
   );
+
+  const sheetMaxHeight = isDesktop
+    ? undefined
+    : Math.max(320, windowHeight - Math.max(insets.top, 8) - 8);
 
   useEffect(() => {
     if (visible) {
@@ -405,14 +438,38 @@ export function ChatDicePopover({ visible, busy, onClose, onRoll }: ChatDicePopo
       pointerEvents={visible ? 'auto' : 'none'}
       accessibilityElementsHidden={!visible}
       importantForAccessibility={visible ? 'yes' : 'no-hide-descendants'}>
-      <Pressable style={styles.backdrop} onPress={visible && !busy ? onClose : undefined}>
-        <Pressable style={styles.sheet} onPress={(e) => e.stopPropagation()}>
-          <View style={styles.header}>
-            <Text style={styles.title}>Быстрый бросок</Text>
-            <Pressable accessibilityRole="button" accessibilityLabel="Закрыть" onPress={onClose}>
-              <Ionicons name="close" size={22} color={DICE_UI.textMuted} />
-            </Pressable>
-          </View>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel="Закрыть быстрый бросок"
+        disabled={!visible}
+        onPress={onClose}
+        style={styles.backdropPress}
+      />
+      <View
+        style={[
+          styles.sheet,
+          sheetMaxHeight != null ? { maxHeight: sheetMaxHeight } : null,
+          { paddingBottom: isDesktop ? Spacing.lg : Math.max(insets.bottom, Spacing.md) },
+        ]}
+        pointerEvents="box-none">
+        <View style={styles.sheetHeader}>
+          <Text style={styles.title}>Быстрый бросок</Text>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Закрыть"
+            hitSlop={12}
+            onPress={onClose}
+            style={styles.closeBtn}>
+            <Ionicons name="close" size={22} color={DICE_UI.textMuted} />
+          </Pressable>
+        </View>
+
+        <ScrollView
+          style={styles.sheetScroll}
+          contentContainerStyle={styles.sheetScrollContent}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+          bounces={false}>
           <Text style={styles.formula}>{formula}</Text>
 
           <View style={styles.colorRow}>
@@ -566,7 +623,9 @@ export function ChatDicePopover({ visible, busy, onClose, onRoll }: ChatDicePopo
               {hidden ? 'Скрытый бросок' : 'Результат видят все'}
             </Text>
           </Pressable>
+        </ScrollView>
 
+        <View style={styles.sheetFooter}>
           <Pressable
             accessibilityRole="button"
             disabled={!canRoll}
@@ -581,8 +640,8 @@ export function ChatDicePopover({ visible, busy, onClose, onRoll }: ChatDicePopo
               </>
             )}
           </Pressable>
-        </Pressable>
-      </Pressable>
+        </View>
+      </View>
     </View>
   );
 }

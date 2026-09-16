@@ -153,6 +153,7 @@ function createStyles(colors: ThemeColors) {
     workspaceCompact: {
       flexDirection: 'column',
       gap: Spacing.sm,
+      overflow: 'hidden',
     },
 
     rail: {
@@ -350,6 +351,7 @@ function createStyles(colors: ThemeColors) {
       flex: 1,
       minWidth: 0,
       minHeight: 0,
+      zIndex: 1,
     },
     tray: {
       flex: 1,
@@ -366,8 +368,11 @@ function createStyles(colors: ThemeColors) {
       shadowOffset: { width: 0, height: 8 },
     },
     trayCompact: {
-      minHeight: 280,
+      minHeight: 180,
       borderRadius: 20,
+    },
+    trayCompactShort: {
+      minHeight: 0,
     },
     trayInnerRing: {
       ...StyleSheet.absoluteFillObject,
@@ -550,6 +555,9 @@ function createStyles(colors: ThemeColors) {
       backgroundColor: 'rgba(21, 122, 254, 0.06)',
       padding: 12,
       minHeight: 0,
+      flexGrow: 0,
+      flexShrink: 0,
+      overflow: 'hidden',
     },
     historyMedium: {
       width: 228,
@@ -561,8 +569,16 @@ function createStyles(colors: ThemeColors) {
     },
     historyCompact: {
       width: '100%',
-      maxHeight: 168,
+      flexGrow: 0,
+      flexShrink: 1,
       borderRadius: 18,
+    },
+    historyScroll: {
+      flexGrow: 0,
+    },
+    historyScrollCompact: {
+      flexGrow: 1,
+      flexShrink: 1,
     },
     historyHeader: {
       flexDirection: 'row',
@@ -781,6 +797,10 @@ export default function DiceScreen() {
   const compact = width < 760;
   const medium = width >= 760 && width < 1100;
   const large = width >= 1100;
+  const shortViewport = height < 720;
+  const historyMaxHeight = compact
+    ? Math.round(Math.min(shortViewport ? 112 : 148, Math.max(88, height * 0.18)))
+    : undefined;
   const diePreviewSize = large ? 52 : medium ? 46 : 40;
 
   const [pool, setPool] = useState<Pool>(INITIAL_POOL);
@@ -1142,6 +1162,7 @@ export default function DiceScreen() {
         medium && styles.historyMedium,
         large && styles.historyLarge,
         compact && styles.historyCompact,
+        historyMaxHeight != null ? { maxHeight: historyMaxHeight } : null,
       ]}>
       <View style={styles.historyHeader}>
         <Text style={styles.historyTitle}>История бросков</Text>
@@ -1154,7 +1175,11 @@ export default function DiceScreen() {
           </Pressable>
         ) : null}
       </View>
-      <ScrollView showsVerticalScrollIndicator={false}>
+      <ScrollView
+        style={[styles.historyScroll, compact ? styles.historyScrollCompact : null]}
+        contentContainerStyle={compact ? { paddingBottom: 2 } : undefined}
+        showsVerticalScrollIndicator={false}
+        nestedScrollEnabled>
         {history.length === 0 ? (
           <Text style={styles.historyEmpty}>
             Здесь появятся результаты: сумма, нотация и значения по костям.
@@ -1373,7 +1398,12 @@ export default function DiceScreen() {
         {dieRail}
 
         <View style={styles.trayColumn}>
-          <View style={[styles.tray, compact && styles.trayCompact]}>
+          <View
+            style={[
+              styles.tray,
+              compact && styles.trayCompact,
+              compact && shortViewport && styles.trayCompactShort,
+            ]}>
             <View style={styles.trayInnerRing} />
             <View style={styles.stageFill}>
               {isFocused ? (

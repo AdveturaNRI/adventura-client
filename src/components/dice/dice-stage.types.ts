@@ -33,6 +33,8 @@ export type DiceStageHandle = {
   /** Soft-drop dice-box meshes onto the table without firing onDone. */
   preview: (notation: DiceNotation | null) => void;
   clear: () => void;
+  /** Sync WebGL size after the stage container becomes visible / resized. */
+  resize: () => void;
 };
 
 export type DiceStageProps = {

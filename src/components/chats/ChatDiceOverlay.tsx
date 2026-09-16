@@ -70,18 +70,13 @@ function createStyles(colors: ThemeColors) {
   return StyleSheet.create({
     root: {
       ...StyleSheet.absoluteFill,
-      zIndex: 40,
+      zIndex: 60,
+      elevation: 60,
       pointerEvents: 'none',
     },
+    // Warm-mount must stay full-screen: 1×1 WebGL init leaves an empty table forever.
     rootCollapsed: {
       opacity: 0,
-      width: 1,
-      height: 1,
-      top: 0,
-      left: 0,
-      right: undefined,
-      bottom: undefined,
-      overflow: 'hidden',
     },
     stage: {
       ...StyleSheet.absoluteFill,
@@ -418,6 +413,11 @@ export function ChatDiceOverlay({
     void (async () => {
       let done: DiceRollOutcome | null = null;
       try {
+        // Дождаться layout после opacity:0 → visible, иначе resize видит старый размер.
+        await new Promise<void>((resolve) => {
+          requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+        });
+        stageRef.current?.resize();
         const raw = await stageRef.current?.roll(notation);
         if (!raw) {
           finishOnce(clientFallbackOutcome());
@@ -506,6 +506,10 @@ export function ChatDiceOverlay({
     void (async () => {
       let revealed = false;
       try {
+        await new Promise<void>((resolve) => {
+          requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+        });
+        stageRef.current?.resize();
         const rolled = await stageRef.current?.roll(notation);
         if (cancelled || sum == null) {
           return;

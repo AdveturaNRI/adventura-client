@@ -87,6 +87,12 @@ export const DiceStage = forwardRef<DiceStageHandle, DiceStageProps>(function Di
         setError(null);
         postToIframe({ type: 'clear' });
       },
+      resize: () => {
+        if (!ready) {
+          return;
+        }
+        postToIframe({ type: 'resize' });
+      },
     }),
     [ready],
   );
@@ -151,8 +157,8 @@ export const DiceStage = forwardRef<DiceStageHandle, DiceStageProps>(function Di
   // Chat overlay uses threejs fork — supports forced `@values` for synced faces.
   // `v=` busts iframe cache after stage HTML / force-sync fixes.
   const src = transparent
-    ? `/chat-dice-stage.html?transparent=1&v=speed1`
-    : `/dice-stage.html?transparent=0&v=speed1`;
+    ? `/chat-dice-stage.html?transparent=1&v=resize2`
+    : `/dice-stage.html?transparent=0&v=resize2`;
 
   useEffect(() => {
     setReady(false);

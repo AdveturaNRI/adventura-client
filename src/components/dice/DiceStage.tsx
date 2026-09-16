@@ -102,6 +102,9 @@ export const DiceStage = forwardRef<DiceStageHandle, DiceStageProps>(function Di
         pendingRef.current = null;
         send({ type: 'clear' });
       },
+      resize: () => {
+        send({ type: 'resize' });
+      },
     }),
     [send],
   );
