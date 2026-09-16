@@ -181,30 +181,48 @@
     }
 
     let currentAccent = '#157AFE';
+    let currentSpeed = 'normal';
     let ready = false;
     let generation = 0;
     let box = null;
 
-    try {
-      box = new DiceBox('#dice-box', {
+    function buildBoxConfig(withSounds, speed) {
+      const fast = speed === 'fast';
+      return {
         assetPath: '/dice-box-threejs/',
-        sounds: false,
+        sounds: withSounds,
+        volume: fast ? 55 : 70,
+        sound_dieMaterial: 'plastic',
         shadows: false,
         theme_surface: 'green-felt',
         theme_colorset: 'white',
         theme_material: 'glass',
-        // Сильнее бросок: library default = 1.
-        strength: 3,
+        // Сильнее бросок: library default = 1. Fast — выше гравитация, короче полёт.
+        strength: fast ? 2.2 : 3,
+        gravity_multiplier: fast ? 900 : 400,
         light_intensity: 1.1,
         // threejs ждёт hex-строки (#RRGGBB), не 0xRRGGBB — иначе куб чёрный.
         theme_customColorset: buildColorSet(currentAccent),
-      });
+      };
+    }
+
+    try {
+      box = new DiceBox('#dice-box', buildBoxConfig(true, currentSpeed));
       await box.initialize();
       ready = true;
       post({ type: 'ready' });
     } catch (err) {
-      console.error(err);
-      post({ type: 'error', message: String(err && err.message || err) });
+      console.warn('dice init with sounds failed, retry silent', err);
+      try {
+        document.getElementById('dice-box')?.replaceChildren();
+        box = new DiceBox('#dice-box', buildBoxConfig(false, currentSpeed));
+        await box.initialize();
+        ready = true;
+        post({ type: 'ready' });
+      } catch (err2) {
+        console.error(err2);
+        post({ type: 'error', message: String(err2 && err2.message || err2) });
+      }
     }
 
     async function applyAccent(next) {
@@ -212,15 +230,67 @@
       if (box?.updateConfig) {
         await box.updateConfig({
           theme_customColorset: buildColorSet(currentAccent),
-          strength: 3,
+          strength: currentSpeed === 'fast' ? 2.2 : 3,
+          gravity_multiplier: currentSpeed === 'fast' ? 900 : 400,
+          volume: currentSpeed === 'fast' ? 55 : 70,
+          sound_dieMaterial: 'plastic',
         });
       }
       return currentAccent;
     }
 
-    async function runRoll(notation, themeColor) {
+    async function applySpeed(speed) {
+      if (speed !== 'fast' && speed !== 'normal') {
+        return;
+      }
+      currentSpeed = speed;
+      if (box?.updateConfig) {
+        await box.updateConfig({
+          strength: currentSpeed === 'fast' ? 2.2 : 3,
+          gravity_multiplier: currentSpeed === 'fast' ? 900 : 400,
+          volume: currentSpeed === 'fast' ? 55 : 70,
+        });
+        if (typeof box.world?.gravity?.set === 'function') {
+          box.world.gravity.set(0, 0, -9.8 * (currentSpeed === 'fast' ? 900 : 400));
+        }
+      }
+    }
+
+    /** Браузер глушит Audio без жеста — прогреваем сэмплы перед броском. */
+    function unlockAudio() {
+      try {
+        const tables = box?.sounds_table;
+        const dice = box?.sounds_dice;
+        const samples = [
+          ...(tables?.felt || []),
+          ...(dice?.plastic || []),
+        ].filter(Boolean);
+        for (const audio of samples.slice(0, 3)) {
+          const prev = audio.volume;
+          audio.muted = true;
+          audio.volume = 0;
+          void audio.play().then(() => {
+            audio.pause();
+            audio.currentTime = 0;
+            audio.muted = false;
+            audio.volume = prev;
+          }).catch(() => {
+            audio.muted = false;
+            audio.volume = prev;
+          });
+        }
+      } catch {
+        // ignore
+      }
+    }
+
+    async function runRoll(notation, themeColor, speed) {
       const token = ++generation;
+      if (speed === 'fast' || speed === 'normal') {
+        await applySpeed(speed);
+      }
       await applyAccent(themeColor);
+      unlockAudio();
       try {
         // Warm-mount в 1×1 — перед броском подгоняем размер под оверлей.
         box.resizeWorld?.();
@@ -244,13 +314,38 @@
       }
     }
 
-    async function onMessage(raw) {
+    function parseHostMessage(raw) {
+      // Родитель шлёт JSON.stringify({ type }). Чужие postMessage (HMR, расширения)
+      // не считаем ошибкой кубиков — иначе на экране SyntaxError.
+      if (raw == null) return null;
+      if (typeof raw === 'object') {
+        return typeof raw.type === 'string' ? raw : null;
+      }
+      if (typeof raw !== 'string') return null;
+      const trimmed = raw.trim();
+      if (!trimmed.startsWith('{')) return null;
       try {
-        const data = typeof raw === 'string' ? JSON.parse(raw) : raw;
-        if (!data || typeof data !== 'object' || !ready || !box) return;
+        const data = JSON.parse(trimmed);
+        return data && typeof data === 'object' && typeof data.type === 'string'
+          ? data
+          : null;
+      } catch {
+        return null;
+      }
+    }
 
+    async function onMessage(raw) {
+      const data = parseHostMessage(raw);
+      if (!data || !ready || !box) return;
+
+      try {
         if (data.type === 'setAccent') {
           await applyAccent(data.themeColor);
+          return;
+        }
+
+        if (data.type === 'setSpeed') {
+          await applySpeed(data.speed);
           return;
         }
 
@@ -260,7 +355,8 @@
         }
 
         if (data.type === 'roll') {
-          await runRoll(data.notation ?? '1d20', data.themeColor);
+          await runRoll(data.notation ?? '1d20', data.themeColor, data.speed);
+          return;
         }
 
         if (data.type === 'clear') {

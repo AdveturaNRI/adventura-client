@@ -631,24 +631,36 @@ export function WandererDeck({
 
       setIsReacting(true);
 
+      // В ленте сразу убираем карточку — иначе анимация входа дважды
+      // крутит одного и того же человека, пока ждём ответ API.
+      if (bucket === 'feed') {
+        setReactionHistory((prev) => [...prev, type]);
+        setFeedUndoIds((prev) => [...prev, target.id]);
+        onReactionSaved?.(target.id, type);
+      }
+
       try {
         await upsertWandererReaction(target.id, type);
-        onReactionSaved?.(target.id, type);
+
+        if (bucket !== 'feed') {
+          onReactionSaved?.(target.id, type);
+          if (advanceCard) {
+            advance();
+          }
+        }
 
         if (toastMode !== 'none') {
           toast.success(reactionToastMessage(target.nickname, type, toastMode));
         }
 
-        if (bucket === 'feed') {
-          setReactionHistory((prev) => [...prev, type]);
-          setFeedUndoIds((prev) => [...prev, target.id]);
-        } else if (advanceCard) {
-          advance();
-        }
-
         setDismissRequest(null);
         return true;
       } catch (error) {
+        if (bucket === 'feed') {
+          setFeedUndoIds((prev) => prev.slice(0, -1));
+          setReactionHistory((prev) => prev.slice(0, -1));
+          onReactionCleared?.(target.id, type);
+        }
         toast.error(localizeErrorMessage(error, 'Не удалось сохранить реакцию'));
         setDismissRequest(null);
         return false;
@@ -656,7 +668,7 @@ export function WandererDeck({
         setIsReacting(false);
       }
     },
-    [advance, bucket, currentItem, isReacting, onReactionSaved],
+    [advance, bucket, currentItem, isReacting, onReactionCleared, onReactionSaved],
   );
 
   const handleDismiss = useCallback(

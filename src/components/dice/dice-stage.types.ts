@@ -1,3 +1,5 @@
+import type { DiceAnimationSpeed } from '@/utils/dice-animations-storage';
+
 export type DiceRollGroup = {
   sides: number;
   values: number[];
@@ -10,6 +12,8 @@ export type DiceRollOutcome = {
   /** Human label, e.g. `2d20 + 1d6` */
   notation: string;
   groups: DiceRollGroup[];
+  /** Преимущество / помеха — итог уже с учётом keep best/worst. */
+  mode?: 'normal' | 'advantage' | 'disadvantage';
 };
 
 /** dice-box accepts strings, roll objects, or mixed arrays. */
@@ -38,4 +42,6 @@ export type DiceStageProps = {
   transparent?: boolean;
   /** Hex color for dice body (`themeColor` in dice-box). */
   accent?: string;
+  /** Скорость физики броска. */
+  animationSpeed?: DiceAnimationSpeed;
 };

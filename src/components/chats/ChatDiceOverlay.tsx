@@ -9,15 +9,23 @@ import { FontSize, Spacing, type ThemeColors } from '@/constants/theme';
 import { useDiceAccentColor } from '@/hooks/use-dice-accent-color';
 import { useThemedStyles } from '@/hooks/use-themed-styles';
 import {
+  applyDiceKeepMode,
+  DICE_CRIT_FAIL_LABEL,
+  DICE_CRIT_SUCCESS_LABEL,
+  diceFaceMark,
   diceInputsToNotation,
+  diceRollCritLabels,
   formatDiceFormula,
   payloadToForcedNotation,
   type DiceRollDieInput,
+  type DiceRollMode,
   type DiceRollPayload,
 } from '@/utils/chat-dice-roll';
 import {
-  getDiceAnimationsEnabledSync,
-  loadDiceAnimationsEnabled,
+  getDiceAnimationSpeedSync,
+  loadDiceAnimationSpeed,
+  subscribeDiceAnimationSpeed,
+  type DiceAnimationSpeed,
 } from '@/utils/dice-animations-storage';
 import { coerceDiceAccent } from '@/utils/dice-color-storage';
 
@@ -34,6 +42,7 @@ export type ChatDiceLocalRollRequest = {
   modifier: number;
   color: string;
   senderNickname: string;
+  mode?: DiceRollMode;
 };
 
 type ChatDiceOverlayProps = {
@@ -51,8 +60,10 @@ type ResultSnapshot = {
   messageId: string;
   senderNickname: string;
   formula: string;
-  faces: number[];
+  faces: { sides: number; value: number }[];
   sum: number;
+  modifier: number;
+  critLabels: string[];
 };
 
 function createStyles(colors: ThemeColors) {
@@ -146,16 +157,61 @@ function createStyles(colors: ThemeColors) {
       backgroundColor: 'rgba(21, 122, 254, 0.22)',
       alignItems: 'center',
     },
+    resultFaceCritFail: {
+      backgroundColor: 'rgba(255, 59, 48, 0.28)',
+    },
+    resultFaceCritSuccess: {
+      backgroundColor: 'rgba(52, 199, 89, 0.28)',
+    },
     resultFaceText: {
       fontSize: FontSize.caption,
       fontWeight: '700',
       color: '#FFFFFF',
+    },
+    resultFaceTextCritFail: {
+      color: '#FFD1CE',
+    },
+    resultFaceTextCritSuccess: {
+      color: '#C8F5D2',
+    },
+    resultCritRow: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      justifyContent: 'center',
+      gap: 6,
+    },
+    resultCritBadge: {
+      paddingHorizontal: 10,
+      paddingVertical: 4,
+      borderRadius: 10,
+    },
+    resultCritBadgeFail: {
+      backgroundColor: 'rgba(255, 59, 48, 0.22)',
+    },
+    resultCritBadgeSuccess: {
+      backgroundColor: 'rgba(52, 199, 89, 0.22)',
+    },
+    resultCritBadgeText: {
+      fontSize: FontSize.caption,
+      fontWeight: '700',
+    },
+    resultCritBadgeTextFail: {
+      color: '#FFD1CE',
+    },
+    resultCritBadgeTextSuccess: {
+      color: '#C8F5D2',
     },
     resultSum: {
       fontSize: 48,
       fontWeight: '800',
       color: '#FFFFFF',
       letterSpacing: -1,
+    },
+    resultSumCritFail: {
+      color: '#FF8A84',
+    },
+    resultSumCritSuccess: {
+      color: '#7DDEA0',
     },
   });
 }
@@ -169,11 +225,11 @@ function documentIsVisible() {
 
 function canAnimateIncoming(
   request: ChatDiceOverlayRequest,
-  animationsEnabled: boolean,
+  animationSpeed: DiceAnimationSpeed,
   isFocused: boolean,
 ) {
   return (
-    animationsEnabled &&
+    animationSpeed !== 'off' &&
     isFocused &&
     documentIsVisible() &&
     !request.payload.redacted &&
@@ -251,7 +307,9 @@ export function ChatDiceOverlay({
 
   const [stageReady, setStageReady] = useState(false);
   const [result, setResult] = useState<ResultSnapshot | null>(null);
-  const [animationsEnabled, setAnimationsEnabled] = useState(getDiceAnimationsEnabledSync);
+  const [animationSpeed, setAnimationSpeed] = useState<DiceAnimationSpeed>(
+    getDiceAnimationSpeedSync,
+  );
   const [engineMounted, setEngineMounted] = useState(false);
 
   const handleStageReady = useRef(() => {
@@ -259,8 +317,9 @@ export function ChatDiceOverlay({
   }).current;
 
   useEffect(() => {
-    void loadDiceAnimationsEnabled().then(setAnimationsEnabled);
-  }, [localRoll?.token, request?.messageId]);
+    void loadDiceAnimationSpeed().then(setAnimationSpeed);
+    return subscribeDiceAnimationSpeed(setAnimationSpeed);
+  }, []);
 
   useEffect(() => {
     if (warm || request || localRoll) {
@@ -269,8 +328,8 @@ export function ChatDiceOverlay({
   }, [warm, request, localRoll]);
 
   // --- Свой бросок: фронт = источник истины (строго один roll на token) ---
-  const animationsEnabledRef = useRef(animationsEnabled);
-  animationsEnabledRef.current = animationsEnabled;
+  const animationSpeedRef = useRef(animationSpeed);
+  animationSpeedRef.current = animationSpeed;
   const isFocusedRef = useRef(isFocused);
   isFocusedRef.current = isFocused;
   const startedLocalTokensRef = useRef(new Set<number>());
@@ -286,8 +345,15 @@ export function ChatDiceOverlay({
       return;
     }
 
-    const animationsOn = animationsEnabledRef.current;
+    // Актуальная скорость из storage — не ждём async state после смены в поповере.
+    const speed = getDiceAnimationSpeedSync();
+    animationSpeedRef.current = speed;
+    if (speed !== animationSpeed) {
+      setAnimationSpeed(speed);
+    }
+    const animationsOn = speed !== 'off';
     const focused = isFocusedRef.current;
+    const resultHoldMs = speed === 'fast' ? 500 : 1100;
 
     let settled = false;
     const finishOnce = (outcome: DiceRollOutcome | null) => {
@@ -297,6 +363,8 @@ export function ChatDiceOverlay({
       settled = true;
       onLocalCompleteRef.current?.(outcome);
     };
+
+    const rollMode = active.mode ?? 'normal';
 
     const clientFallbackOutcome = (): DiceRollOutcome => {
       const expected = [...active.dice].sort((a, b) => a.sides - b.sides);
@@ -312,12 +380,16 @@ export function ChatDiceOverlay({
         };
       });
       const values = groups.flatMap((g) => g.values);
-      return {
-        values,
-        sum: values.reduce((a, b) => a + b, 0) + active.modifier,
-        notation: formatDiceFormula(active.dice, active.modifier),
-        groups,
-      };
+      return applyDiceKeepMode(
+        {
+          values,
+          sum: values.reduce((a, b) => a + b, 0),
+          notation: formatDiceFormula(active.dice, active.modifier, rollMode),
+          groups,
+        },
+        rollMode,
+        active.modifier,
+      );
     };
 
     if (!animationsOn || !focused || !documentIsVisible()) {
@@ -341,7 +413,7 @@ export function ChatDiceOverlay({
 
     startedLocalTokensRef.current.add(active.token);
     const notation = diceInputsToNotation(active.dice);
-    const formula = formatDiceFormula(active.dice, active.modifier);
+    const formula = formatDiceFormula(active.dice, active.modifier, rollMode);
 
     void (async () => {
       let done: DiceRollOutcome | null = null;
@@ -351,21 +423,25 @@ export function ChatDiceOverlay({
           finishOnce(clientFallbackOutcome());
           return;
         }
-        done = normalizeOutcomeGroups(raw, active.dice);
-        done = {
-          ...done,
-          sum: done.values.reduce((a, b) => a + b, 0) + active.modifier,
-          notation: formula,
-        };
+        done = applyDiceKeepMode(
+          normalizeOutcomeGroups(raw, active.dice),
+          rollMode,
+          active.modifier,
+        );
         // Куб уже на нужных гранях — карточка = тот же outcome.
+        const faceRows = done.groups.flatMap((group) =>
+          group.values.map((value) => ({ sides: group.sides, value })),
+        );
         setResult({
           messageId: `local-${active.token}`,
           senderNickname: active.senderNickname,
-          formula,
-          faces: done.values,
+          formula: done.notation || formula,
+          faces: faceRows,
           sum: done.sum,
+          modifier: active.modifier,
+          critLabels: diceRollCritLabels(done.groups, rollMode, active.modifier),
         });
-        await new Promise((resolve) => setTimeout(resolve, 1100));
+        await new Promise((resolve) => setTimeout(resolve, resultHoldMs));
       } catch {
         done = clientFallbackOutcome();
       } finally {
@@ -388,7 +464,7 @@ export function ChatDiceOverlay({
       return;
     }
 
-    if (!canAnimateIncoming(request, animationsEnabled, isFocused)) {
+    if (!canAnimateIncoming(request, getDiceAnimationSpeedSync(), isFocused)) {
       onRevealRef.current(request.messageId);
       onAdvanceRef.current();
       return;
@@ -410,9 +486,22 @@ export function ChatDiceOverlay({
 
     let cancelled = false;
     const active = request;
+    // Актуальная скорость — вдруг только что сменили в поповере.
+    const liveSpeed = getDiceAnimationSpeedSync();
+    if (liveSpeed !== animationSpeed) {
+      setAnimationSpeed(liveSpeed);
+    }
+    const resultHoldMs = liveSpeed === 'fast' ? 500 : 1100;
     const notation = payloadToForcedNotation(active.payload);
-    const faces = active.payload.groups.flatMap((g) => g.values);
+    const faces = active.payload.groups.flatMap((g) =>
+      g.values.map((value) => ({ sides: g.sides, value })),
+    );
     const sum = active.payload.sum;
+    const critLabels = diceRollCritLabels(
+      active.payload.groups,
+      active.payload.mode,
+      active.payload.modifier,
+    );
 
     void (async () => {
       let revealed = false;
@@ -423,10 +512,13 @@ export function ChatDiceOverlay({
         }
         // Карточка всегда из payload. Если 3D всё ещё врёт — убираем куб,
         // чтобы не было двух разных чисел на экране.
+        const expectedValues = faces.map((face) => face.value);
         const faceMismatch =
           !rolled ||
-          faces.length === 0 ||
-          faces.some((value, index) => Number(rolled.values[index]) !== Number(value));
+          expectedValues.length === 0 ||
+          expectedValues.some(
+            (value, index) => Number(rolled.values[index]) !== Number(value),
+          );
         if (faceMismatch) {
           stageRef.current?.clear();
         }
@@ -438,8 +530,10 @@ export function ChatDiceOverlay({
           formula: active.payload.formula,
           faces,
           sum,
+          modifier: active.payload.modifier,
+          critLabels,
         });
-        await new Promise((resolve) => setTimeout(resolve, 1100));
+        await new Promise((resolve) => setTimeout(resolve, resultHoldMs));
       } catch {
         // fall through
       } finally {
@@ -457,19 +551,19 @@ export function ChatDiceOverlay({
     return () => {
       cancelled = true;
     };
-  }, [animationsEnabled, isFocused, localRoll, request, stageReady]);
+  }, [animationSpeed, isFocused, localRoll, request, stageReady]);
 
   const visible =
     Boolean(localRoll) ||
     (Boolean(request) &&
-      animationsEnabled &&
+      animationSpeed !== 'off' &&
       isFocused &&
       Boolean(request && !request.payload.redacted && request.payload.sum != null));
 
   const throwerNickname =
     localRoll?.senderNickname ?? (visible ? request?.senderNickname : null) ?? null;
   const throwerFormula = localRoll
-    ? formatDiceFormula(localRoll.dice, localRoll.modifier)
+    ? formatDiceFormula(localRoll.dice, localRoll.modifier, localRoll.mode)
     : visible
       ? request?.payload.formula
       : null;
@@ -488,6 +582,7 @@ export function ChatDiceOverlay({
           ref={stageRef}
           accent={activeAccent}
           transparent
+          animationSpeed={animationSpeed === 'off' ? 'normal' : animationSpeed}
           onReady={handleStageReady}
         />
       </View>
@@ -511,16 +606,68 @@ export function ChatDiceOverlay({
           <View style={styles.resultCard}>
             <Text style={styles.resultWho}>{result.senderNickname}</Text>
             <Text style={styles.resultFormula}>{result.formula}</Text>
-            {result.faces.length > 0 ? (
-              <View style={styles.resultFaces}>
-                {result.faces.map((value, index) => (
-                  <View key={`${index}-${value}`} style={styles.resultFace}>
-                    <Text style={styles.resultFaceText}>{value}</Text>
-                  </View>
-                ))}
+            {result.critLabels.length > 0 ? (
+              <View style={styles.resultCritRow}>
+                {result.critLabels.map((label) => {
+                  const isFail = label === DICE_CRIT_FAIL_LABEL;
+                  return (
+                    <View
+                      key={label}
+                      style={[
+                        styles.resultCritBadge,
+                        isFail ? styles.resultCritBadgeFail : styles.resultCritBadgeSuccess,
+                      ]}>
+                      <Text
+                        style={[
+                          styles.resultCritBadgeText,
+                          isFail
+                            ? styles.resultCritBadgeTextFail
+                            : styles.resultCritBadgeTextSuccess,
+                        ]}>
+                        {label}
+                      </Text>
+                    </View>
+                  );
+                })}
               </View>
             ) : null}
-            <Text style={styles.resultSum}>{result.sum}</Text>
+            {result.faces.length > 0 ? (
+              <View style={styles.resultFaces}>
+                {result.faces.map((face, index) => {
+                  const mark = diceFaceMark(face.sides, face.value, result.modifier);
+                  return (
+                    <View
+                      key={`${index}-${face.sides}-${face.value}`}
+                      style={[
+                        styles.resultFace,
+                        mark === 'crit_fail' ? styles.resultFaceCritFail : null,
+                        mark === 'crit_success' ? styles.resultFaceCritSuccess : null,
+                      ]}>
+                      <Text
+                        style={[
+                          styles.resultFaceText,
+                          mark === 'crit_fail' ? styles.resultFaceTextCritFail : null,
+                          mark === 'crit_success' ? styles.resultFaceTextCritSuccess : null,
+                        ]}>
+                        {face.value}
+                      </Text>
+                    </View>
+                  );
+                })}
+              </View>
+            ) : null}
+            <Text
+              style={[
+                styles.resultSum,
+                result.critLabels.includes(DICE_CRIT_FAIL_LABEL)
+                  ? styles.resultSumCritFail
+                  : null,
+                result.critLabels.includes(DICE_CRIT_SUCCESS_LABEL)
+                  ? styles.resultSumCritSuccess
+                  : null,
+              ]}>
+              {result.sum}
+            </Text>
           </View>
         </View>
       ) : null}

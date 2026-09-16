@@ -25,6 +25,24 @@ import { useTheme } from '@/hooks/use-theme';
 import { useThemedStyles } from '@/hooks/use-themed-styles';
 import { useMainScreenStyles } from '@/screens/main/main-screen.styles';
 import {
+  applyDiceKeepMode,
+  DICE_CRIT_FAIL_LABEL,
+  diceFaceMark,
+  diceRollCritLabels,
+  diceRollModeLabel,
+  keptDiceValue,
+  collectD20Values,
+  modifierFromOutcome,
+  type DiceRollMode,
+} from '@/utils/chat-dice-roll';
+import {
+  getDiceAnimationSpeedSync,
+  loadDiceAnimationSpeed,
+  saveDiceAnimationSpeed,
+  subscribeDiceAnimationSpeed,
+  type DiceAnimationSpeed,
+} from '@/utils/dice-animations-storage';
+import {
   loadDiceHistory,
   makeHistoryEntry,
   saveDiceHistory,
@@ -58,12 +76,57 @@ const EMPTY_POOL: Record<DieSides, number> = {
 };
 const INITIAL_POOL: Record<DieSides, number> = { ...EMPTY_POOL, 20: 1 };
 
+const DICE_SPEED_OPTIONS: {
+  value: DiceAnimationSpeed;
+  icon: keyof typeof Ionicons.glyphMap;
+  iconExtra?: keyof typeof Ionicons.glyphMap;
+  accessibilityLabel: string;
+}[] = [
+  {
+    value: 'normal',
+    icon: 'arrow-forward',
+    accessibilityLabel: 'Обычная скорость анимации',
+  },
+  {
+    value: 'fast',
+    icon: 'play-forward',
+    accessibilityLabel: 'Быстрая анимация кубиков',
+  },
+  {
+    value: 'off',
+    icon: 'close',
+    accessibilityLabel: 'Без анимации кубиков',
+  },
+];
+
 type Pool = Record<DieSides, number>;
 
 function poolParts(pool: Pool) {
   return DIE_OPTIONS.filter((option) => pool[option.sides] > 0).map(
     (option) => `${pool[option.sides]}d${option.sides}`,
   );
+}
+
+function formatNotationWithModifier(
+  parts: string[],
+  modifier: number,
+  mode: DiceRollMode = 'normal',
+) {
+  if (mode === 'advantage' || mode === 'disadvantage') {
+    const base = '1d20';
+    if (modifier === 0) {
+      return base;
+    }
+    return modifier > 0 ? `${base} + ${modifier}` : `${base} − ${Math.abs(modifier)}`;
+  }
+  if (parts.length === 0) {
+    return '';
+  }
+  const base = parts.join(' + ');
+  if (modifier === 0) {
+    return base;
+  }
+  return modifier > 0 ? `${base} + ${modifier}` : `${base} − ${Math.abs(modifier)}`;
 }
 
 function formatTime(at: number) {
@@ -403,18 +466,77 @@ function createStyles(colors: ThemeColors) {
       color: colors.primary,
       minWidth: 48,
     },
+    lastResultSumCritFail: {
+      color: colors.destructive,
+    },
+    lastResultSumCritSuccess: {
+      color: colors.success,
+    },
     lastResultMeta: {
       flex: 1,
-      gap: 2,
+      gap: 4,
+      minWidth: 0,
     },
     lastResultNotation: {
       fontSize: FontSize.caption,
       fontWeight: '700',
       color: colors.primaryLight,
     },
-    lastResultValues: {
-      fontSize: FontSize.label,
+    lastResultCritRow: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: 4,
+    },
+    lastResultCritBadge: {
+      paddingHorizontal: 8,
+      paddingVertical: 2,
+      borderRadius: 8,
+    },
+    lastResultCritBadgeFail: {
+      backgroundColor: 'rgba(255, 59, 48, 0.18)',
+    },
+    lastResultCritBadgeSuccess: {
+      backgroundColor: 'rgba(52, 199, 89, 0.18)',
+    },
+    lastResultCritText: {
+      fontSize: 11,
+      fontWeight: '700',
+    },
+    lastResultCritTextFail: {
+      color: colors.destructive,
+    },
+    lastResultCritTextSuccess: {
+      color: colors.success,
+    },
+    lastResultFaces: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: 4,
+    },
+    lastResultFace: {
+      minWidth: 22,
+      paddingHorizontal: 6,
+      paddingVertical: 2,
+      borderRadius: 6,
+      backgroundColor: 'rgba(21, 122, 254, 0.18)',
+      alignItems: 'center',
+    },
+    lastResultFaceFail: {
+      backgroundColor: 'rgba(255, 59, 48, 0.2)',
+    },
+    lastResultFaceSuccess: {
+      backgroundColor: 'rgba(52, 199, 89, 0.2)',
+    },
+    lastResultFaceText: {
+      fontSize: FontSize.caption,
+      fontWeight: '700',
       color: '#E8EEF8',
+    },
+    lastResultFaceTextFail: {
+      color: '#FFD1CE',
+    },
+    lastResultFaceTextSuccess: {
+      color: '#C8F5D2',
     },
     lastResultDismiss: {
       padding: 6,
@@ -478,7 +600,7 @@ function createStyles(colors: ThemeColors) {
       paddingVertical: 9,
       backgroundColor: 'rgba(21, 122, 254, 0.1)',
       marginBottom: 6,
-      gap: 2,
+      gap: 4,
     },
     historyItemTop: {
       flexDirection: 'row',
@@ -491,6 +613,12 @@ function createStyles(colors: ThemeColors) {
       fontWeight: '800',
       color: colors.primary,
     },
+    historySumCritFail: {
+      color: colors.destructive,
+    },
+    historySumCritSuccess: {
+      color: colors.success,
+    },
     historyTime: {
       fontSize: 11,
       fontWeight: '600',
@@ -501,13 +629,141 @@ function createStyles(colors: ThemeColors) {
       fontWeight: '600',
       color: colors.text,
     },
-    historyValues: {
+    historyCritRow: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: 4,
+    },
+    historyFaces: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: 3,
+    },
+    historyFace: {
+      minWidth: 20,
+      paddingHorizontal: 5,
+      paddingVertical: 1,
+      borderRadius: 5,
+      backgroundColor: 'rgba(21, 122, 254, 0.14)',
+      alignItems: 'center',
+    },
+    historyFaceFail: {
+      backgroundColor: 'rgba(255, 59, 48, 0.18)',
+    },
+    historyFaceSuccess: {
+      backgroundColor: 'rgba(52, 199, 89, 0.18)',
+    },
+    historyFaceKept: {
+      borderWidth: 1.5,
+      borderColor: colors.primary,
+    },
+    historyFaceDiscarded: {
+      opacity: 0.42,
+    },
+    historyFaceText: {
       fontSize: 11,
-      color: colors.textSecondary,
+      fontWeight: '700',
+      color: colors.text,
+    },
+    historyFaceTextFail: {
+      color: colors.destructive,
+    },
+    historyFaceTextSuccess: {
+      color: colors.success,
     },
     colorBar: {
       paddingHorizontal: Spacing.sm,
       paddingBottom: Spacing.sm,
+      gap: Spacing.sm,
+    },
+    modRow: {
+      gap: 6,
+      paddingHorizontal: 4,
+    },
+    modLabel: {
+      fontSize: FontSize.caption,
+      fontWeight: '700',
+      color: colors.primary,
+    },
+    modControls: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+      alignSelf: 'flex-start',
+    },
+    modBtn: {
+      width: 32,
+      height: 32,
+      borderRadius: 10,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: 'rgba(21, 122, 254, 0.14)',
+      borderWidth: 1,
+      borderColor: 'rgba(21, 122, 254, 0.28)',
+    },
+    modValue: {
+      minWidth: 40,
+      textAlign: 'center',
+      fontSize: FontSize.label,
+      fontWeight: '800',
+      color: colors.primary,
+    },
+    modeRow: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: 6,
+      paddingHorizontal: 4,
+    },
+    modeChip: {
+      paddingHorizontal: 10,
+      paddingVertical: 5,
+      borderRadius: 8,
+      borderWidth: 1,
+      borderColor: 'rgba(21, 122, 254, 0.28)',
+      backgroundColor: 'rgba(21, 122, 254, 0.1)',
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    modeChipOn: {
+      backgroundColor: colors.primary,
+      borderColor: colors.primary,
+    },
+    modeChipText: {
+      fontSize: 12,
+      fontWeight: '700',
+      color: colors.primary,
+      letterSpacing: 0.1,
+    },
+    modeChipTextOn: {
+      color: colors.onPrimary,
+    },
+    speedRow: {
+      gap: 6,
+      paddingHorizontal: 4,
+    },
+    speedLabel: {
+      fontSize: FontSize.caption,
+      fontWeight: '700',
+      color: colors.primary,
+    },
+    speedSegment: {
+      flexDirection: 'row',
+      alignSelf: 'flex-start',
+      gap: 6,
+    },
+    speedChip: {
+      width: 34,
+      height: 34,
+      borderRadius: 8,
+      borderWidth: 1,
+      borderColor: 'rgba(21, 122, 254, 0.28)',
+      backgroundColor: 'rgba(21, 122, 254, 0.1)',
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    speedChipOn: {
+      backgroundColor: colors.primary,
+      borderColor: colors.primary,
     },
   });
 }
@@ -528,6 +784,17 @@ export default function DiceScreen() {
   const diePreviewSize = large ? 52 : medium ? 46 : 40;
 
   const [pool, setPool] = useState<Pool>(INITIAL_POOL);
+  const [modifier, setModifier] = useState(0);
+  const modifierRef = useRef(0);
+  modifierRef.current = modifier;
+  const [mode, setMode] = useState<DiceRollMode>('normal');
+  const modeRef = useRef<DiceRollMode>('normal');
+  modeRef.current = mode;
+  const [animationSpeed, setAnimationSpeed] = useState<DiceAnimationSpeed>(
+    getDiceAnimationSpeedSync,
+  );
+  const animationSpeedRef = useRef(animationSpeed);
+  animationSpeedRef.current = animationSpeed;
   const [stageReady, setStageReady] = useState(false);
   const [rolling, setRolling] = useState(false);
   const [outcome, setOutcome] = useState<DiceRollOutcome | null>(null);
@@ -536,6 +803,8 @@ export default function DiceScreen() {
   const [hoveredDie, setHoveredDie] = useState<DieSides | null>(null);
   const hoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isWeb = Platform.OS === 'web';
+
+  const keepMode = mode !== 'normal';
 
   const clearHoverTimer = useCallback(() => {
     if (hoverTimerRef.current) {
@@ -565,17 +834,54 @@ export default function DiceScreen() {
   }, [clearHoverTimer]);
 
   const parts = useMemo(() => poolParts(pool), [pool]);
-  const notationLabel = parts.length
-    ? parts.join(' + ')
-    : 'Выберите кости для броска';
+  const modeLabel = diceRollModeLabel(mode);
+  const formulaLabel = parts.length
+    ? formatNotationWithModifier(parts, modifier, mode)
+    : '';
+  const notationLabel = keepMode
+    ? modeLabel
+      ? modifier === 0
+        ? modeLabel
+        : `${modeLabel} · ${formulaLabel}`
+      : formulaLabel
+    : parts.length
+      ? formulaLabel
+      : 'Выберите кости для броска';
   const totalDice = useMemo(
     () => DIE_OPTIONS.reduce((acc, option) => acc + pool[option.sides], 0),
     [pool],
   );
+  const outcomeMode = outcome?.mode ?? 'normal';
+  const outcomeModifier = outcome ? modifierFromOutcome(outcome) : 0;
+  const outcomeCritLabels = useMemo(
+    () => (outcome ? diceRollCritLabels(outcome.groups, outcomeMode, outcomeModifier) : []),
+    [outcome, outcomeMode, outcomeModifier],
+  );
+  const outcomeKept =
+    outcomeMode === 'advantage' || outcomeMode === 'disadvantage'
+      ? keptDiceValue(collectD20Values(outcome?.groups ?? []), outcomeMode)
+      : null;
+  const outcomeSingleMark = useMemo(() => {
+    if (!outcome) {
+      return null;
+    }
+    if (outcomeKept != null) {
+      return diceFaceMark(20, outcomeKept, outcomeModifier);
+    }
+    if (outcome.groups.length !== 1 || outcome.groups[0]!.values.length !== 1) {
+      return null;
+    }
+    return diceFaceMark(
+      outcome.groups[0]!.sides,
+      outcome.groups[0]!.values[0]!,
+      outcomeModifier,
+    );
+  }, [outcome, outcomeKept, outcomeModifier]);
 
   useEffect(() => {
     if (isFocused) {
-      return;
+      void loadDiceAnimationSpeed().then(setAnimationSpeed);
+      return subscribeDiceAnimationSpeed(setAnimationSpeed);
     }
     setStageReady(false);
     setRolling(false);
@@ -592,7 +898,7 @@ export default function DiceScreen() {
   }, []);
 
   useEffect(() => {
-    if (!stageReady || rolling) return;
+    if (!stageReady || rolling || animationSpeed === 'off') return;
     const timer = setTimeout(() => {
       if (parts.length === 0) {
         stageRef.current?.preview([]);
@@ -601,21 +907,43 @@ export default function DiceScreen() {
       }
     }, 60);
     return () => clearTimeout(timer);
-  }, [parts, rolling, stageReady]);
+  }, [animationSpeed, parts, rolling, stageReady]);
 
-  const bump = useCallback((sides: DieSides, delta: number) => {
-    setPool((prev) => {
-      const current = prev[sides];
-      const next = current + delta;
-      if (next < 0 || next > MAX_PER_DIE) return prev;
-      const total =
-        DIE_OPTIONS.reduce((acc, option) => acc + prev[option.sides], 0) - current + next;
-      if (total > MAX_TOTAL) return prev;
-      return { ...prev, [sides]: next };
+  const setKeepMode = useCallback((next: DiceRollMode) => {
+    setMode((prev) => {
+      const resolved = prev === next ? 'normal' : next;
+      if (resolved === 'advantage' || resolved === 'disadvantage') {
+        setPool({ ...EMPTY_POOL, 20: 2 });
+      }
+      return resolved;
     });
   }, []);
 
+  const handleAnimationSpeedChange = useCallback((next: DiceAnimationSpeed) => {
+    setAnimationSpeed(next);
+    void saveDiceAnimationSpeed(next);
+  }, []);
+
+  const bump = useCallback(
+    (sides: DieSides, delta: number) => {
+      if (keepMode) {
+        return;
+      }
+      setPool((prev) => {
+        const current = prev[sides];
+        const next = current + delta;
+        if (next < 0 || next > MAX_PER_DIE) return prev;
+        const total =
+          DIE_OPTIONS.reduce((acc, option) => acc + prev[option.sides], 0) - current + next;
+        if (total > MAX_TOTAL) return prev;
+        return { ...prev, [sides]: next };
+      });
+    },
+    [keepMode],
+  );
+
   const clearPool = useCallback(() => {
+    setMode('normal');
     setPool({ ...EMPTY_POOL });
     stageRef.current?.clear();
     setShowLast(false);
@@ -634,8 +962,57 @@ export default function DiceScreen() {
     void saveDiceHistory([]);
   }, []);
 
+  const handleDone = useCallback(
+    (next: DiceRollOutcome) => {
+      const mod = modifierRef.current;
+      const rollMode = modeRef.current;
+      const kept = applyDiceKeepMode(next, rollMode, mod);
+      const enriched: DiceRollOutcome = {
+        ...kept,
+        notation: formatNotationWithModifier(
+          kept.groups
+            .filter((group) => group.values.length > 0 && group.sides > 0)
+            .map((group) => `${group.values.length}d${group.sides}`),
+          mod,
+          rollMode,
+        ) || kept.notation || next.notation,
+        mode: rollMode === 'normal' ? undefined : rollMode,
+      };
+      setOutcome(enriched);
+      setRolling(false);
+      setShowLast(true);
+      pushHistory(enriched);
+    },
+    [pushHistory],
+  );
+
   const handleRoll = useCallback(async () => {
-    if (rolling || !stageReady || parts.length === 0) return;
+    if (rolling || parts.length === 0) return;
+    const speed = animationSpeedRef.current;
+    if (speed === 'off') {
+      setRolling(true);
+      setShowLast(false);
+      const groups = DIE_OPTIONS.filter((option) => pool[option.sides] > 0).map((option) => {
+        const values = Array.from(
+          { length: pool[option.sides] },
+          () => Math.floor(Math.random() * option.sides) + 1,
+        );
+        return {
+          sides: option.sides as number,
+          values,
+          sum: values.reduce((a, b) => a + b, 0),
+        };
+      });
+      const values = groups.flatMap((g) => g.values);
+      handleDone({
+        values,
+        sum: values.reduce((a, b) => a + b, 0),
+        notation: parts.join(' + '),
+        groups,
+      });
+      return;
+    }
+    if (!stageReady) return;
     setRolling(true);
     setShowLast(false);
     try {
@@ -643,17 +1020,7 @@ export default function DiceScreen() {
     } catch {
       setRolling(false);
     }
-  }, [parts, rolling, stageReady]);
-
-  const handleDone = useCallback(
-    (next: DiceRollOutcome) => {
-      setOutcome(next);
-      setRolling(false);
-      setShowLast(true);
-      pushHistory(next);
-    },
-    [pushHistory],
-  );
+  }, [handleDone, parts, pool, rolling, stageReady]);
 
   const dieRail = (
     <View
@@ -684,13 +1051,13 @@ export default function DiceScreen() {
               style={[
                 styles.dieSection,
                 compact && styles.dieSectionCompact,
-                rolling && { opacity: 0.55 },
+                (rolling || keepMode) && { opacity: 0.55 },
                 showTooltip && { zIndex: 30 },
               ]}>
               <Pressable
                 accessibilityRole="button"
                 accessibilityLabel={`${option.fullName}. Добавить, сейчас ${count}`}
-                disabled={rolling || !canPlus}
+                disabled={rolling || keepMode || !canPlus}
                 onPress={() => bump(option.sides, 1)}
                 onHoverIn={() => showDieTooltip(option.sides)}
                 onHoverOut={hideDieTooltip}
@@ -698,7 +1065,7 @@ export default function DiceScreen() {
                   styles.dieHit,
                   (medium || large) && styles.dieHitLg,
                   active && styles.dieHitActive,
-                  pressed && canPlus && { opacity: 0.88 },
+                  pressed && canPlus && !keepMode && { opacity: 0.88 },
                 ]}>
                 {active ? (
                   <View style={styles.dieBadge}>
@@ -737,11 +1104,11 @@ export default function DiceScreen() {
                 <Pressable
                   accessibilityRole="button"
                   accessibilityLabel={`Убрать ${option.label}`}
-                  disabled={rolling}
+                  disabled={rolling || keepMode}
                   onPress={() => bump(option.sides, -1)}
                   style={({ pressed }) => [
                     styles.dieMinus,
-                    pressed && { opacity: 0.85 },
+                    pressed && !keepMode && { opacity: 0.85 },
                   ]}>
                   <Ionicons name="remove" size={14} color={colors.primaryLight} />
                 </Pressable>
@@ -793,18 +1160,110 @@ export default function DiceScreen() {
             Здесь появятся результаты: сумма, нотация и значения по костям.
           </Text>
         ) : (
-          history.map((entry) => (
-            <View key={entry.id} style={styles.historyItem}>
-              <View style={styles.historyItemTop}>
-                <Text style={styles.historySum}>{entry.sum}</Text>
-                <Text style={styles.historyTime}>{formatTime(entry.at)}</Text>
+          history.map((entry) => {
+            const entryMode = entry.mode ?? 'normal';
+            const entryMod = modifierFromOutcome(entry);
+            const critLabels = diceRollCritLabels(entry.groups, entryMode, entryMod);
+            const kept =
+              entryMode === 'advantage' || entryMode === 'disadvantage'
+                ? keptDiceValue(collectD20Values(entry.groups), entryMode)
+                : null;
+            const singleMark =
+              kept != null
+                ? diceFaceMark(20, kept, entryMod)
+                : entry.groups.length === 1 && entry.groups[0]?.values.length === 1
+                  ? diceFaceMark(entry.groups[0].sides, entry.groups[0].values[0]!, entryMod)
+                  : null;
+            return (
+              <View key={entry.id} style={styles.historyItem}>
+                <View style={styles.historyItemTop}>
+                  <Text
+                    style={[
+                      styles.historySum,
+                      singleMark === 'crit_fail' ? styles.historySumCritFail : null,
+                      singleMark === 'crit_success' ? styles.historySumCritSuccess : null,
+                    ]}>
+                    {entry.sum}
+                  </Text>
+                  <Text style={styles.historyTime}>{formatTime(entry.at)}</Text>
+                </View>
+                <Text style={styles.historyNotation}>
+                  {entryMode === 'advantage' || entryMode === 'disadvantage'
+                    ? `${diceRollModeLabel(entryMode)} · ${entry.notation}`
+                    : entry.notation}
+                </Text>
+                {critLabels.length > 0 ? (
+                  <View style={styles.historyCritRow}>
+                    {critLabels.map((label) => {
+                      const isFail = label === DICE_CRIT_FAIL_LABEL;
+                      return (
+                        <View
+                          key={label}
+                          style={[
+                            styles.lastResultCritBadge,
+                            isFail
+                              ? styles.lastResultCritBadgeFail
+                              : styles.lastResultCritBadgeSuccess,
+                          ]}>
+                          <Text
+                            style={[
+                              styles.lastResultCritText,
+                              isFail
+                                ? styles.lastResultCritTextFail
+                                : styles.lastResultCritTextSuccess,
+                            ]}>
+                            {label}
+                          </Text>
+                        </View>
+                      );
+                    })}
+                  </View>
+                ) : null}
+                <View style={styles.historyFaces}>
+                  {entry.groups.flatMap((group, groupIndex) => {
+                    const isKeepGroup =
+                      (entryMode === 'advantage' || entryMode === 'disadvantage') &&
+                      group.sides === 20 &&
+                      kept != null;
+                    const keptIndex =
+                      isKeepGroup && kept != null ? group.values.indexOf(kept) : -1;
+                    return group.values.map((value, index) => {
+                      const keptHighlight = isKeepGroup && index === keptIndex;
+                      const discardedHighlight = isKeepGroup && index !== keptIndex;
+                      const showCrit = !isKeepGroup || keptHighlight;
+                      const mark = diceFaceMark(group.sides, value, entryMod);
+                      return (
+                        <View
+                          key={`${entry.id}-g${groupIndex}-${index}`}
+                          style={[
+                            styles.historyFace,
+                            mark === 'crit_fail' && showCrit ? styles.historyFaceFail : null,
+                            mark === 'crit_success' && showCrit
+                              ? styles.historyFaceSuccess
+                              : null,
+                            keptHighlight ? styles.historyFaceKept : null,
+                            discardedHighlight ? styles.historyFaceDiscarded : null,
+                          ]}>
+                          <Text
+                            style={[
+                              styles.historyFaceText,
+                              mark === 'crit_fail' && showCrit
+                                ? styles.historyFaceTextFail
+                                : null,
+                              mark === 'crit_success' && showCrit
+                                ? styles.historyFaceTextSuccess
+                                : null,
+                            ]}>
+                            {value}
+                          </Text>
+                        </View>
+                      );
+                    });
+                  })}
+                </View>
               </View>
-              <Text style={styles.historyNotation}>{entry.notation}</Text>
-              <Text style={styles.historyValues} numberOfLines={2}>
-                {entry.values.join(' · ')}
-              </Text>
-            </View>
-          ))
+            );
+          })
         )}
       </ScrollView>
     </View>
@@ -826,6 +1285,88 @@ export default function DiceScreen() {
             void setAccent(hex);
           }}
         />
+        <View style={styles.modRow}>
+          <Text style={styles.modLabel}>Модификатор</Text>
+          <View style={styles.modControls}>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Уменьшить модификатор"
+              disabled={rolling}
+              onPress={() => setModifier((value) => Math.max(-99, value - 1))}
+              style={({ pressed }) => [styles.modBtn, pressed && { opacity: 0.85 }]}>
+              <Ionicons name="remove" size={16} color={colors.primary} />
+            </Pressable>
+            <Text style={styles.modValue}>
+              {modifier > 0 ? `+${modifier}` : String(modifier)}
+            </Text>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Увеличить модификатор"
+              disabled={rolling}
+              onPress={() => setModifier((value) => Math.min(99, value + 1))}
+              style={({ pressed }) => [styles.modBtn, pressed && { opacity: 0.85 }]}>
+              <Ionicons name="add" size={16} color={colors.primary} />
+            </Pressable>
+          </View>
+        </View>
+        <View style={styles.modeRow}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityState={{ selected: mode === 'advantage' }}
+            disabled={rolling}
+            onPress={() => setKeepMode('advantage')}
+            style={[styles.modeChip, mode === 'advantage' ? styles.modeChipOn : null]}>
+            <Text
+              style={[
+                styles.modeChipText,
+                mode === 'advantage' ? styles.modeChipTextOn : null,
+              ]}>
+              Преимущество
+            </Text>
+          </Pressable>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityState={{ selected: mode === 'disadvantage' }}
+            disabled={rolling}
+            onPress={() => setKeepMode('disadvantage')}
+            style={[styles.modeChip, mode === 'disadvantage' ? styles.modeChipOn : null]}>
+            <Text
+              style={[
+                styles.modeChipText,
+                mode === 'disadvantage' ? styles.modeChipTextOn : null,
+              ]}>
+              Помеха
+            </Text>
+          </Pressable>
+        </View>
+        <View style={styles.speedRow}>
+          <Text style={styles.speedLabel}>Анимация</Text>
+          <View style={styles.speedSegment}>
+            {DICE_SPEED_OPTIONS.map((option) => {
+              const selected = animationSpeed === option.value;
+              const iconColor = selected ? colors.onPrimary : colors.primary;
+              return (
+                <Pressable
+                  key={option.value}
+                  accessibilityRole="button"
+                  accessibilityLabel={option.accessibilityLabel}
+                  accessibilityState={{ selected }}
+                  disabled={rolling}
+                  onPress={() => handleAnimationSpeedChange(option.value)}
+                  style={[styles.speedChip, selected ? styles.speedChipOn : null]}>
+                  {option.value === 'fast' ? (
+                    <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                      <Ionicons name="arrow-forward" size={12} color={iconColor} />
+                      <Ionicons name="arrow-forward" size={12} color={iconColor} />
+                    </View>
+                  ) : (
+                    <Ionicons name={option.icon} size={16} color={iconColor} />
+                  )}
+                </Pressable>
+              );
+            })}
+          </View>
+        </View>
       </View>
 
       <View style={[styles.workspace, compact && styles.workspaceCompact]}>
@@ -839,6 +1380,7 @@ export default function DiceScreen() {
                 <DiceStage
                   ref={stageRef}
                   accent={accent}
+                  animationSpeed={animationSpeed === 'off' ? 'normal' : animationSpeed}
                   onReady={() => setStageReady(true)}
                   onDone={handleDone}
                 />
@@ -862,20 +1404,24 @@ export default function DiceScreen() {
                 <Pressable
                   accessibilityRole="button"
                   accessibilityLabel="Сделать бросок"
-                  disabled={!stageReady || parts.length === 0}
+                  disabled={
+                    parts.length === 0 || (animationSpeed !== 'off' && !stageReady)
+                  }
                   onPress={handleRoll}
                   style={({ pressed }) => [
                     styles.rollBtn,
                     showLast && { marginBottom: 56 },
-                    (!stageReady || parts.length === 0) && styles.rollBtnDisabled,
+                    (parts.length === 0 ||
+                      (animationSpeed !== 'off' && !stageReady)) &&
+                      styles.rollBtnDisabled,
                     pressed &&
-                      stageReady &&
+                      (animationSpeed === 'off' || stageReady) &&
                       parts.length > 0 && { opacity: 0.92, transform: [{ scale: 0.98 }] },
                   ]}>
                   <Text style={styles.rollLabel}>
-                    {!stageReady ? '…' : 'Бросок'}
+                    {animationSpeed !== 'off' && !stageReady ? '…' : 'Бросок'}
                   </Text>
-                  {stageReady ? (
+                  {animationSpeed === 'off' || stageReady ? (
                     <Ionicons name="arrow-forward" size={18} color={colors.onPrimary} />
                   ) : null}
                 </Pressable>
@@ -889,12 +1435,102 @@ export default function DiceScreen() {
                   accessibilityLabel="Скрыть результат"
                   onPress={() => setShowLast(false)}
                   style={styles.lastResultMain}>
-                  <Text style={styles.lastResultSum}>{outcome.sum}</Text>
+                  <Text
+                    style={[
+                      styles.lastResultSum,
+                      outcomeSingleMark === 'crit_fail'
+                        ? styles.lastResultSumCritFail
+                        : null,
+                      outcomeSingleMark === 'crit_success'
+                        ? styles.lastResultSumCritSuccess
+                        : null,
+                    ]}>
+                    {outcome.sum}
+                  </Text>
                   <View style={styles.lastResultMeta}>
-                    <Text style={styles.lastResultNotation}>{outcome.notation}</Text>
-                    <Text style={styles.lastResultValues} numberOfLines={1}>
-                      {outcome.values.join(' · ')}
+                    <Text style={styles.lastResultNotation}>
+                      {outcomeMode === 'advantage' || outcomeMode === 'disadvantage'
+                        ? `${diceRollModeLabel(outcomeMode)} · ${outcome.notation}`
+                        : outcome.notation}
                     </Text>
+                    {outcomeCritLabels.length > 0 ? (
+                      <View style={styles.lastResultCritRow}>
+                        {outcomeCritLabels.map((label) => {
+                          const isFail = label === DICE_CRIT_FAIL_LABEL;
+                          return (
+                            <View
+                              key={label}
+                              style={[
+                                styles.lastResultCritBadge,
+                                isFail
+                                  ? styles.lastResultCritBadgeFail
+                                  : styles.lastResultCritBadgeSuccess,
+                              ]}>
+                              <Text
+                                style={[
+                                  styles.lastResultCritText,
+                                  isFail
+                                    ? styles.lastResultCritTextFail
+                                    : styles.lastResultCritTextSuccess,
+                                ]}>
+                                {label}
+                              </Text>
+                            </View>
+                          );
+                        })}
+                      </View>
+                    ) : null}
+                    <View style={styles.lastResultFaces}>
+                      {outcome.groups.flatMap((group, groupIndex) => {
+                        const isKeepGroup =
+                          (outcomeMode === 'advantage' || outcomeMode === 'disadvantage') &&
+                          group.sides === 20 &&
+                          outcomeKept != null;
+                        const keptIndex =
+                          isKeepGroup && outcomeKept != null
+                            ? group.values.indexOf(outcomeKept)
+                            : -1;
+                        return group.values.map((value, index) => {
+                          const mark = diceFaceMark(group.sides, value, outcomeModifier);
+                          const keptHighlight = isKeepGroup && index === keptIndex;
+                          const discardedHighlight = isKeepGroup && index !== keptIndex;
+                          const showCrit = !isKeepGroup || keptHighlight;
+                          return (
+                            <View
+                              key={`last-g${groupIndex}-${index}`}
+                              style={[
+                                styles.lastResultFace,
+                                mark === 'crit_fail' && showCrit
+                                  ? styles.lastResultFaceFail
+                                  : null,
+                                mark === 'crit_success' && showCrit
+                                  ? styles.lastResultFaceSuccess
+                                  : null,
+                                discardedHighlight ? { opacity: 0.42 } : null,
+                                keptHighlight
+                                  ? {
+                                      borderWidth: 1.5,
+                                      borderColor: colors.primary,
+                                    }
+                                  : null,
+                              ]}>
+                              <Text
+                                style={[
+                                  styles.lastResultFaceText,
+                                  mark === 'crit_fail' && showCrit
+                                    ? styles.lastResultFaceTextFail
+                                    : null,
+                                  mark === 'crit_success' && showCrit
+                                    ? styles.lastResultFaceTextSuccess
+                                    : null,
+                                ]}>
+                                {value}
+                              </Text>
+                            </View>
+                          );
+                        });
+                      })}
+                    </View>
                   </View>
                 </Pressable>
                 <Pressable

@@ -19,12 +19,42 @@ import {
   CHAT_MAX_TOTAL_DICE,
   formatDiceFormula,
   type ChatDieSides,
+  type DiceRollMode,
 } from '@/utils/chat-dice-roll';
+import {
+  getDiceAnimationSpeedSync,
+  loadDiceAnimationSpeed,
+  saveDiceAnimationSpeed,
+  type DiceAnimationSpeed,
+} from '@/utils/dice-animations-storage';
 
 type Pool = Record<ChatDieSides, number>;
 
 const EMPTY_POOL: Pool = { 4: 0, 6: 0, 8: 0, 10: 0, 12: 0, 20: 0, 100: 0 };
+const ADVANTAGE_POOL: Pool = { ...EMPTY_POOL, 20: 2 };
 const PREVIEW_SIZE = 40;
+
+const DICE_SPEED_OPTIONS: {
+  value: DiceAnimationSpeed;
+  icon: keyof typeof Ionicons.glyphMap;
+  accessibilityLabel: string;
+}[] = [
+  {
+    value: 'normal',
+    icon: 'arrow-forward',
+    accessibilityLabel: 'Обычная скорость анимации',
+  },
+  {
+    value: 'fast',
+    icon: 'play-forward',
+    accessibilityLabel: 'Быстрая анимация кубиков',
+  },
+  {
+    value: 'off',
+    icon: 'close',
+    accessibilityLabel: 'Без анимации кубиков',
+  },
+];
 
 /** Палитра как у рейла на экране «Дайсы». */
 const DICE_UI = {
@@ -54,6 +84,7 @@ type ChatDicePopoverProps = {
     modifier: number;
     hidden: boolean;
     color: string;
+    mode: DiceRollMode;
   }) => void;
 };
 
@@ -168,15 +199,12 @@ function createStyles(isDesktop: boolean) {
       fontSize: FontSize.label,
     },
     row: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'space-between',
-      gap: Spacing.md,
+      gap: 8,
     },
     rowLabel: {
-      fontSize: FontSize.label,
-      fontWeight: '600',
-      color: DICE_UI.text,
+      fontSize: FontSize.caption,
+      fontWeight: '700',
+      color: DICE_UI.label,
     },
     modControls: {
       flexDirection: 'row',
@@ -189,6 +217,60 @@ function createStyles(isDesktop: boolean) {
       fontWeight: '700',
       color: DICE_UI.label,
       fontSize: FontSize.button,
+    },
+    modeRow: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: 6,
+    },
+    modeChip: {
+      paddingHorizontal: 10,
+      paddingVertical: 6,
+      borderRadius: 8,
+      borderWidth: 1,
+      borderColor: DICE_UI.controlBorder,
+      backgroundColor: DICE_UI.accentSoft,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    modeChipOn: {
+      backgroundColor: DICE_UI.accentSoftOn,
+      borderColor: DICE_UI.accent,
+    },
+    modeChipText: {
+      fontSize: 12,
+      fontWeight: '700',
+      color: DICE_UI.label,
+    },
+    modeChipTextOn: {
+      color: '#FFFFFF',
+    },
+    speedRow: {
+      gap: 6,
+    },
+    speedLabel: {
+      fontSize: FontSize.caption,
+      fontWeight: '700',
+      color: DICE_UI.label,
+    },
+    speedSegment: {
+      flexDirection: 'row',
+      alignSelf: 'flex-start',
+      gap: 6,
+    },
+    speedChip: {
+      width: 34,
+      height: 34,
+      borderRadius: 8,
+      borderWidth: 1,
+      borderColor: DICE_UI.controlBorder,
+      backgroundColor: DICE_UI.accentSoft,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    speedChipOn: {
+      backgroundColor: DICE_UI.accent,
+      borderColor: DICE_UI.accent,
     },
     hiddenToggle: {
       flexDirection: 'row',
@@ -243,12 +325,22 @@ export function ChatDicePopover({ visible, busy, onClose, onRoll }: ChatDicePopo
   const [pool, setPool] = useState<Pool>({ ...EMPTY_POOL, 20: 1 });
   const [modifier, setModifier] = useState(0);
   const [hidden, setHidden] = useState(false);
+  const [mode, setMode] = useState<DiceRollMode>('normal');
+  const [animationSpeed, setAnimationSpeed] = useState<DiceAnimationSpeed>(
+    getDiceAnimationSpeedSync,
+  );
 
   useEffect(() => {
     if (visible) {
       setKeptAlive(true);
+      void loadDiceAnimationSpeed().then(setAnimationSpeed);
     }
   }, [visible]);
+
+  const handleAnimationSpeedChange = (next: DiceAnimationSpeed) => {
+    setAnimationSpeed(next);
+    void saveDiceAnimationSpeed(next);
+  };
 
   const total = useMemo(
     () => CHAT_DIE_SIDES.reduce((sum, sides) => sum + pool[sides], 0),
@@ -260,12 +352,26 @@ export function ChatDicePopover({ visible, busy, onClose, onRoll }: ChatDicePopo
       sides,
       qty: pool[sides],
     }));
-    return formatDiceFormula(dice, modifier) || '—';
-  }, [modifier, pool]);
+    return formatDiceFormula(dice, modifier, mode) || '—';
+  }, [mode, modifier, pool]);
 
   const canRoll = total > 0 && !busy;
+  const keepMode = mode !== 'normal';
+
+  const setKeepMode = (next: DiceRollMode) => {
+    setMode((prev) => {
+      const resolved = prev === next ? 'normal' : next;
+      if (resolved === 'advantage' || resolved === 'disadvantage') {
+        setPool({ ...ADVANTAGE_POOL });
+      }
+      return resolved;
+    });
+  };
 
   const bump = (sides: ChatDieSides, delta: number) => {
+    if (keepMode) {
+      return;
+    }
     setPool((prev) => {
       const nextQty = Math.max(0, Math.min(CHAT_MAX_PER_DIE, prev[sides] + delta));
       if (delta > 0 && total - prev[sides] + nextQty > CHAT_MAX_TOTAL_DICE) {
@@ -279,11 +385,14 @@ export function ChatDicePopover({ visible, busy, onClose, onRoll }: ChatDicePopo
     if (!canRoll) {
       return;
     }
-    const dice = CHAT_DIE_SIDES.filter((sides) => pool[sides] > 0).map((sides) => ({
-      sides,
-      qty: pool[sides],
-    }));
-    onRoll({ dice, modifier, hidden, color: accent });
+    const dice =
+      mode === 'advantage' || mode === 'disadvantage'
+        ? [{ sides: 20, qty: 2 }]
+        : CHAT_DIE_SIDES.filter((sides) => pool[sides] > 0).map((sides) => ({
+            sides,
+            qty: pool[sides],
+          }));
+    onRoll({ dice, modifier, hidden, color: accent, mode });
   };
 
   if (!visible && !keptAlive) {
@@ -317,8 +426,68 @@ export function ChatDicePopover({ visible, busy, onClose, onRoll }: ChatDicePopo
             />
           </View>
 
+          <View style={styles.modeRow}>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityState={{ selected: mode === 'advantage' }}
+              disabled={busy}
+              onPress={() => setKeepMode('advantage')}
+              style={[styles.modeChip, mode === 'advantage' ? styles.modeChipOn : null]}>
+              <Text
+                style={[
+                  styles.modeChipText,
+                  mode === 'advantage' ? styles.modeChipTextOn : null,
+                ]}>
+                Преимущество
+              </Text>
+            </Pressable>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityState={{ selected: mode === 'disadvantage' }}
+              disabled={busy}
+              onPress={() => setKeepMode('disadvantage')}
+              style={[styles.modeChip, mode === 'disadvantage' ? styles.modeChipOn : null]}>
+              <Text
+                style={[
+                  styles.modeChipText,
+                  mode === 'disadvantage' ? styles.modeChipTextOn : null,
+                ]}>
+                Помеха
+              </Text>
+            </Pressable>
+          </View>
+
+          <View style={styles.speedRow}>
+            <Text style={styles.speedLabel}>Анимация</Text>
+            <View style={styles.speedSegment}>
+              {DICE_SPEED_OPTIONS.map((option) => {
+                const selected = animationSpeed === option.value;
+                const iconColor = selected ? '#FFFFFF' : DICE_UI.label;
+                return (
+                  <Pressable
+                    key={option.value}
+                    accessibilityRole="button"
+                    accessibilityLabel={option.accessibilityLabel}
+                    accessibilityState={{ selected }}
+                    disabled={busy}
+                    onPress={() => handleAnimationSpeedChange(option.value)}
+                    style={[styles.speedChip, selected ? styles.speedChipOn : null]}>
+                    {option.value === 'fast' ? (
+                      <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                        <Ionicons name="arrow-forward" size={12} color={iconColor} />
+                        <Ionicons name="arrow-forward" size={12} color={iconColor} />
+                      </View>
+                    ) : (
+                      <Ionicons name={option.icon} size={16} color={iconColor} />
+                    )}
+                  </Pressable>
+                );
+              })}
+            </View>
+          </View>
+
           <DieMeshPreviewProvider>
-            <View style={styles.grid}>
+            <View style={[styles.grid, keepMode ? { opacity: 0.55 } : null]}>
               {CHAT_DIE_SIDES.map((sides) => {
                 const qty = pool[sides];
                 const active = qty > 0;
@@ -341,6 +510,7 @@ export function ChatDicePopover({ visible, busy, onClose, onRoll }: ChatDicePopo
                       <Pressable
                         accessibilityRole="button"
                         accessibilityLabel={`Меньше d${sides}`}
+                        disabled={busy || keepMode}
                         onPress={() => bump(sides, -1)}
                         style={styles.qtyBtn}>
                         <Ionicons name="remove" size={14} color={DICE_UI.label} />
@@ -349,6 +519,7 @@ export function ChatDicePopover({ visible, busy, onClose, onRoll }: ChatDicePopo
                       <Pressable
                         accessibilityRole="button"
                         accessibilityLabel={`Больше d${sides}`}
+                        disabled={busy || keepMode}
                         onPress={() => bump(sides, 1)}
                         style={styles.qtyBtn}>
                         <Ionicons name="add" size={14} color={DICE_UI.label} />

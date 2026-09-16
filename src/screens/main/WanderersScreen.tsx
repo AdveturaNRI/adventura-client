@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Text, View } from 'react-native';
 
 import { useIsDesktopSidebarVisible } from '@/components/navigation/DesktopThemeToggle';
@@ -58,6 +58,8 @@ export default function WanderersScreen() {
   const [filtersExpanded, setFiltersExpanded] = useState(false);
   const [officialSystems, setOfficialSystems] = useState<string[]>([]);
   const [experienceLabels, setExperienceLabels] = useState<string[]>([]);
+  const loadGenerationRef = useRef(0);
+  const feedRemovedCardsRef = useRef(new Map<string, WandererCardItem>());
 
   const loadBucketCounts = useCallback(async () => {
     try {
@@ -69,6 +71,7 @@ export default function WanderersScreen() {
   }, []);
 
   const loadWanderers = useCallback(async (nextBucket: WandererBucket) => {
+    const generation = ++loadGenerationRef.current;
     setIsLoading(true);
     setErrorMessage(null);
 
@@ -77,12 +80,23 @@ export default function WanderersScreen() {
         fetchWanderers(nextBucket),
         loadBucketCounts(),
       ]);
+      if (generation !== loadGenerationRef.current) {
+        return;
+      }
+      if (nextBucket === 'feed') {
+        feedRemovedCardsRef.current.clear();
+      }
       setItems(nextItems);
     } catch (error) {
+      if (generation !== loadGenerationRef.current) {
+        return;
+      }
       setItems([]);
       setErrorMessage(localizeErrorMessage(error, WANDERERS_SCREEN.loadError));
     } finally {
-      setIsLoading(false);
+      if (generation === loadGenerationRef.current) {
+        setIsLoading(false);
+      }
     }
   }, [loadBucketCounts]);
 
@@ -179,7 +193,13 @@ export default function WanderersScreen() {
   const handleReactionSaved = useCallback(
     (targetUserId: string, type: WandererReactionType) => {
       if (bucket === 'feed') {
-        setItems((prev) => prev.filter((item) => item.id !== targetUserId));
+        setItems((prev) => {
+          const removed = prev.find((item) => item.id === targetUserId);
+          if (removed) {
+            feedRemovedCardsRef.current.set(targetUserId, removed);
+          }
+          return prev.filter((item) => item.id !== targetUserId);
+        });
         setBucketCounts((prev) => ({
           favorites: type === 'favorite' ? prev.favorites + 1 : prev.favorites,
           skipped: type === 'skipped' ? prev.skipped + 1 : prev.skipped,
@@ -223,6 +243,14 @@ export default function WanderersScreen() {
       }));
 
       if (bucket === 'feed') {
+        const cached = feedRemovedCardsRef.current.get(targetUserId);
+        feedRemovedCardsRef.current.delete(targetUserId);
+        if (cached) {
+          setItems((prev) =>
+            prev.some((item) => item.id === targetUserId) ? prev : [cached, ...prev],
+          );
+          return;
+        }
         void loadWanderers('feed');
         return;
       }
@@ -247,7 +275,7 @@ export default function WanderersScreen() {
     />
   ) : null;
 
-  if ((isLoading && items.length === 0) || !isFiltersReady) {
+  if (isLoading && items.length === 0) {
     return (
       <ScreenTransition animateOnFocus>
         <View style={[styles.container, styles.stateWrap]}>

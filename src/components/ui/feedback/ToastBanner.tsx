@@ -1,6 +1,6 @@
 import type { ComponentProps } from 'react';
 import { Ionicons } from '@expo/vector-icons';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import Toast, { type ToastConfigParams } from 'react-native-toast-message';
 
 import { UserAvatar } from '@/components/navigation/UserAvatar';
@@ -11,7 +11,7 @@ import {
   type ToastVariant,
 } from '@/components/ui/feedback/toast.config';
 import { FontSize, Layout, Spacing, type ThemeColors } from '@/constants/theme';
-import { useTheme, useThemePreference } from '@/hooks/use-theme';
+import { useTheme } from '@/hooks/use-theme';
 import { useThemedStyles } from '@/hooks/use-themed-styles';
 
 type ToastBannerProps = ToastConfigParams<Record<string, unknown>> & {
@@ -20,10 +20,8 @@ type ToastBannerProps = ToastConfigParams<Record<string, unknown>> & {
 
 type IconName = ComponentProps<typeof Ionicons>['name'];
 
-function createStyles(colors: ThemeColors, isDark: boolean) {
-  const cardBg = isDark ? '#2C2C2E' : '#FFFFFF';
-  const titleColor = isDark ? '#FFFFFF' : '#000000';
-  const messageColor = isDark ? '#E5E5EA' : '#4C4C4C';
+function createStyles(colors: ThemeColors) {
+  const isDark = colors.background === '#000000';
 
   return StyleSheet.create({
     outer: {
@@ -49,9 +47,9 @@ function createStyles(colors: ThemeColors, isDark: boolean) {
       paddingVertical: 12,
       paddingHorizontal: Spacing.md,
       borderRadius: 16,
-      backgroundColor: cardBg,
+      backgroundColor: colors.surface,
       borderWidth: 1,
-      borderColor: isDark ? 'rgba(255,255,255,0.14)' : colors.borderLight,
+      borderColor: colors.border,
       shadowColor: colors.shadow,
       shadowOffset: { width: 0, height: 10 },
       shadowOpacity: isDark ? 0.45 : 0.14,
@@ -59,6 +57,11 @@ function createStyles(colors: ThemeColors, isDark: boolean) {
       elevation: 8,
       overflow: 'hidden',
       pointerEvents: 'auto',
+      ...(Platform.OS === 'web'
+        ? ({
+            color: colors.text,
+          } as object)
+        : null),
     },
     cardAlert: {
       borderColor: 'rgba(21, 122, 254, 0.28)',
@@ -102,7 +105,7 @@ function createStyles(colors: ThemeColors, isDark: boolean) {
       justifyContent: 'center',
       backgroundColor: colors.primary,
       borderWidth: 2,
-      borderColor: cardBg,
+      borderColor: colors.surface,
     },
     avatarSealWarning: {
       backgroundColor: '#FF9F0A',
@@ -118,7 +121,7 @@ function createStyles(colors: ThemeColors, isDark: boolean) {
     title: {
       fontSize: FontSize.label,
       fontWeight: '600',
-      color: titleColor,
+      color: colors.text,
       letterSpacing: -0.1,
     },
     titleEmphasis: {
@@ -126,7 +129,7 @@ function createStyles(colors: ThemeColors, isDark: boolean) {
     },
     message: {
       fontSize: FontSize.caption,
-      color: messageColor,
+      color: colors.textSecondary,
       lineHeight: 17,
     },
     actionButton: {
@@ -193,10 +196,7 @@ function resolveSealIcon(emphasis: ToastEmphasis, variant: ToastVariant): IconNa
 
 export function ToastBanner({ text1, text2, onPress, variant, props }: ToastBannerProps) {
   const colors = useTheme();
-  const { colorScheme } = useThemePreference();
-  const isDark = colorScheme === 'dark';
-  const styles = useThemedStyles((themeColors) => createStyles(themeColors, isDark));
-  const cardBg = isDark ? '#2C2C2E' : '#FFFFFF';
+  const styles = useThemedStyles(createStyles);
   const spec = getToastSpecs(colors).find((item) => item.variant === variant)!;
   const alignment = (props?.alignment as ToastAlignment | undefined) ?? 'center';
   const actionLabel = typeof props?.actionLabel === 'string' ? props.actionLabel : undefined;
@@ -248,20 +248,24 @@ export function ToastBanner({ text1, text2, onPress, variant, props }: ToastBann
       <View style={styles.content}>
         {text1 ? (
           <Text
-            style={[styles.title, emphasis !== 'default' ? styles.titleEmphasis : null]}
+            style={[
+              styles.title,
+              { color: colors.text },
+              emphasis !== 'default' ? styles.titleEmphasis : null,
+            ]}
             numberOfLines={2}>
             {text1}
           </Text>
         ) : null}
         {message ? (
-          <Text style={styles.message} numberOfLines={2}>
+          <Text style={[styles.message, { color: colors.textSecondary }]} numberOfLines={2}>
             {message}
           </Text>
         ) : null}
       </View>
       {actionLabel && onAction ? (
         <View style={styles.actionButton} pointerEvents="none">
-          <Text style={styles.actionLabel}>{actionLabel}</Text>
+          <Text style={[styles.actionLabel, { color: colors.primary }]}>{actionLabel}</Text>
         </View>
       ) : null}
     </>
@@ -269,7 +273,11 @@ export function ToastBanner({ text1, text2, onPress, variant, props }: ToastBann
 
   const cardStyle = [
     styles.card,
-    { backgroundColor: cardBg },
+    {
+      backgroundColor: colors.surface,
+      borderColor: colors.border,
+      ...(Platform.OS === 'web' ? ({ color: colors.text } as object) : null),
+    },
     alignment !== 'center' ? styles.cardShrink : null,
     emphasis === 'alert' ? styles.cardAlert : null,
     emphasis === 'chat' ? styles.cardChat : null,

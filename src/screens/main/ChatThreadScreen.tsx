@@ -89,10 +89,12 @@ import { upsertWandererReaction, clearWandererReaction } from '@/services/profil
 import {
   diceRollPreviewText,
   parseDiceRollPayload,
+  type DiceRollMode,
 } from '@/utils/chat-dice-roll';
 import {
-  getDiceAnimationsEnabledSync,
-  loadDiceAnimationsEnabled,
+  getDiceAnimationSpeedSync,
+  loadDiceAnimationSpeed,
+  subscribeDiceAnimationSpeed,
 } from '@/utils/dice-animations-storage';
 import { localizeErrorMessage } from '@/utils/localizeError';
 import {
@@ -1259,7 +1261,7 @@ export default function ChatThreadScreen() {
   const heldDiceMessagesRef = useRef(new Map<string, ChatMessage>());
   const [heldDiceIds, setHeldDiceIds] = useState<string[]>([]);
   const diceAnimQueueRef = useRef<ChatDiceOverlayRequest[]>([]);
-  const diceAnimationsEnabledRef = useRef(getDiceAnimationsEnabledSync());
+  const diceAnimationsEnabledRef = useRef(getDiceAnimationSpeedSync() !== 'off');
   const myId = user?.id;
 
   draftRef.current = draft;
@@ -1268,8 +1270,11 @@ export default function ChatThreadScreen() {
   blockedMeRef.current = Boolean(conversation?.blockedMe);
 
   useEffect(() => {
-    void loadDiceAnimationsEnabled().then((enabled) => {
-      diceAnimationsEnabledRef.current = enabled;
+    void loadDiceAnimationSpeed().then((speed) => {
+      diceAnimationsEnabledRef.current = speed !== 'off';
+    });
+    return subscribeDiceAnimationSpeed((speed) => {
+      diceAnimationsEnabledRef.current = speed !== 'off';
     });
   }, []);
 
@@ -1956,6 +1961,7 @@ export default function ChatThreadScreen() {
       modifier: number;
       hidden: boolean;
       color: string;
+      mode: DiceRollMode;
     }) => {
       if (!conversationId || diceRollBusy || conversation?.blockedMe || localDiceRoll) {
         return;
@@ -1978,6 +1984,7 @@ export default function ChatThreadScreen() {
           modifier: input.modifier,
           color: input.color,
           senderNickname: user?.nickname ?? 'Вы',
+          mode: input.mode,
         });
       });
 
@@ -1993,6 +2000,7 @@ export default function ChatThreadScreen() {
             sides: group.sides,
             values: group.values,
           })),
+          ...(input.mode !== 'normal' ? { mode: input.mode } : {}),
         });
         const rolled = parseDiceRollPayload(message.body);
         if (rolled && !rolled.color && input.color) {
@@ -2319,6 +2327,10 @@ export default function ChatThreadScreen() {
 
   const handleKeyPress = useCallback(
     (event: NativeSyntheticEvent<TextInputKeyPressEventData>) => {
+      // На телефоне Enter — новая строка; отправка только кнопкой.
+      if (Platform.OS !== 'web') {
+        return;
+      }
       const key = event.nativeEvent.key;
       const shiftKey = Boolean(
         (event.nativeEvent as TextInputKeyPressEventData & { shiftKey?: boolean }).shiftKey,
@@ -3157,12 +3169,8 @@ export default function ChatThreadScreen() {
                       multiline
                       blurOnSubmit={false}
                       submitBehavior="newline"
-                      onKeyPress={handleKeyPress}
-                      onSubmitEditing={() => {
-                        if (Platform.OS !== 'web') {
-                          void handleSend();
-                        }
-                      }}
+                      returnKeyType={Platform.OS === 'web' ? undefined : 'default'}
+                      onKeyPress={Platform.OS === 'web' ? handleKeyPress : undefined}
                     />
                   </View>
                   <Pressable

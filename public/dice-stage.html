@@ -140,11 +140,19 @@
       document.body.style.pointerEvents = 'none';
     }
 
-    const ROLL_CFG = {
+    const ROLL_CFG_NORMAL = {
       throwForce: 5,
       spinForce: 5,
       startingHeight: 8,
       settleTimeout: 3500,
+      gravity: 1,
+    };
+    const ROLL_CFG_FAST = {
+      throwForce: 4,
+      spinForce: 3,
+      startingHeight: 5,
+      settleTimeout: 1400,
+      gravity: 2.6,
     };
     // Appear on the table center — no edge toss / soft-drop.
     const PREVIEW_CFG = {
@@ -152,9 +160,15 @@
       spinForce: 0,
       startingHeight: 1.1,
       settleTimeout: 280,
+      gravity: 1,
       // Physics worker uses this when newStartPoint is false.
       startPosition: [0, 1.1, 0],
     };
+
+    let currentSpeed = 'normal';
+    function rollCfgForSpeed(speed) {
+      return speed === 'fast' ? ROLL_CFG_FAST : ROLL_CFG_NORMAL;
+    }
 
     setStatus('Тянем 3D-движок…');
     const DiceBox = (await import(`${CDN}/dice-box.es.min.js`)).default;
@@ -167,8 +181,7 @@
       theme: 'default',
       themeColor: currentAccent,
       scale: 6,
-      gravity: 1,
-      ...ROLL_CFG,
+      ...rollCfgForSpeed(currentSpeed),
       offscreen: false,
       enableShadows: false,
       lightIntensity: 1.05,
@@ -219,15 +232,19 @@
       } finally {
         busy = false;
         if (token === generation) {
-          box.updateConfig(ROLL_CFG);
+          box.updateConfig(rollCfgForSpeed(currentSpeed));
         }
       }
     }
 
-    async function runRoll(notation, themeColor) {
+    async function runRoll(notation, themeColor, speed) {
       const token = ++generation;
       const color = applyAccent(themeColor);
-      box.updateConfig(ROLL_CFG);
+      if (speed === 'fast' || speed === 'normal') {
+        currentSpeed = speed;
+      }
+      const rollCfg = rollCfgForSpeed(currentSpeed);
+      box.updateConfig(rollCfg);
       busy = true;
       try {
         const results = await box.roll(normalizeNotation(notation), {
@@ -241,18 +258,46 @@
       } finally {
         busy = false;
         if (token === generation) {
-          box.updateConfig(ROLL_CFG);
+          box.updateConfig(rollCfg);
         }
       }
     }
 
-    async function onMessage(raw) {
+    function parseHostMessage(raw) {
+      if (raw == null) return null;
+      if (typeof raw === 'object') {
+        return typeof raw.type === 'string' ? raw : null;
+      }
+      if (typeof raw !== 'string') return null;
+      const trimmed = raw.trim();
+      if (!trimmed.startsWith('{')) return null;
       try {
-        const data = typeof raw === 'string' ? JSON.parse(raw) : raw;
-        if (!data || typeof data !== 'object' || !ready) return;
+        const data = JSON.parse(trimmed);
+        return data && typeof data === 'object' && typeof data.type === 'string'
+          ? data
+          : null;
+      } catch {
+        return null;
+      }
+    }
 
+    async function onMessage(raw) {
+      const data = parseHostMessage(raw);
+      if (!data || !ready) return;
+
+      try {
         if (data.type === 'setAccent') {
           applyAccent(data.themeColor);
+          return;
+        }
+
+        if (data.type === 'setSpeed') {
+          if (data.speed === 'fast' || data.speed === 'normal') {
+            currentSpeed = data.speed;
+            if (!busy) {
+              box.updateConfig(rollCfgForSpeed(currentSpeed));
+            }
+          }
           return;
         }
 
@@ -262,11 +307,13 @@
             // Still bump generation so an in-flight preview is ignored after.
           }
           await runPreview(data.notation, data.themeColor);
+          return;
         }
 
         if (data.type === 'roll') {
           hintEl.style.display = 'none';
-          await runRoll(data.notation ?? '1d20', data.themeColor);
+          await runRoll(data.notation ?? '1d20', data.themeColor, data.speed);
+          return;
         }
 
         if (data.type === 'clear') {

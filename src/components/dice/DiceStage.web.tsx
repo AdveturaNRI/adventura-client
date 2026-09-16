@@ -28,7 +28,7 @@ export type { DiceRollOutcome, DiceStageHandle };
  * (that leaks WebGL contexts and crashes the tab after many rolls).
  */
 export const DiceStage = forwardRef<DiceStageHandle, DiceStageProps>(function DiceStage(
-  { onReady, onDone, transparent = false, accent },
+  { onReady, onDone, transparent = false, accent, animationSpeed = 'normal' },
   ref,
 ) {
   const colors = useTheme();
@@ -36,6 +36,8 @@ export const DiceStage = forwardRef<DiceStageHandle, DiceStageProps>(function Di
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
   const accentRef = useRef(themeAccent);
   accentRef.current = themeAccent;
+  const speedRef = useRef(animationSpeed);
+  speedRef.current = animationSpeed;
   const onDoneRef = useRef(onDone);
   onDoneRef.current = onDone;
   const onReadyRef = useRef(onReady);
@@ -60,11 +62,13 @@ export const DiceStage = forwardRef<DiceStageHandle, DiceStageProps>(function Di
             reject(new Error('Dice box is not ready'));
             return;
           }
+          setError(null);
           pendingRef.current = { resolve, reject };
           postToIframe({
             type: 'roll',
             notation,
             themeColor: accentRef.current,
+            speed: speedRef.current,
           });
         }),
       preview: (notation) => {
@@ -75,10 +79,12 @@ export const DiceStage = forwardRef<DiceStageHandle, DiceStageProps>(function Di
           type: 'preview',
           notation: notation ?? [],
           themeColor: accentRef.current,
+          speed: speedRef.current,
         });
       },
       clear: () => {
         pendingRef.current = null;
+        setError(null);
         postToIframe({ type: 'clear' });
       },
     }),
@@ -88,44 +94,65 @@ export const DiceStage = forwardRef<DiceStageHandle, DiceStageProps>(function Di
   useEffect(() => {
     const onWindowMessage = (event: MessageEvent) => {
       try {
-        const data =
-          typeof event.data === 'string'
-            ? (JSON.parse(event.data) as {
-                type?: string;
-                outcome?: DiceRollOutcome;
-                message?: string;
-              })
-            : null;
+        const raw = event.data;
+        let data: {
+          type?: string;
+          outcome?: DiceRollOutcome;
+          message?: string;
+        } | null = null;
+        if (typeof raw === 'string') {
+          const trimmed = raw.trim();
+          if (!trimmed.startsWith('{')) {
+            return;
+          }
+          data = JSON.parse(trimmed) as {
+            type?: string;
+            outcome?: DiceRollOutcome;
+            message?: string;
+          };
+        } else if (raw && typeof raw === 'object') {
+          data = raw as {
+            type?: string;
+            outcome?: DiceRollOutcome;
+            message?: string;
+          };
+        }
         if (!data?.type) {
           return;
         }
         if (data.type === 'ready') {
           setReady(true);
+          setError(null);
           onReadyRef.current?.();
         }
         if (data.type === 'done' && data.outcome) {
+          setError(null);
           pendingRef.current?.resolve(data.outcome);
           pendingRef.current = null;
           onDoneRef.current?.(data.outcome);
         }
         if (data.type === 'error') {
-          setError(data.message || 'Ошибка 3D-кубиков');
-          pendingRef.current?.reject(new Error(data.message || 'Dice error'));
+          const message = data.message || 'Не удалось бросить кости';
+          // В чате не рисуем сырой SyntaxError поверх ленты — бросок уйдёт в fallback.
+          if (!transparent) {
+            setError(message);
+          }
+          pendingRef.current?.reject(new Error(message));
           pendingRef.current = null;
         }
       } catch {
-        // ignore
+        // Чужие window.message — не наши.
       }
     };
     window.addEventListener('message', onWindowMessage);
     return () => window.removeEventListener('message', onWindowMessage);
-  }, []);
+  }, [transparent]);
 
   // Chat overlay uses threejs fork — supports forced `@values` for synced faces.
   // `v=` busts iframe cache after stage HTML / force-sync fixes.
   const src = transparent
-    ? `/chat-dice-stage.html?transparent=1&v=force3`
-    : `/dice-stage.html?transparent=0`;
+    ? `/chat-dice-stage.html?transparent=1&v=speed1`
+    : `/dice-stage.html?transparent=0&v=speed1`;
 
   useEffect(() => {
     setReady(false);
@@ -138,6 +165,13 @@ export const DiceStage = forwardRef<DiceStageHandle, DiceStageProps>(function Di
     }
     postToIframe({ type: 'setAccent', themeColor: themeAccent });
   }, [ready, themeAccent]);
+
+  useEffect(() => {
+    if (!ready) {
+      return;
+    }
+    postToIframe({ type: 'setSpeed', speed: animationSpeed });
+  }, [ready, animationSpeed]);
 
   const shellBg = transparent ? 'transparent' : '#0B1220';
 
@@ -172,7 +206,7 @@ export const DiceStage = forwardRef<DiceStageHandle, DiceStageProps>(function Di
         pointerEvents: 'none',
       },
       sandbox: 'allow-scripts allow-same-origin',
-      allow: 'accelerometer; gyroscope',
+      allow: 'autoplay; accelerometer; gyroscope',
     }),
     !ready && !error && !transparent
       ? createElement('div', {
