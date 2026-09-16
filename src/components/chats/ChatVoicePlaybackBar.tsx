@@ -1,5 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useAudioPlayer, useAudioPlayerStatus } from 'expo-audio';
+import { useAudioPlaylist, useAudioPlaylistStatus } from 'expo-audio';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -44,19 +44,65 @@ function formatTime(value: number) {
 const SPEEDS = VOICE_PLAYBACK_SPEEDS;
 
 export function ChatVoicePlaybackBar() {
+  const { queue, activeKey, sessionId } = useVoicePlayback();
+  const activeIndex = queue.findIndex((item) => item.key === activeKey);
+  const active = activeIndex >= 0 ? queue[activeIndex] : null;
+
+  if (!active) return null;
+
+  // `sessionId` changes only when the user starts another voice manually.
+  // Automatic sequential transitions deliberately stay in the same playlist:
+  // it already owns a preloaded HTMLAudioElement for the following message.
+  return (
+    <ActiveVoicePlaybackBar
+      key={sessionId}
+      initialActive={active}
+      initialActiveIndex={activeIndex}
+    />
+  );
+}
+
+function ActiveVoicePlaybackBar({
+  initialActive,
+  initialActiveIndex,
+}: {
+  initialActive: ChatVoiceQueueItem;
+  initialActiveIndex: number;
+}) {
   const colors = useTheme();
   const insets = useSafeAreaInsets();
   const isDesktopWeb = useIsDesktopWeb();
   const { queue, activeKey, toggleRequest, setActiveKey, setPlayingKey } = useVoicePlayback();
-  const activeIndex = queue.findIndex((item) => item.key === activeKey);
-  const active = activeIndex >= 0 ? queue[activeIndex] : null;
-  const player = useAudioPlayer(active?.attachment.url ?? undefined, { updateInterval: 100 });
-  const status = useAudioPlayerStatus(player);
+  const playlistQueueRef = useRef(queue.slice(initialActiveIndex));
+  const playlist = useAudioPlaylist({
+    sources: playlistQueueRef.current.map((item) => item.attachment.url),
+    updateInterval: 100,
+  });
+  const status = useAudioPlaylistStatus(playlist);
+  const currentOffset = Math.min(Math.max(status.currentIndex, 0), playlistQueueRef.current.length - 1);
+  const active = playlistQueueRef.current[currentOffset] ?? initialActive;
+  const hasCurrentPlaylistStatus = status.id === playlist.id;
+  const currentTime = hasCurrentPlaylistStatus ? status.currentTime : 0;
+  const duration = hasCurrentPlaylistStatus ? status.duration : 0;
+  const isActuallyPlaying = hasCurrentPlaylistStatus && status.playing;
+  // expo-audio emits `onplay` as soon as the browser accepts the request,
+  // which may still be before the first decoded audio sample. The bubbles
+  // interpolate their progress, so only let them animate once the media clock
+  // itself has demonstrably moved.
+  const isProgressing = isActuallyPlaying && currentTime > 0.03;
+  const [playRequested, setPlayRequested] = useState(true);
+  // This is intentional UI state, rather than the delayed media status: the
+  // user should see Pause immediately after pressing Play, including while the
+  // next source is buffering.
+  const showsPause = playRequested;
   const [speedIndex, setSpeedIndex] = useState(0);
-  const startedKeyRef = useRef<string | null>(null);
+  const startedSourceRef = useRef<string | null>(null);
   const playedKeyRef = useRef<string | null>(null);
   const finishedKeyRef = useRef<string | null>(null);
-  const handledToggleRequestRef = useRef(0);
+  // A toggle is meaningful only for the instance that existed when it was
+  // clicked. A newly selected voice must not inherit a pause/play request from
+  // a previously selected one.
+  const handledToggleRequestRef = useRef(toggleRequest);
 
   useEffect(() => {
     let mounted = true;
@@ -71,81 +117,101 @@ export function ChatVoicePlaybackBar() {
   }, []);
 
   useEffect(() => {
-    player.setPlaybackRate(SPEEDS[speedIndex], 'high');
-  }, [player, speedIndex]);
+    playlist.playbackRate = SPEEDS[speedIndex];
+  }, [playlist, speedIndex]);
 
   useEffect(() => {
-    if (!active || toggleRequest === 0 || handledToggleRequestRef.current === toggleRequest) return;
+    if (toggleRequest === 0 || handledToggleRequestRef.current === toggleRequest) return;
+    // The call must stay tied to the user's click. On the web `HTMLMediaElement`
+    // accepts play() before its data is ready and starts as soon as it loads;
+    // postponing it until `isLoaded` loses the browser's user-activation token
+    // and makes the first click appear to do nothing.
     handledToggleRequestRef.current = toggleRequest;
-    if (status.playing) player.pause();
-    else player.play();
-  }, [active, player, status.playing, toggleRequest]);
+    if (showsPause) {
+      setPlayRequested(false);
+      playlist.pause();
+    } else {
+      setPlayRequested(true);
+      playlist.play();
+    }
+  }, [playlist, showsPause, toggleRequest]);
 
   useEffect(() => {
-    if (!active || startedKeyRef.current === active.key) return;
-    startedKeyRef.current = active.key;
+    if (startedSourceRef.current === initialActive.key) return;
+    startedSourceRef.current = initialActive.key;
     playedKeyRef.current = null;
     finishedKeyRef.current = null;
-    player.play();
-  }, [active, player]);
+    setPlayRequested(true);
+    // Do not wait for `isLoaded`: on Web this play request needs to originate
+    // from the user's original tap. The native HTML audio element queues it
+    // until it has enough data, without requiring a second tap.
+    void playlist.seekTo(0);
+    playlist.play();
+  }, [initialActive.key, playlist]);
 
   useEffect(() => {
-    setPlayingKey(active && status.playing ? active.key : null);
-  }, [active, setPlayingKey, status.playing]);
-
-  useEffect(() => {
-    if (!active) {
+    return () => {
+      // Do not leave an old visual progress sample alive while React mounts
+      // the keyed player for the next voice.
       publishVoiceProgress(null);
-      return;
-    }
+    };
+  }, []);
 
+  useEffect(() => {
+    setPlayingKey(active && showsPause ? active.key : null);
+  }, [active, setPlayingKey, showsPause]);
+
+  useEffect(() => {
     publishVoiceProgress({
       key: active.key,
-      currentTime: status.currentTime,
-      duration: status.duration || active.attachment.durationSec || 0,
-      playing: Boolean(status.playing),
+      currentTime,
+      duration: duration || active.attachment.durationSec || 0,
+      playing: Boolean(isProgressing),
       rate: SPEEDS[speedIndex],
     });
-  }, [active, speedIndex, status.currentTime, status.duration, status.playing]);
+  }, [active, currentTime, duration, isProgressing, speedIndex]);
 
   useEffect(() => {
-    if (active && status.playing) {
+    if (active && isProgressing) {
       playedKeyRef.current = active.key;
     }
-  }, [active, status.playing]);
+  }, [active, isProgressing]);
 
   const move = useCallback((offset: number) => {
-    const target = queue[activeIndex + offset];
-    if (target) setActiveKey(target.key);
-  }, [activeIndex, queue, setActiveKey]);
+    if (offset < 0) playlist.previous();
+    else playlist.next();
+  }, [playlist]);
+
+  useEffect(() => {
+    if (activeKey !== active.key) setActiveKey(active.key);
+  }, [active.key, activeKey, setActiveKey]);
 
   useEffect(() => {
     if (!active || playedKeyRef.current !== active.key) return;
-    const duration = status.duration || active.attachment.durationSec || 0;
-    if (duration > 0 && status.currentTime / duration >= 0.9) {
+    const totalDuration = duration || active.attachment.durationSec || 0;
+    if (totalDuration > 0 && currentTime / totalDuration >= 0.9) {
       void markVoiceListened(active.key);
     }
-  }, [active, status.currentTime, status.duration]);
+  }, [active, currentTime, duration]);
 
   useEffect(() => {
     if (
       !active ||
+      !hasCurrentPlaylistStatus ||
       !status.didJustFinish ||
       playedKeyRef.current !== active.key ||
       finishedKeyRef.current === active.key
     ) return;
     finishedKeyRef.current = active.key;
     void markVoiceListened(active.key);
-    const older = queue[activeIndex + 1];
-    if (older) setActiveKey(older.key);
-    else {
-      player.pause();
+    if (currentOffset >= playlistQueueRef.current.length - 1) {
+      setPlayRequested(false);
+      playlist.pause();
       setActiveKey(null);
     }
-  }, [active, activeIndex, player, queue, setActiveKey, status.didJustFinish]);
+  }, [active, currentOffset, hasCurrentPlaylistStatus, playlist, setActiveKey, status.didJustFinish]);
 
-  if (!active) return null;
-  const duration = status.duration || active.attachment.durationSec || 0;
+  const displayedDuration = duration || active.attachment.durationSec || 0;
   return (
     <View
       style={[
@@ -156,12 +222,12 @@ export function ChatVoicePlaybackBar() {
           paddingTop: isDesktopWeb ? 0 : insets.top,
         },
       ]}>
-      <Pressable accessibilityRole="button" accessibilityLabel="Более позднее голосовое" disabled={activeIndex <= 0} onPress={() => move(-1)} style={styles.iconButton}><Ionicons name="play-skip-back" size={18} color={activeIndex <= 0 ? colors.textMuted : colors.text} /></Pressable>
-      <Pressable accessibilityRole="button" accessibilityLabel={status.playing ? 'Пауза' : 'Воспроизвести'} onPress={() => (status.playing ? player.pause() : player.play())} style={[styles.playButton, { backgroundColor: colors.primary }]}><Ionicons name={status.playing ? 'pause' : 'play'} size={18} color="#FFFFFF" /></Pressable>
-      <Pressable accessibilityRole="button" accessibilityLabel="Более раннее голосовое" disabled={activeIndex >= queue.length - 1} onPress={() => move(1)} style={styles.iconButton}><Ionicons name="play-skip-forward" size={18} color={activeIndex >= queue.length - 1 ? colors.textMuted : colors.text} /></Pressable>
-      <View style={styles.copy}><Text numberOfLines={1} style={[styles.title, { color: colors.text }]}>Голосовое сообщение</Text><Text style={[styles.time, { color: colors.textMuted }]}>{formatTime(status.currentTime)} / {formatTime(duration)}</Text></View>
+      <Pressable accessibilityRole="button" accessibilityLabel="Более позднее голосовое" disabled={currentOffset <= 0} onPress={() => move(-1)} style={styles.iconButton}><Ionicons name="play-skip-back" size={18} color={currentOffset <= 0 ? colors.textMuted : colors.text} /></Pressable>
+      <Pressable accessibilityRole="button" accessibilityLabel={showsPause ? 'Пауза' : 'Воспроизвести'} onPress={() => { if (showsPause) { setPlayRequested(false); playlist.pause(); } else { setPlayRequested(true); playlist.play(); } }} style={[styles.playButton, { backgroundColor: colors.primary }]}><Ionicons name={showsPause ? 'pause' : 'play'} size={18} color="#FFFFFF" /></Pressable>
+      <Pressable accessibilityRole="button" accessibilityLabel="Более раннее голосовое" disabled={currentOffset >= playlistQueueRef.current.length - 1} onPress={() => move(1)} style={styles.iconButton}><Ionicons name="play-skip-forward" size={18} color={currentOffset >= playlistQueueRef.current.length - 1 ? colors.textMuted : colors.text} /></Pressable>
+      <View style={styles.copy}><Text numberOfLines={1} style={[styles.title, { color: colors.text }]}>Голосовое сообщение</Text><Text style={[styles.time, { color: colors.textMuted }]}>{formatTime(currentTime)} / {formatTime(displayedDuration)}</Text></View>
       <Pressable accessibilityRole="button" accessibilityLabel="Изменить скорость" onPress={() => { const next = (speedIndex + 1) % SPEEDS.length; setSpeedIndex(next); void saveVoicePlaybackSpeed(SPEEDS[next]); }} style={[styles.speed, { borderColor: colors.borderLight }]}><Text style={[styles.speedText, { color: colors.text }]}>{SPEEDS[speedIndex]}×</Text></Pressable>
-      <Pressable accessibilityRole="button" accessibilityLabel="Закрыть плеер" onPress={() => { player.pause(); setActiveKey(null); }} style={styles.iconButton}><Ionicons name="close" size={20} color={colors.textMuted} /></Pressable>
+      <Pressable accessibilityRole="button" accessibilityLabel="Закрыть плеер" onPress={() => { setPlayRequested(false); playlist.pause(); setActiveKey(null); }} style={styles.iconButton}><Ionicons name="close" size={20} color={colors.textMuted} /></Pressable>
     </View>
   );
 }

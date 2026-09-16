@@ -1,6 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import {
   RecordingPresets,
+  getRecordingPermissionsAsync,
   requestRecordingPermissionsAsync,
   setAudioModeAsync,
   useAudioPlayer,
@@ -131,6 +132,15 @@ export function ChatVoiceComposer({ conversationId, disabled, replyToId, showMic
     return () => clearInterval(id);
   }, [startedAt]);
 
+  // Configuring the audio session can take a noticeable native bridge round
+  // trip. It is independent of a particular message, so do it when the chat
+  // composer becomes available rather than after the user starts holding mic.
+  useEffect(() => {
+    void setAudioModeAsync({ playsInSilentMode: true, allowsRecording: true }).catch(
+      () => undefined,
+    );
+  }, []);
+
   useEffect(() => {
     if (phase !== 'holding') {
       lockGuideOffset.stopAnimation();
@@ -199,15 +209,18 @@ export function ChatVoiceComposer({ conversationId, disabled, replyToId, showMic
   const startRecording = useCallback(async (resuming = false) => {
     if (disabled || sending || (busyRef.current && !resuming)) return;
     try {
-      const permission = await requestRecordingPermissionsAsync();
+      // After the first approval, querying the current state is immediate and
+      // avoids a second permission request on every held recording.
+      const currentPermission = await getRecordingPermissionsAsync();
+      const permission = currentPermission.granted
+        ? currentPermission
+        : await requestRecordingPermissionsAsync();
       if (!pressingRef.current && phaseRef.current !== 'locked') return;
       if (!permission.granted) {
         toast.error('Нет доступа к микрофону. Разрешите его в настройках браузера или приложения.');
         reset();
         return;
       }
-      await setAudioModeAsync({ playsInSilentMode: true, allowsRecording: true });
-      if (!pressingRef.current && phaseRef.current !== 'locked') return;
       await recorder.prepareToRecordAsync();
       if (!pressingRef.current && phaseRef.current !== 'locked') return;
       const at = Date.now();
@@ -448,10 +461,17 @@ export function ChatVoiceComposer({ conversationId, disabled, replyToId, showMic
           event.nativeEvent.layout.width - CANCEL_SWIPE_HIT_DIAMETER,
         );
       }}>
-      {showIdle ? <View style={styles.idleSlot}>{idleChildren}</View> : null}
+      {/* Keep the real input mounted as a layout-sized skeleton while voice
+          controls are displayed. Removing it changes the web TextInput's
+          intrinsic height and makes the complete composer jump. */}
+      <View
+        pointerEvents={showIdle ? 'auto' : 'none'}
+        style={[styles.idleSlot, !showIdle ? styles.idleSlotReserved : null]}>
+        {idleChildren}
+      </View>
 
       {recording ? (
-        <View style={[styles.recordingRow, phase === 'holding' ? styles.recordingRowWithTrash : null]}>
+        <View style={[styles.recordingRow, styles.voiceOverlay, phase === 'holding' ? styles.recordingRowWithTrash : null]}>
           <View style={styles.recordingDot} />
           <Text style={[styles.timer, { color: colors.text }]}>{formatClock(elapsedMs)}</Text>
           {phase === 'locked' ? (
@@ -465,17 +485,19 @@ export function ChatVoiceComposer({ conversationId, disabled, replyToId, showMic
       ) : null}
 
       {phase === 'paused' ? (
-        <PausedVoiceBar
-          colors={colors}
-          peaks={peaks}
-          durationMs={previewDurationMs}
-          uris={previewUri ? [previewUri] : previewUris}
-          trimStart={trimStart}
-          trimEnd={trimEnd}
-          onTrimStart={setTrimStart}
-          onTrimEnd={setTrimEnd}
-          onTrash={() => void discard()}
-        />
+        <View style={styles.voiceOverlay}>
+          <PausedVoiceBar
+            colors={colors}
+            peaks={peaks}
+            durationMs={previewDurationMs}
+            uris={previewUri ? [previewUri] : previewUris}
+            trimStart={trimStart}
+            trimEnd={trimEnd}
+            onTrimStart={setTrimStart}
+            onTrimEnd={setTrimEnd}
+            onTrash={() => void discard()}
+          />
+        </View>
       ) : null}
 
       {showIdle && !showMic ? trailing : null}
@@ -519,10 +541,7 @@ export function ChatVoiceComposer({ conversationId, disabled, replyToId, showMic
             style={[
               styles.cancelSwipeTarget,
               {
-                backgroundColor:
-                  cancelSwipeProgress > 0.35 ? colors.destructive : VOICE_CONTROL_COLOR,
-                borderWidth: cancelSwipeProgress > 0.35 ? 0 : 1,
-                borderColor: VOICE_CONTROL_COLOR,
+                backgroundColor: colors.destructive,
               },
             ]}>
             <Ionicons
@@ -706,7 +725,7 @@ function PausedVoiceBar({
         accessibilityRole="button"
         accessibilityLabel="Удалить запись"
         onPress={onTrash}
-        style={[styles.iconPlain, { backgroundColor: VOICE_CONTROL_COLOR }]}>
+        style={[styles.iconPlain, { backgroundColor: colors.destructive }]}>
         <Ionicons name="trash-outline" size={20} color="#FFFFFF" />
       </Pressable>
       <View
@@ -726,7 +745,7 @@ function PausedVoiceBar({
                 style={[
                   styles.waveBar,
                   {
-                    height: 10 + value * 34,
+                    height: 6 + value * 24,
                     backgroundColor: kept ? 'rgba(255,255,255,0.92)' : 'rgba(255,255,255,0.28)',
                   },
                 ]}
@@ -789,6 +808,7 @@ const styles = StyleSheet.create({
   wrap: {
     flex: 1,
     minWidth: 0,
+    minHeight: 40,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
@@ -798,18 +818,31 @@ const styles = StyleSheet.create({
   idleSlot: {
     flex: 1,
     minWidth: 0,
+    minHeight: 40,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
   },
+  idleSlotReserved: {
+    opacity: 0,
+  },
   recordingRow: {
     flex: 1,
     minWidth: 0,
+    minHeight: 40,
     position: 'relative',
     flexDirection: 'row',
     alignItems: 'center',
     gap: Spacing.sm,
     paddingHorizontal: Spacing.sm,
+  },
+  voiceOverlay: {
+    position: 'absolute',
+    left: 0,
+    right: 46,
+    top: 0,
+    bottom: 0,
+    zIndex: 1,
   },
   // While a held recording exposes the delete target at the left edge, reserve
   // its entire touch area before the timer. Otherwise the target sits over the
@@ -840,6 +873,7 @@ const styles = StyleSheet.create({
   pausedRow: {
     flex: 1,
     minWidth: 0,
+    minHeight: 40,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
@@ -848,13 +882,17 @@ const styles = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: 18,
+    alignSelf: 'center',
     alignItems: 'center',
     justifyContent: 'center',
   },
   waveTrack: {
     flex: 1,
     minWidth: 0,
-    height: 56,
+    // Must match the normal input/button height. The trim controls can extend
+    // outside visually, but the composer itself must never grow or shrink
+    // when recording is paused or the preview starts playing.
+    height: 40,
     borderRadius: 14,
     overflow: 'visible',
     justifyContent: 'center',
@@ -884,8 +922,8 @@ const styles = StyleSheet.create({
   },
   trimHitArea: {
     position: 'absolute',
-    top: -10,
-    bottom: -10,
+    top: -8,
+    bottom: -8,
     width: 36,
     alignItems: 'center',
     justifyContent: 'center',
@@ -893,7 +931,7 @@ const styles = StyleSheet.create({
   },
   trimHandle: {
     width: 8,
-    height: 48,
+    height: 34,
     borderRadius: 4,
     backgroundColor: '#FFFFFF',
     borderWidth: 1,
@@ -901,7 +939,7 @@ const styles = StyleSheet.create({
   },
   previewPlay: {
     position: 'absolute',
-    top: 16,
+    top: 8,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
@@ -976,10 +1014,11 @@ const styles = StyleSheet.create({
   cancelSwipeTarget: {
     position: 'absolute',
     left: 1,
-    top: 1,
+    top: '50%',
     width: 40,
     height: 40,
     borderRadius: 20,
+    transform: [{ translateY: -20 }],
     alignItems: 'center',
     justifyContent: 'center',
     zIndex: 5,

@@ -126,6 +126,10 @@ export function ChatAudioPlayer({
   useEffect(() => {
     return subscribeVoiceProgress((next) => {
       if (next?.key !== playbackKey) {
+        // The global player emits progress for the active voice only. Ignore
+        // it in every untouched bubble instead of resetting dozens of waves
+        // and their animated overlays four times per second.
+        if (sampleRef.current === null) return;
         sampleRef.current = null;
         setLive(false);
         paintRatio(0, attachment.durationSec ?? 0);
