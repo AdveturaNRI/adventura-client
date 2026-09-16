@@ -98,12 +98,42 @@ export function diceRollPreviewText(payload: DiceRollPayload | null): string {
   return `🎲 ${payload.formula}`;
 }
 
-/** Notation for DiceStage: one entry per die so faces can be forced via @values. */
-export function payloadToForcedNotation(payload: DiceRollPayload): string[] {
-  return payload.groups.map((group) => {
-    const values = group.values.join(',');
-    return `${group.values.length}d${group.sides}@${values}`;
-  });
+/**
+ * Notation for chat (dice-box-threejs): forced faces via `@`.
+ * Пример: `2d6+1d20@3,5,14` — всем падают одни и те же грани.
+ */
+export function payloadToForcedNotation(payload: DiceRollPayload): string {
+  const parts = payload.groups
+    .filter((group) => group.sides > 0 && group.values.length > 0)
+    .map((group) => `${group.values.length}d${group.sides}`);
+  const values = payload.groups.flatMap((group) => group.values);
+  if (parts.length === 0) {
+    return '1d20';
+  }
+  if (values.length === 0) {
+    return parts.join('+');
+  }
+  return `${parts.join('+')}@${values.join(',')}`;
+}
+
+export function diceInputsToNotation(dice: DiceRollDieInput[]): string {
+  const parts = [...dice]
+    .filter((die) => die.qty > 0)
+    .sort((a, b) => a.sides - b.sides)
+    .map((die) => `${die.qty}d${die.sides}`);
+  return parts.join('+') || '1d20';
+}
+
+/** Notation without forced values (Babylon / free roll). */
+export function payloadToStageNotation(
+  payload: DiceRollPayload,
+): Array<{ qty: number; sides: number }> {
+  return payload.groups
+    .filter((group) => group.sides > 0 && group.values.length > 0)
+    .map((group) => ({
+      qty: group.values.length,
+      sides: group.sides,
+    }));
 }
 
 export function payloadToNotationParts(payload: DiceRollPayload): string[] {

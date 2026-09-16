@@ -20,8 +20,12 @@
     html.transparent, html.transparent body, html.transparent #dice-box {
       background: transparent !important;
       pointer-events: none !important;
+      color-scheme: normal;
     }
-    html.transparent #dice-box canvas { pointer-events: none !important; }
+    html.transparent #dice-box canvas {
+      pointer-events: none !important;
+      background: transparent !important;
+    }
     #hint {
       position: absolute;
       left: 16px;
@@ -86,14 +90,24 @@
             : [];
         rolls.forEach((v) => values.push(v));
         groups.push({
-          sides: Number(group.sides) || 0,
+          sides: Number(String(group.sides).replace(/^d/i, '')) || 0,
           values: rolls,
           sum: rolls.reduce((a, b) => a + b, 0),
         });
       });
       const label = Array.isArray(notation)
-        ? notation.join(' + ')
-        : String(notation || '');
+        ? notation
+            .map((part) =>
+              typeof part === 'string'
+                ? part
+                : part && typeof part === 'object'
+                  ? `${part.qty ?? 1}d${part.sides}`
+                  : String(part),
+            )
+            .join(' + ')
+        : typeof notation === 'object' && notation
+          ? `${notation.qty ?? 1}d${notation.sides}`
+          : String(notation || '');
       return {
         values,
         sum: values.reduce((a, b) => a + b, 0),

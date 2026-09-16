@@ -12,8 +12,17 @@ export type DiceRollOutcome = {
   groups: DiceRollGroup[];
 };
 
-/** Single `2d20` or several `['2d20','1d6']` — dice-box accepts both. */
-export type DiceNotation = string | string[];
+/** dice-box accepts strings, roll objects, or mixed arrays. */
+export type DiceRollNotationObject = {
+  qty?: number;
+  sides: number;
+  themeColor?: string;
+};
+
+export type DiceNotation =
+  | string
+  | DiceRollNotationObject
+  | Array<string | DiceRollNotationObject>;
 
 export type DiceStageHandle = {
   roll: (notation: DiceNotation) => Promise<DiceRollOutcome>;

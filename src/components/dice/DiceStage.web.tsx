@@ -121,8 +121,10 @@ export const DiceStage = forwardRef<DiceStageHandle, DiceStageProps>(function Di
     return () => window.removeEventListener('message', onWindowMessage);
   }, []);
 
-  // Stable src: accent goes via postMessage, not URL — remounting the iframe OOMs the tab.
-  const src = `/dice-stage.html?transparent=${transparent ? '1' : '0'}`;
+  // Chat overlay uses threejs fork — supports forced `@values` for synced faces.
+  const src = transparent
+    ? `/chat-dice-stage.html?transparent=1`
+    : `/dice-stage.html?transparent=0`;
 
   useEffect(() => {
     setReady(false);
@@ -164,6 +166,8 @@ export const DiceStage = forwardRef<DiceStageHandle, DiceStageProps>(function Di
         border: '0',
         display: 'block',
         background: shellBg,
+        backgroundColor: shellBg,
+        colorScheme: 'normal',
         pointerEvents: 'none',
       },
       sandbox: 'allow-scripts allow-same-origin',

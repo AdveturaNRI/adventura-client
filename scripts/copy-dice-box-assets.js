@@ -74,3 +74,19 @@ for (const name of [
 }
 
 console.log('[copy-dice-box-assets] → public/dice-box + public/vendor/dice-box');
+
+// Chat overlay: threejs fork with forced `@values` so everyone sees the same faces.
+const threePkg = path.join(root, 'node_modules', '@3d-dice', 'dice-box-threejs');
+const threeDist = path.join(threePkg, 'dist', 'dice-box-threejs.es.js');
+const threeVendor = path.join(root, 'public', 'vendor', 'dice-box-threejs');
+const threeAssets = path.join(root, 'public', 'dice-box-threejs');
+if (fs.existsSync(threeDist)) {
+  fs.mkdirSync(threeVendor, { recursive: true });
+  fs.copyFileSync(threeDist, path.join(threeVendor, 'dice-box-threejs.es.js'));
+  fs.rmSync(threeAssets, { recursive: true, force: true });
+  const publicSrc = path.join(threePkg, 'public');
+  if (fs.existsSync(publicSrc)) {
+    copyRecursive(publicSrc, threeAssets);
+  }
+  console.log('[copy-dice-box-assets] → public/dice-box-threejs + vendor');
+}

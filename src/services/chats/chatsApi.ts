@@ -301,6 +301,8 @@ export async function sendChatDiceRoll(
     hidden?: boolean;
     /** Hex `#RRGGBB` — цвет кубов у отправителя. */
     color?: string;
+    /** Раскладка с 3D-броска на клиенте. */
+    groups?: { sides: number; values: number[] }[];
   },
 ) {
   return apiRequest<ChatMessage>(`/chats/${conversationId}/dice-rolls`, {
@@ -310,6 +312,7 @@ export async function sendChatDiceRoll(
       modifier: options.modifier ?? 0,
       hidden: Boolean(options.hidden),
       ...(options.color ? { color: options.color } : {}),
+      ...(options.groups && options.groups.length > 0 ? { groups: options.groups } : {}),
     },
   });
 }

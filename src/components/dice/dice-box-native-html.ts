@@ -44,9 +44,11 @@ export function buildDiceBoxNativeHtml(options?: { accent?: string; transparent?
       (results||[]).forEach((group)=>{
         const rolls = Array.isArray(group.rolls) ? group.rolls.map(d=>d.value) : (typeof group.value==='number'?[group.value]:[]);
         rolls.forEach(v=>values.push(v));
-        groups.push({ sides:Number(group.sides)||0, values:rolls, sum:rolls.reduce((a,b)=>a+b,0) });
+        groups.push({ sides: Number(String(group.sides).replace(/^d/i,''))||0, values:rolls, sum:rolls.reduce((a,b)=>a+b,0) });
       });
-      const label = Array.isArray(notation) ? notation.join(' + ') : String(notation||'');
+      const label = Array.isArray(notation)
+        ? notation.map((part) => typeof part === 'string' ? part : (part && typeof part === 'object' ? `${part.qty ?? 1}d${part.sides}` : String(part))).join(' + ')
+        : (typeof notation === 'object' && notation ? `${notation.qty ?? 1}d${notation.sides}` : String(notation||''));
       return { values, sum:values.reduce((a,b)=>a+b,0), notation:label, groups };
     }
     function normalizeNotation(n){ return Array.isArray(n) ? n.filter(Boolean) : (n||'1d20'); }

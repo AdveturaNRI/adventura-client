@@ -21,8 +21,8 @@ import type {
   NativeSyntheticEvent,
   TextInputKeyPressEventData,
 } from 'react-native';
-import { FlatList, Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Svg, { Path } from 'react-native-svg';
+import { FlatList } from 'react-native-gesture-handler';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { MobileBackButton } from '@/components/navigation/MobileBackButton';
@@ -33,7 +33,12 @@ import { ScreenTransition } from '@/components/navigation/ScreenTransition';
 import { BlockUserDialog } from '@/components/chats/BlockUserDialog';
 import { ChatAlbumGrid } from '@/components/chats/ChatAlbumGrid';
 import { ChatDiceBubble } from '@/components/chats/ChatDiceBubble';
-import { ChatDiceOverlay, type ChatDiceOverlayRequest } from '@/components/chats/ChatDiceOverlay';
+import {
+  ChatDiceOverlay,
+  type ChatDiceLocalRollRequest,
+  type ChatDiceOverlayRequest,
+} from '@/components/chats/ChatDiceOverlay';
+import type { DiceRollOutcome } from '@/components/dice/dice-stage.types';
 import { ChatDicePopover } from '@/components/chats/ChatDicePopover';
 import { ChatEmojiPanel } from '@/components/chats/ChatEmojiPanel';
 import { ChatForwardPicker } from '@/components/chats/ChatForwardPicker';
@@ -475,11 +480,13 @@ function createStyles(colors: ThemeColors, bottomPad: number, isDark: boolean) {
   return StyleSheet.create({
     root: {
       flex: 1,
+      minHeight: 0,
       backgroundColor: colors.background,
       position: 'relative',
     },
     dropZone: {
       flex: 1,
+      minHeight: 0,
       position: 'relative',
     },
     header: {
@@ -799,6 +806,14 @@ function createStyles(colors: ThemeColors, bottomPad: number, isDark: boolean) {
     },
     list: {
       flex: 1,
+      minHeight: 0,
+      ...(Platform.OS === 'web'
+        ? ({
+            overflow: 'auto',
+            WebkitOverflowScrolling: 'touch',
+            touchAction: 'pan-y',
+          } as object)
+        : null),
     },
     listContent: {
       paddingHorizontal: Spacing.md,
@@ -1174,7 +1189,6 @@ export default function ChatThreadScreen() {
     useRealtime();
   const bottomPad = hasDesktopSidebar ? Spacing.md : Math.max(insets.bottom, Spacing.sm);
   const styles = useThemedStyles((themeColors) => createStyles(themeColors, bottomPad, isDark));
-  const nativeScrollGesture = useMemo(() => Gesture.Native(), []);
 
   const [conversation, setConversation] = useState<ConversationListItem | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -1218,6 +1232,14 @@ export default function ChatThreadScreen() {
   const [diceOverlayRequest, setDiceOverlayRequest] = useState<ChatDiceOverlayRequest | null>(
     null,
   );
+  const [localDiceRoll, setLocalDiceRoll] = useState<ChatDiceLocalRollRequest | null>(null);
+  const localDiceRollTokenRef = useRef(0);
+  const localDiceRollResolveRef = useRef<((outcome: DiceRollOutcome | null) => void) | null>(
+    null,
+  );
+  const skipDiceAnimIdsRef = useRef(new Set<string>());
+  /** Пока свой бросок в полёте — сокет часто приходит раньше HTTP и иначе крутит вторую анимацию. */
+  const suppressOwnDiceAnimRef = useRef(false);
   const listRef = useRef<FlatList<ChatTimelineItem>>(null);
   const timelineRef = useRef<ChatTimelineItem[]>([]);
   const highlightTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -1235,6 +1257,7 @@ export default function ChatThreadScreen() {
   const composerInputRef = useRef<TextInput>(null);
   const selectionRef = useRef({ start: 0, end: 0 });
   const heldDiceMessagesRef = useRef(new Map<string, ChatMessage>());
+  const [heldDiceIds, setHeldDiceIds] = useState<string[]>([]);
   const diceAnimQueueRef = useRef<ChatDiceOverlayRequest[]>([]);
   const diceAnimationsEnabledRef = useRef(getDiceAnimationsEnabledSync());
   const myId = user?.id;
@@ -1284,22 +1307,37 @@ export default function ChatThreadScreen() {
     setDiceOverlayRequest(next);
   }, []);
 
-  const revealHeldDiceMessage = useCallback(
-    (messageId: string) => {
-      const held = heldDiceMessagesRef.current.get(messageId);
-      if (held) {
-        heldDiceMessagesRef.current.delete(messageId);
-        appendMessage(held);
-        scrollToBottom();
-      }
-      startNextDiceAnimation();
-    },
-    [appendMessage, scrollToBottom, startNextDiceAnimation],
-  );
+  const revealHeldDiceMessage = useCallback((messageId: string) => {
+    const held = heldDiceMessagesRef.current.get(messageId);
+    if (held) {
+      heldDiceMessagesRef.current.delete(messageId);
+      setHeldDiceIds((prev) => prev.filter((id) => id !== messageId));
+      appendMessage(held);
+      scrollToBottom();
+      return;
+    }
+    setHeldDiceIds((prev) => prev.filter((id) => id !== messageId));
+  }, [appendMessage, scrollToBottom]);
+
+  const advanceDiceAnimationQueue = useCallback(() => {
+    startNextDiceAnimation();
+  }, [startNextDiceAnimation]);
 
   const ingestIncomingMessage = useCallback(
     (message: ChatMessage) => {
       if (message.kind !== 'dice_roll') {
+        appendMessage(message);
+        return;
+      }
+
+      const skipAnim =
+        skipDiceAnimIdsRef.current.has(message.id) ||
+        (Boolean(myId) &&
+          message.senderId === myId &&
+          suppressOwnDiceAnimRef.current);
+
+      if (skipAnim) {
+        skipDiceAnimIdsRef.current.delete(message.id);
         appendMessage(message);
         return;
       }
@@ -1323,6 +1361,7 @@ export default function ChatThreadScreen() {
       }
 
       heldDiceMessagesRef.current.set(message.id, message);
+      setHeldDiceIds((prev) => (prev.includes(message.id) ? prev : [...prev, message.id]));
       const request: ChatDiceOverlayRequest = {
         messageId: message.id,
         payload,
@@ -1342,7 +1381,7 @@ export default function ChatThreadScreen() {
         return request;
       });
     },
-    [appendMessage],
+    [appendMessage, myId],
   );
 
   const clearPendingAttachments = useCallback(() => {
@@ -1500,6 +1539,10 @@ export default function ChatThreadScreen() {
           byId.set(item.id, item);
         }
       }
+      // Сообщения в hold для анимации кубов не показываем до onReveal.
+      for (const heldId of heldDiceMessagesRef.current.keys()) {
+        byId.delete(heldId);
+      }
       return [...byId.values()].sort((left, right) =>
         left.createdAt.localeCompare(right.createdAt),
       );
@@ -1562,6 +1605,15 @@ export default function ChatThreadScreen() {
     void bootstrap();
     return () => {
       cancelled = true;
+      heldDiceMessagesRef.current.clear();
+      diceAnimQueueRef.current = [];
+      setHeldDiceIds([]);
+      setDiceOverlayRequest(null);
+      setLocalDiceRoll(null);
+      suppressOwnDiceAnimRef.current = false;
+      const resolveLocal = localDiceRollResolveRef.current;
+      localDiceRollResolveRef.current = null;
+      resolveLocal?.(null);
     };
   }, [conversationId, loadConversation, loadMessages, router]);
 
@@ -1891,6 +1943,13 @@ export default function ChatThreadScreen() {
     }
   }, [clearPendingAttachments, conversationId, replyTo?.id, requestAfterFirstMessage, scrollToBottom]);
 
+  const handleLocalDiceRollComplete = useCallback((outcome: DiceRollOutcome | null) => {
+    const resolve = localDiceRollResolveRef.current;
+    localDiceRollResolveRef.current = null;
+    setLocalDiceRoll(null);
+    resolve?.(outcome);
+  }, []);
+
   const handleDiceRoll = useCallback(
     async (input: {
       dice: { sides: number; qty: number }[];
@@ -1898,13 +1957,43 @@ export default function ChatThreadScreen() {
       hidden: boolean;
       color: string;
     }) => {
-      if (!conversationId || diceRollBusy || conversation?.blockedMe) {
+      if (!conversationId || diceRollBusy || conversation?.blockedMe || localDiceRoll) {
         return;
       }
       setDiceRollBusy(true);
+      suppressOwnDiceAnimRef.current = true;
+      // На всякий случай не крутить чужую очередь поверх своего броска.
+      diceAnimQueueRef.current = [];
+      setDiceOverlayRequest(null);
+      setDicePopoverOpen(false);
+      setEmojiPanelOpen(false);
+      emojiPanelOpenRef.current = false;
+
+      const token = ++localDiceRollTokenRef.current;
+      const outcome = await new Promise<DiceRollOutcome | null>((resolve) => {
+        localDiceRollResolveRef.current = resolve;
+        setLocalDiceRoll({
+          token,
+          dice: input.dice,
+          modifier: input.modifier,
+          color: input.color,
+          senderNickname: user?.nickname ?? 'Вы',
+        });
+      });
+
       try {
-        let message = await sendChatDiceRoll(conversationId, input);
-        // Если бэкенд ещё не сохраняет color — всё равно анимируем выбранный цвет у себя.
+        if (!outcome || outcome.groups.length === 0) {
+          toast.error('Не удалось бросить кости');
+          return;
+        }
+
+        let message = await sendChatDiceRoll(conversationId, {
+          ...input,
+          groups: outcome.groups.map((group) => ({
+            sides: group.sides,
+            values: group.values,
+          })),
+        });
         const rolled = parseDiceRollPayload(message.body);
         if (rolled && !rolled.color && input.color) {
           message = {
@@ -1912,20 +2001,26 @@ export default function ChatThreadScreen() {
             body: JSON.stringify({ ...rolled, color: input.color }),
           };
         }
-        setDicePopoverOpen(false);
-        setEmojiPanelOpen(false);
-        emojiPanelOpenRef.current = false;
-        ingestIncomingMessage(message);
-        if (!heldDiceMessagesRef.current.has(message.id)) {
-          scrollToBottom();
-        }
+        // Уже показали анимацию со своими цифрами — в ленту без повтора.
+        skipDiceAnimIdsRef.current.add(message.id);
+        appendMessage(message);
+        scrollToBottom();
       } catch (error) {
         toast.error(localizeErrorMessage(error, 'Не удалось бросить кости'));
       } finally {
+        suppressOwnDiceAnimRef.current = false;
         setDiceRollBusy(false);
       }
     },
-    [conversation?.blockedMe, conversationId, diceRollBusy, ingestIncomingMessage, scrollToBottom],
+    [
+      appendMessage,
+      conversation?.blockedMe,
+      conversationId,
+      diceRollBusy,
+      localDiceRoll,
+      scrollToBottom,
+      user?.nickname,
+    ],
   );
 
   const toReplyPreview = useCallback((message: ChatMessage): ChatReplyPreviewData => {
@@ -2269,10 +2364,13 @@ export default function ChatThreadScreen() {
       : insets.top + Spacing.sm;
   const peerReadMs =
     !isGroup && peerLastReadAt ? new Date(peerLastReadAt).getTime() : 0;
-  const renderedMessages = useMemo(
-    () => buildChatTimeline(messages, { isGroup, myId: myId ?? undefined }),
-    [isGroup, messages, myId],
-  );
+  const renderedMessages = useMemo(() => {
+    const visible =
+      heldDiceIds.length === 0
+        ? messages
+        : messages.filter((message) => !heldDiceIds.includes(message.id));
+    return buildChatTimeline(visible, { isGroup, myId: myId ?? undefined });
+  }, [heldDiceIds, isGroup, messages, myId]);
   timelineRef.current = renderedMessages;
   // Keep exactly the visual order of messages in the chat. Starting any voice
   // therefore continues with the following voice below it and stops at the
@@ -2537,7 +2635,6 @@ export default function ChatThreadScreen() {
             <ActivityIndicator color={colors.primary} />
           </View>
         ) : (
-          <GestureDetector gesture={nativeScrollGesture}>
           <FlatList
             ref={listRef}
             style={styles.list}
@@ -2714,7 +2811,6 @@ export default function ChatThreadScreen() {
                 <ChatMessagePressable
                   selectionMode={selectionMode}
                   onOpenActions={() => openMessageActions(item)}
-                  nativeScrollGesture={nativeScrollGesture}
                   style={[styles.bubbleRow, mine && styles.bubbleRowMine]}>
                   {selectionMode ? (
                     <View style={styles.selectMark}>
@@ -2922,7 +3018,6 @@ export default function ChatThreadScreen() {
               );
             }}
           />
-          </GestureDetector>
         )}
 
         <ChatImageLightbox
@@ -3311,9 +3406,12 @@ export default function ChatThreadScreen() {
         />
 
         <ChatDiceOverlay
-          request={diceOverlayRequest}
-          warm={dicePopoverOpen || diceRollBusy}
-          onFinished={revealHeldDiceMessage}
+          request={localDiceRoll ? null : diceOverlayRequest}
+          localRoll={localDiceRoll}
+          onLocalRollComplete={handleLocalDiceRollComplete}
+          warm={dicePopoverOpen || diceRollBusy || Boolean(localDiceRoll)}
+          onReveal={revealHeldDiceMessage}
+          onAdvance={advanceDiceAnimationQueue}
         />
       </ScreenTransition>
   );

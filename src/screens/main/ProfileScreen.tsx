@@ -1,6 +1,6 @@
 import { useCallback, useMemo } from 'react';
 import { useFocusEffect, useRouter } from 'expo-router';
-import { Pressable, ScrollView, Text, View } from 'react-native';
+import { Linking, Pressable, ScrollView, Text, View } from 'react-native';
 
 import { useIsDesktopSidebarVisible, useIsDesktopWeb } from '@/components/navigation/DesktopThemeToggle';
 import { MobileScreenHeader } from '@/components/navigation/MobileScreenHeader';
@@ -25,7 +25,11 @@ function getProfileTagline(isGuest: boolean, email: string) {
   return email;
 }
 
-function handleMenuPress(key: string, router: ReturnType<typeof useRouter>) {
+function handleMenuPress(key: string, router: ReturnType<typeof useRouter>, externalUrl?: string) {
+  if (externalUrl) {
+    Linking.openURL(externalUrl);
+    return;
+  }
   switch (key) {
     case 'notifications':
       router.push('/notifications');
@@ -129,7 +133,7 @@ export default function ProfileScreen() {
                   }
                   iconAlert={item.key === 'settings' && showSettingsAlert}
                   variant={item.variant}
-                  onPress={() => handleMenuPress(item.key, router)}
+                  onPress={() => handleMenuPress(item.key, router, item.externalUrl)}
                 />
               ))}
             </Menu>

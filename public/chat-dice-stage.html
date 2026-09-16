@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+  <style>
+    html, body, #dice-box {
+      margin: 0;
+      width: 100%;
+      height: 100%;
+      background: transparent;
+      overflow: hidden;
+      pointer-events: none;
+    }
+    #dice-box { position: relative; }
+    #dice-box canvas {
+      width: 100% !important;
+      height: 100% !important;
+      display: block;
+      pointer-events: none;
+      background: transparent !important;
+    }
+  </style>
+</head>
+<body>
+  <div id="dice-box"></div>
+  <script type="module">
+    import DiceBox from '/vendor/dice-box-threejs/dice-box-threejs.es.js';
+
+    function post(msg) {
+      const payload = JSON.stringify(msg);
+      if (window.parent && window.parent !== window) {
+        window.parent.postMessage(payload, '*');
+      }
+      if (window.ReactNativeWebView?.postMessage) {
+        window.ReactNativeWebView.postMessage(payload);
+      }
+    }
+
+    function normalizeAccent(hex) {
+      const m = String(hex || '').trim().match(/^#?([0-9A-Fa-f]{6})$/);
+      return m ? `#${m[1].toUpperCase()}` : '#157AFE';
+    }
+
+    function buildColorSet(accentHex) {
+      const bg = normalizeAccent(accentHex);
+      return {
+        name: `adventura-${bg.slice(1)}`,
+        foreground: '#FFFFFF',
+        background: bg,
+        outline: '#0B1220',
+        texture: 'none',
+        material: 'glass',
+      };
+    }
+
+    function flattenThreejs(results, notation) {
+      const groups = [];
+      const values = [];
+      const sets = results?.sets || [];
+      for (const set of sets) {
+        const rolls = (set.rolls || []).map((die) => {
+          const v = typeof die.value === 'number' ? die.value : Number(die.value);
+          return Number.isFinite(v) ? v : 0;
+        });
+        rolls.forEach((v) => values.push(v));
+        const sides =
+          Number(set.sides) ||
+          Number(String(set.type || '').replace(/^d/i, '')) ||
+          0;
+        groups.push({
+          sides,
+          values: rolls,
+          sum: rolls.reduce((a, b) => a + b, 0),
+        });
+      }
+      const label = Array.isArray(notation)
+        ? notation.join(' + ')
+        : String(notation || results?.notation || '');
+      return {
+        values,
+        sum: values.reduce((a, b) => a + b, 0),
+        notation: label,
+        groups,
+      };
+    }
+
+    function normalizeNotation(notation) {
+      if (Array.isArray(notation)) {
+        // threejs: одна строка с @ по всем кубам слева направо
+        return notation.filter(Boolean).join('+');
+      }
+      if (notation && typeof notation === 'object') {
+        const qty = notation.qty ?? 1;
+        const sides = notation.sides;
+        const forced = Array.isArray(notation.values)
+          ? `@${notation.values.join(',')}`
+          : '';
+        return `${qty}d${sides}${forced}`;
+      }
+      return notation || '1d20';
+    }
+
+    let currentAccent = '#157AFE';
+    let ready = false;
+    let generation = 0;
+    let box = null;
+
+    try {
+      box = new DiceBox('#dice-box', {
+        assetPath: '/dice-box-threejs/',
+        sounds: false,
+        shadows: false,
+        theme_surface: 'green-felt',
+        theme_colorset: 'white',
+        theme_material: 'glass',
+        strength: 1,
+        light_intensity: 1.1,
+        // threejs ждёт hex-строки (#RRGGBB), не 0xRRGGBB — иначе куб чёрный.
+        theme_customColorset: buildColorSet(currentAccent),
+      });
+      await box.initialize();
+      ready = true;
+      post({ type: 'ready' });
+    } catch (err) {
+      console.error(err);
+      post({ type: 'error', message: String(err && err.message || err) });
+    }
+
+    async function applyAccent(next) {
+      currentAccent = normalizeAccent(next || currentAccent);
+      if (box?.updateConfig) {
+        await box.updateConfig({
+          theme_customColorset: buildColorSet(currentAccent),
+        });
+      }
+      return currentAccent;
+    }
+
+    async function runRoll(notation, themeColor) {
+      const token = ++generation;
+      await applyAccent(themeColor);
+      try {
+        // Warm-mount в 1×1 — перед броском подгоняем размер под оверлей.
+        box.resizeWorld?.();
+        const normalized = normalizeNotation(notation);
+        const results = await box.roll(normalized);
+        if (token === generation) {
+          post({ type: 'done', outcome: flattenThreejs(results, normalized) });
+        }
+      } catch (err) {
+        if (token === generation) {
+          post({ type: 'error', message: String(err && err.message || err) });
+        }
+      }
+    }
+
+    async function onMessage(raw) {
+      try {
+        const data = typeof raw === 'string' ? JSON.parse(raw) : raw;
+        if (!data || typeof data !== 'object' || !ready || !box) return;
+
+        if (data.type === 'setAccent') {
+          await applyAccent(data.themeColor);
+          return;
+        }
+
+        if (data.type === 'preview') {
+          // В чате превью не используем — только бросок.
+          return;
+        }
+
+        if (data.type === 'roll') {
+          await runRoll(data.notation ?? '1d20', data.themeColor);
+        }
+
+        if (data.type === 'clear') {
+          generation += 1;
+          box.clearDice();
+        }
+      } catch (err) {
+        post({ type: 'error', message: String(err && err.message || err) });
+      }
+    }
+
+    window.addEventListener('message', (e) => onMessage(e.data));
+  </script>
+</body>
+</html>
