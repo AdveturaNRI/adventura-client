@@ -29,6 +29,7 @@ import {
 import { localizeErrorMessage } from '@/utils/localizeError';
 import { ensureUploadLimits } from '@/utils/upload-limits';
 import { markOfferPushAfterRegister } from '@/services/push/pushAttention';
+import { trackUserSessionStarted } from '@/services/analytics/analytics';
 
 type AuthContextValue = {
   user: AuthUser | null;
@@ -94,6 +95,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setToken(accessToken);
         setUser(currentUser);
         await saveAuthSession(accessToken, refreshToken, currentUser);
+        trackUserSessionStarted('restore');
       } catch {
         await clearAuthSession();
         if (!isMounted) return;
@@ -123,6 +125,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       );
       setToken(response.accessToken);
       setUser(response.user);
+      trackUserSessionStarted('password');
       toast.success('Добро пожаловать!');
       return true;
     } catch (error) {
@@ -145,6 +148,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setUser(response.user);
         setRedirectToQuestionnaire(true);
         void markOfferPushAfterRegister();
+        trackUserSessionStarted('register');
         toast.success('Аккаунт создан');
         return true;
       } catch (error) {
@@ -167,6 +171,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setToken(response.accessToken);
       setUser(response.user);
       setRedirectToQuestionnaire(true);
+      trackUserSessionStarted('guest');
       toast.success(`Добро пожаловать, ${response.user.nickname}!`);
       return true;
     } catch (error) {

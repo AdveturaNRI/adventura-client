@@ -1,5 +1,5 @@
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   ScrollView,
@@ -25,6 +25,7 @@ import {
   type WandererCardItem,
 } from '@/services/profile/wanderersApi';
 import { localizeErrorMessage } from '@/utils/localizeError';
+import { trackEntityTransition } from '@/services/analytics/analytics';
 import { wandererCardToUserCardProps } from '@/utils/wanderer-card';
 import { QUESTIONNAIRE_ENTRY } from '@/screens/questionnaire/questionnaire.config';
 
@@ -153,6 +154,12 @@ export default function UserProfileScreen() {
       void loadCard();
     }, [loadCard]),
   );
+
+  useEffect(() => {
+    if (item?.id && item.id !== user?.id) {
+      trackEntityTransition('player', item.id);
+    }
+  }, [item?.id, user?.id]);
 
   const handleChat = useCallback(async () => {
     if (!item || isBusy) {

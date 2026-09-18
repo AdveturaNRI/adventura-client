@@ -26,6 +26,7 @@ export type UpdateProfilePayload = {
   systems?: string[];
   readyToLearnNew?: boolean;
   openToAnySystem?: boolean;
+  prefersFreeOnly?: boolean;
   questionnaireStep?: number;
   isPublic?: boolean;
 };
