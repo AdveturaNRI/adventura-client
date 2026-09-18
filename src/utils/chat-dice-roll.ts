@@ -6,6 +6,9 @@ export type DiceRollGroupPayload = {
   sum: number;
 };
 
+/** Обычный бросок / преимущество / помеха (2d20, берём лучший или худший). */
+export type DiceRollMode = 'normal' | 'advantage' | 'disadvantage';
+
 export type DiceRollPayload = {
   v: typeof DICE_ROLL_PAYLOAD_VERSION;
   formula: string;
@@ -17,6 +20,7 @@ export type DiceRollPayload = {
   redacted?: boolean;
   /** Hex `#RRGGBB` цвета кубов отправителя. */
   color?: string;
+  mode?: DiceRollMode;
 };
 
 export type DiceRollDieInput = {
@@ -30,7 +34,31 @@ export type ChatDieSides = (typeof CHAT_DIE_SIDES)[number];
 export const CHAT_MAX_PER_DIE = 8;
 export const CHAT_MAX_TOTAL_DICE = 12;
 
-export function formatDiceFormula(dice: DiceRollDieInput[], modifier = 0) {
+export const DICE_ADVANTAGE_DICE: DiceRollDieInput[] = [{ sides: 20, qty: 2 }];
+
+export function diceRollModeLabel(mode: DiceRollMode | null | undefined): string | null {
+  if (mode === 'advantage') {
+    return 'Бросок с преимуществом';
+  }
+  if (mode === 'disadvantage') {
+    return 'Бросок с помехой';
+  }
+  return null;
+}
+
+export function formatDiceFormula(
+  dice: DiceRollDieInput[],
+  modifier = 0,
+  mode: DiceRollMode = 'normal',
+) {
+  if (mode === 'advantage' || mode === 'disadvantage') {
+    const base = '1d20';
+    if (modifier === 0) {
+      return base;
+    }
+    return modifier > 0 ? `${base} + ${modifier}` : `${base} − ${Math.abs(modifier)}`;
+  }
+
   const parts = [...dice]
     .filter((die) => die.qty > 0)
     .sort((a, b) => a.sides - b.sides)
@@ -45,6 +73,11 @@ export function formatDiceFormula(dice: DiceRollDieInput[], modifier = 0) {
   return modifier > 0 ? `${base} + ${modifier}` : `${base} − ${Math.abs(modifier)}`;
 }
 
+/** Собрать все значения d20 из групп (dice-box иногда отдаёт 1d20+1d20). */
+export function collectD20Values(groups: { sides: number; values: number[] }[]): number[] {
+  return groups.filter((g) => g.sides === 20).flatMap((g) => g.values);
+}
+
 export function poolToDiceInputs(pool: Partial<Record<ChatDieSides, number>>): DiceRollDieInput[] {
   return CHAT_DIE_SIDES.filter((sides) => (pool[sides] ?? 0) > 0).map((sides) => ({
     sides,
@@ -54,6 +87,13 @@ export function poolToDiceInputs(pool: Partial<Record<ChatDieSides, number>>): D
 
 export function poolNotationParts(pool: Partial<Record<ChatDieSides, number>>): string[] {
   return poolToDiceInputs(pool).map((die) => `${die.qty}d${die.sides}`);
+}
+
+function parseDiceRollMode(value: unknown): DiceRollMode | undefined {
+  if (value === 'advantage' || value === 'disadvantage') {
+    return value;
+  }
+  return undefined;
 }
 
 export function parseDiceRollPayload(body: string | null | undefined): DiceRollPayload | null {
@@ -69,6 +109,7 @@ export function parseDiceRollPayload(body: string | null | undefined): DiceRollP
       typeof parsed.color === 'string' && /^#[0-9A-Fa-f]{6}$/.test(parsed.color.trim())
         ? `#${parsed.color.trim().slice(1).toUpperCase()}`
         : undefined;
+    const mode = parseDiceRollMode(parsed.mode);
     return {
       v: DICE_ROLL_PAYLOAD_VERSION,
       formula: parsed.formula,
@@ -79,6 +120,7 @@ export function parseDiceRollPayload(body: string | null | undefined): DiceRollP
       hidden: Boolean(parsed.hidden),
       redacted: Boolean(parsed.redacted),
       ...(color ? { color } : {}),
+      ...(mode ? { mode } : {}),
     };
   } catch {
     return null;
@@ -98,14 +140,216 @@ export function diceRollPreviewText(payload: DiceRollPayload | null): string {
   return `🎲 ${payload.formula}`;
 }
 
-/** Notation for DiceStage: one entry per die so faces can be forced via @values. */
-export function payloadToForcedNotation(payload: DiceRollPayload): string[] {
-  return payload.groups.map((group) => {
-    const values = group.values.join(',');
-    return `${group.values.length}d${group.sides}@${values}`;
-  });
+/**
+ * Notation for chat (dice-box-threejs): forced faces via `@`.
+ * Пример: `2d6+1d20@3,5,14` — всем падают одни и те же грани.
+ */
+export function payloadToForcedNotation(payload: DiceRollPayload): string {
+  const parts = payload.groups
+    .filter((group) => group.sides > 0 && group.values.length > 0)
+    .map((group) => `${group.values.length}d${group.sides}`);
+  const values = payload.groups.flatMap((group) => group.values);
+  if (parts.length === 0) {
+    return '1d20';
+  }
+  if (values.length === 0) {
+    return parts.join('+');
+  }
+  return `${parts.join('+')}@${values.join(',')}`;
+}
+
+export function diceInputsToNotation(dice: DiceRollDieInput[]): string {
+  const parts = [...dice]
+    .filter((die) => die.qty > 0)
+    .sort((a, b) => a.sides - b.sides)
+    .map((die) => `${die.qty}d${die.sides}`);
+  return parts.join('+') || '1d20';
+}
+
+/** Notation without forced values (Babylon / free roll). */
+export function payloadToStageNotation(
+  payload: DiceRollPayload,
+): Array<{ qty: number; sides: number }> {
+  return payload.groups
+    .filter((group) => group.sides > 0 && group.values.length > 0)
+    .map((group) => ({
+      qty: group.values.length,
+      sides: group.sides,
+    }));
 }
 
 export function payloadToNotationParts(payload: DiceRollPayload): string[] {
   return payload.groups.map((group) => `${group.values.length}d${group.sides}`);
+}
+
+/** Какое значение из 2d20 учитывается при преимуществе/помехе. */
+export function keptDiceValue(
+  values: number[],
+  mode: DiceRollMode | null | undefined,
+): number | null {
+  if (mode !== 'advantage' && mode !== 'disadvantage') {
+    return null;
+  }
+  if (values.length < 2) {
+    return null;
+  }
+  return mode === 'advantage' ? Math.max(...values) : Math.min(...values);
+}
+
+/**
+ * После 3D-броска: при преимуществе/помехе в итоге один куб (лучший/худший),
+ * обе грани остаются в groups/values для анимации и пузыря.
+ */
+export function applyDiceKeepMode<
+  T extends {
+    values: number[];
+    groups: { sides: number; values: number[]; sum: number }[];
+    sum: number;
+    notation?: string;
+  },
+>(outcome: T, mode: DiceRollMode, modifier = 0): T {
+  if (mode !== 'advantage' && mode !== 'disadvantage') {
+    const diceSum = outcome.values.reduce((a, b) => a + b, 0);
+    return {
+      ...outcome,
+      sum: diceSum + modifier,
+      notation: formatDiceFormula(
+        outcome.groups.map((g) => ({ sides: g.sides, qty: g.values.length })),
+        modifier,
+        mode,
+      ),
+    };
+  }
+
+  const d20Values = collectD20Values(outcome.groups);
+  if (d20Values.length < 2) {
+    const diceSum = outcome.values.reduce((a, b) => a + b, 0);
+    return {
+      ...outcome,
+      sum: diceSum + modifier,
+      notation: formatDiceFormula(
+        outcome.groups.map((g) => ({ sides: g.sides, qty: g.values.length })),
+        modifier,
+        'normal',
+      ),
+    };
+  }
+
+  const kept = mode === 'advantage' ? Math.max(...d20Values) : Math.min(...d20Values);
+  const otherGroups = outcome.groups.filter((g) => g.sides !== 20);
+  const groups = [
+    ...otherGroups,
+    {
+      sides: 20,
+      values: d20Values,
+      sum: kept,
+    },
+  ];
+
+  return {
+    ...outcome,
+    groups,
+    values: groups.flatMap((g) => g.values),
+    sum: kept + modifier,
+    notation: formatDiceFormula([{ sides: 20, qty: 1 }], modifier, mode),
+  };
+}
+
+/** Подсветка результата d20: учитываем грань и модификатор. */
+export type DiceFaceMark = 'crit_fail' | 'crit_success';
+
+export const DICE_CRIT_FAIL_LABEL = 'Крит. провал';
+export const DICE_CRIT_SUCCESS_LABEL = 'Крит. удача';
+
+/**
+ * Крит по итогу грани с модификатором:
+ * провал — value+mod ≤ 1, удача — value+mod ≥ 20.
+ */
+export function diceFaceMark(
+  sides: number,
+  value: number,
+  modifier = 0,
+): DiceFaceMark | null {
+  if (sides !== 20) {
+    return null;
+  }
+  const total = value + modifier;
+  if (total <= 1) {
+    return 'crit_fail';
+  }
+  if (total >= 20) {
+    return 'crit_success';
+  }
+  return null;
+}
+
+export function diceFaceMarkLabel(mark: DiceFaceMark | null): string | null {
+  if (mark === 'crit_fail') {
+    return DICE_CRIT_FAIL_LABEL;
+  }
+  if (mark === 'crit_success') {
+    return DICE_CRIT_SUCCESS_LABEL;
+  }
+  return null;
+}
+
+/** Метки для карточки: уникальные криты по всем граням броска. */
+export function diceRollCritLabels(
+  groups: { sides: number; values: number[] }[],
+  mode?: DiceRollMode | null,
+  modifier = 0,
+): string[] {
+  const labels: string[] = [];
+  let hasFail = false;
+  let hasSuccess = false;
+
+  const consider = (sides: number, value: number) => {
+    const mark = diceFaceMark(sides, value, modifier);
+    if (mark === 'crit_fail') {
+      hasFail = true;
+    }
+    if (mark === 'crit_success') {
+      hasSuccess = true;
+    }
+  };
+
+  const dieCount = groups.reduce((sum, group) => sum + group.values.length, 0);
+
+  if (mode === 'advantage' || mode === 'disadvantage') {
+    const d20Values = collectD20Values(groups);
+    if (d20Values.length >= 2) {
+      const kept = mode === 'advantage' ? Math.max(...d20Values) : Math.min(...d20Values);
+      consider(20, kept);
+    } else {
+      for (const group of groups) {
+        for (const value of group.values) {
+          consider(group.sides, value);
+        }
+      }
+    }
+  } else if (dieCount <= 1) {
+    // Несколько кубов без преимущества/помехи — крит по граням не пишем.
+    for (const group of groups) {
+      for (const value of group.values) {
+        consider(group.sides, value);
+      }
+    }
+  }
+
+  if (hasFail) {
+    labels.push(DICE_CRIT_FAIL_LABEL);
+  }
+  if (hasSuccess) {
+    labels.push(DICE_CRIT_SUCCESS_LABEL);
+  }
+  return labels;
+}
+
+/** Восстановить модификатор из итога и сумм групп. */
+export function modifierFromOutcome(outcome: {
+  sum: number;
+  groups: { sum: number }[];
+}): number {
+  const diceSum = outcome.groups.reduce((acc, group) => acc + group.sum, 0);
+  return outcome.sum - diceSum;
 }

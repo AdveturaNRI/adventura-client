@@ -18,6 +18,7 @@ export type MenuItemSpec = {
   icon: MenuIconKey;
   variant?: MenuItemVariant;
   badge?: string;
+  externalUrl?: string;
 };
 
 export type ProfileMenuSectionSpec = {
@@ -33,6 +34,7 @@ export const MENU_SPECS: MenuItemSpec[] = [
     subtitle:
       'Здесь вы можете поддержать проект денюжкой, что нам очень поможет',
     icon: 'developer',
+    externalUrl: 'https://boosty.to/adventuranri',
   },
   {
     key: 'profile',
@@ -93,12 +95,14 @@ export const PROFILE_MENU_SECTIONS: ProfileMenuSectionSpec[] = [
         label: 'Наши соцсети',
         subtitle: 'Здесь вы можете следить за новостями о нас',
         icon: 'telegram',
+        externalUrl: 'https://t.me/AdventuraNRI',
       },
       {
         key: 'support',
         label: 'Поддержка',
         subtitle: 'Здесь вы можете написать нам и сообщить о проблеме или нарушении',
         icon: 'support',
+        externalUrl: 'https://boosty.to/adventuranring',
       },
     ],
   },

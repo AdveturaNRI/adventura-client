@@ -1,6 +1,8 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  type NativeScrollEvent,
+  type NativeSyntheticEvent,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -15,6 +17,10 @@ import { GmResultCard } from '@/components/gm-toolkit/GmResultCard';
 import { MobileScreenHeader } from '@/components/navigation/MobileScreenHeader';
 import { useIsDesktopSidebarVisible } from '@/components/navigation/DesktopThemeToggle';
 import { ScreenTransition } from '@/components/navigation/ScreenTransition';
+import {
+  ScrollToTopButton,
+  shouldShowScrollToTop,
+} from '@/components/navigation/ScrollToTopButton';
 import {
   Button,
   SelectField,
@@ -78,11 +84,6 @@ function formatTime(at: number) {
 
 function createStyles(colors: ThemeColors, isDark: boolean) {
   return StyleSheet.create({
-    root: {
-      flex: 1,
-      gap: Spacing.sm,
-      minHeight: 0,
-    },
     tabsScroll: {
       flexGrow: 0,
     },
@@ -141,14 +142,6 @@ function createStyles(colors: ThemeColors, isDark: boolean) {
     actionBtn: {
       flexGrow: 1,
       minWidth: 120,
-    },
-    scroll: {
-      flex: 1,
-      minHeight: 0,
-    },
-    scrollContent: {
-      gap: Spacing.md,
-      paddingBottom: Spacing.xl,
     },
     empty: {
       borderRadius: 16,
@@ -242,6 +235,8 @@ export default function GeneratorsScreen() {
   const [pickerOpen, setPickerOpen] = useState(false);
   const [pendingChatCard, setPendingChatCard] = useState<GeneratorCard | null>(null);
   const [chatBusy, setChatBusy] = useState(false);
+  const [showScrollTop, setShowScrollTop] = useState(false);
+  const scrollRef = useRef<ScrollView>(null);
 
   const card =
     tab !== 'history' && tab !== 'art' ? (cardsByTab[tab] ?? null) : null;
@@ -368,7 +363,17 @@ export default function GeneratorsScreen() {
 
   return (
     <ScreenTransition>
-      <View style={[pageStyles.container, styles.root]}>
+      <View style={{ flex: 1 }}>
+      <ScrollView
+        ref={scrollRef}
+        style={pageStyles.scroll}
+        contentContainerStyle={pageStyles.content}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
+        scrollEventThrottle={16}
+        onScroll={(event: NativeSyntheticEvent<NativeScrollEvent>) => {
+          setShowScrollTop(shouldShowScrollToTop(event.nativeEvent.contentOffset.y));
+        }}>
         {hasDesktopSidebar ? (
           <Text style={pageStyles.title}>Генераторы</Text>
         ) : (
@@ -398,6 +403,7 @@ export default function GeneratorsScreen() {
 
         <ScrollView
           horizontal
+          nestedScrollEnabled
           showsHorizontalScrollIndicator={false}
           style={styles.tabsScroll}
           contentContainerStyle={styles.tabsContent}>
@@ -489,61 +495,65 @@ export default function GeneratorsScreen() {
           </View>
         ) : null}
 
-        <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent}>
-          {ART_STUDIO_ENABLED && tab === 'art' ? (
-            <ArtStudioPanel />
-          ) : tab === 'history' ? (
-            history.length === 0 ? (
-              <View style={styles.empty}>
-                <Text style={styles.emptyTitle}>История пуста</Text>
-                <Text style={styles.emptyText}>
-                  Сгенерируй NPC, таверну или подземелье — последние 20 сохранятся здесь.
-                </Text>
-              </View>
-            ) : (
-              history.map((entry) => (
-                <View key={entry.id} style={styles.historyItem}>
-                  <View style={styles.historyTop}>
-                    <Text style={styles.historyMeta}>
-                      {categoryLabel(entry.card.category)} · {formatTime(entry.at)}
-                    </Text>
-                  </View>
-                  <Text style={styles.historyTitle}>{entry.card.name}</Text>
-                  <Text style={styles.historySummary} numberOfLines={3}>
-                    {entry.card.summary}
-                  </Text>
-                  <View style={styles.historyActions}>
-                    <Pressable
-                      accessibilityRole="button"
-                      onPress={() => void handleCopy(entry.card)}
-                      style={({ pressed }) => [styles.miniBtn, pressed && { opacity: 0.85 }]}>
-                      <Ionicons name="copy-outline" size={14} color={colors.primary} />
-                      <Text style={styles.miniBtnText}>Скопировать</Text>
-                    </Pressable>
-                    <Pressable
-                      accessibilityRole="button"
-                      onPress={() => openChatPicker(entry.card)}
-                      style={({ pressed }) => [styles.miniBtn, pressed && { opacity: 0.85 }]}>
-                      <Ionicons
-                        name="chatbubble-ellipses-outline"
-                        size={14}
-                        color={colors.primary}
-                      />
-                      <Text style={styles.miniBtnText}>В чат</Text>
-                    </Pressable>
-                  </View>
-                </View>
-              ))
-            )
-          ) : card ? (
-            <GmResultCard card={card} />
-          ) : (
+        {ART_STUDIO_ENABLED && tab === 'art' ? (
+          <ArtStudioPanel />
+        ) : tab === 'history' ? (
+          history.length === 0 ? (
             <View style={styles.empty}>
-              <Text style={styles.emptyTitle}>Пока пусто</Text>
-              <Text style={styles.emptyText}>Нажми «Ещё раз», чтобы бросить генерацию.</Text>
+              <Text style={styles.emptyTitle}>История пуста</Text>
+              <Text style={styles.emptyText}>
+                Сгенерируй NPC, таверну или подземелье — последние 20 сохранятся здесь.
+              </Text>
             </View>
-          )}
-        </ScrollView>
+          ) : (
+            history.map((entry) => (
+              <View key={entry.id} style={styles.historyItem}>
+                <View style={styles.historyTop}>
+                  <Text style={styles.historyMeta}>
+                    {categoryLabel(entry.card.category)} · {formatTime(entry.at)}
+                  </Text>
+                </View>
+                <Text style={styles.historyTitle}>{entry.card.name}</Text>
+                <Text style={styles.historySummary} numberOfLines={3}>
+                  {entry.card.summary}
+                </Text>
+                <View style={styles.historyActions}>
+                  <Pressable
+                    accessibilityRole="button"
+                    onPress={() => void handleCopy(entry.card)}
+                    style={({ pressed }) => [styles.miniBtn, pressed && { opacity: 0.85 }]}>
+                    <Ionicons name="copy-outline" size={14} color={colors.primary} />
+                    <Text style={styles.miniBtnText}>Скопировать</Text>
+                  </Pressable>
+                  <Pressable
+                    accessibilityRole="button"
+                    onPress={() => openChatPicker(entry.card)}
+                    style={({ pressed }) => [styles.miniBtn, pressed && { opacity: 0.85 }]}>
+                    <Ionicons
+                      name="chatbubble-ellipses-outline"
+                      size={14}
+                      color={colors.primary}
+                    />
+                    <Text style={styles.miniBtnText}>В чат</Text>
+                  </Pressable>
+                </View>
+              </View>
+            ))
+          )
+        ) : card ? (
+          <GmResultCard card={card} />
+        ) : (
+          <View style={styles.empty}>
+            <Text style={styles.emptyTitle}>Пока пусто</Text>
+            <Text style={styles.emptyText}>Нажми «Ещё раз», чтобы бросить генерацию.</Text>
+          </View>
+        )}
+      </ScrollView>
+
+      <ScrollToTopButton
+        visible={showScrollTop}
+        onPress={() => scrollRef.current?.scrollTo({ y: 0, animated: true })}
+      />
       </View>
 
       <GmChatTargetPicker

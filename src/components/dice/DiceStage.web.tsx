@@ -28,7 +28,7 @@ export type { DiceRollOutcome, DiceStageHandle };
  * (that leaks WebGL contexts and crashes the tab after many rolls).
  */
 export const DiceStage = forwardRef<DiceStageHandle, DiceStageProps>(function DiceStage(
-  { onReady, onDone, transparent = false, accent },
+  { onReady, onDone, transparent = false, accent, animationSpeed = 'normal' },
   ref,
 ) {
   const colors = useTheme();
@@ -36,6 +36,8 @@ export const DiceStage = forwardRef<DiceStageHandle, DiceStageProps>(function Di
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
   const accentRef = useRef(themeAccent);
   accentRef.current = themeAccent;
+  const speedRef = useRef(animationSpeed);
+  speedRef.current = animationSpeed;
   const onDoneRef = useRef(onDone);
   onDoneRef.current = onDone;
   const onReadyRef = useRef(onReady);
@@ -60,11 +62,16 @@ export const DiceStage = forwardRef<DiceStageHandle, DiceStageProps>(function Di
             reject(new Error('Dice box is not ready'));
             return;
           }
+          // Новый roll снимает предыдущий pending — иначе «белый» бросок
+          // потом всё равно resolve'ится и даёт повтор.
+          pendingRef.current?.reject(new Error('Dice roll superseded'));
+          setError(null);
           pendingRef.current = { resolve, reject };
           postToIframe({
             type: 'roll',
             notation,
             themeColor: accentRef.current,
+            speed: speedRef.current,
           });
         }),
       preview: (notation) => {
@@ -75,11 +82,22 @@ export const DiceStage = forwardRef<DiceStageHandle, DiceStageProps>(function Di
           type: 'preview',
           notation: notation ?? [],
           themeColor: accentRef.current,
+          speed: speedRef.current,
         });
       },
       clear: () => {
+        const pending = pendingRef.current;
         pendingRef.current = null;
+        setError(null);
         postToIframe({ type: 'clear' });
+        // Не оставляем висящий Promise — иначе overlay ждёт done и шлёт fallback + поздний result.
+        pending?.reject(new Error('Dice roll cleared'));
+      },
+      resize: () => {
+        if (!ready) {
+          return;
+        }
+        postToIframe({ type: 'resize' });
       },
     }),
     [ready],
@@ -88,41 +106,64 @@ export const DiceStage = forwardRef<DiceStageHandle, DiceStageProps>(function Di
   useEffect(() => {
     const onWindowMessage = (event: MessageEvent) => {
       try {
-        const data =
-          typeof event.data === 'string'
-            ? (JSON.parse(event.data) as {
-                type?: string;
-                outcome?: DiceRollOutcome;
-                message?: string;
-              })
-            : null;
+        const raw = event.data;
+        let data: {
+          type?: string;
+          outcome?: DiceRollOutcome;
+          message?: string;
+        } | null = null;
+        if (typeof raw === 'string') {
+          const trimmed = raw.trim();
+          if (!trimmed.startsWith('{')) {
+            return;
+          }
+          data = JSON.parse(trimmed) as {
+            type?: string;
+            outcome?: DiceRollOutcome;
+            message?: string;
+          };
+        } else if (raw && typeof raw === 'object') {
+          data = raw as {
+            type?: string;
+            outcome?: DiceRollOutcome;
+            message?: string;
+          };
+        }
         if (!data?.type) {
           return;
         }
         if (data.type === 'ready') {
           setReady(true);
+          setError(null);
           onReadyRef.current?.();
         }
         if (data.type === 'done' && data.outcome) {
+          setError(null);
           pendingRef.current?.resolve(data.outcome);
           pendingRef.current = null;
           onDoneRef.current?.(data.outcome);
         }
         if (data.type === 'error') {
-          setError(data.message || 'Ошибка 3D-кубиков');
-          pendingRef.current?.reject(new Error(data.message || 'Dice error'));
+          const message = data.message || 'Не удалось бросить кости';
+          console.warn('[DiceStage]', message);
+          // В чате не рисуем сырой SyntaxError поверх ленты — бросок уйдёт в fallback.
+          if (!transparent) {
+            setError(message);
+          }
+          pendingRef.current?.reject(new Error(message));
           pendingRef.current = null;
         }
       } catch {
-        // ignore
+        // Чужие window.message — не наши.
       }
     };
     window.addEventListener('message', onWindowMessage);
     return () => window.removeEventListener('message', onWindowMessage);
-  }, []);
+  }, [transparent]);
 
-  // Stable src: accent goes via postMessage, not URL — remounting the iframe OOMs the tab.
-  const src = `/dice-stage.html?transparent=${transparent ? '1' : '0'}`;
+  // Chat and DiceScreen share Babylon @3d-dice/dice-box (threejs chat fork is broken on mobile).
+  // Remote face sync: overlay clears die on mismatch and shows the result card.
+  const src = `/dice-stage.html?transparent=${transparent ? 1 : 0}&v=dicemin1`;
 
   useEffect(() => {
     setReady(false);
@@ -136,7 +177,19 @@ export const DiceStage = forwardRef<DiceStageHandle, DiceStageProps>(function Di
     postToIframe({ type: 'setAccent', themeColor: themeAccent });
   }, [ready, themeAccent]);
 
+  useEffect(() => {
+    if (!ready) {
+      return;
+    }
+    postToIframe({ type: 'setSpeed', speed: animationSpeed });
+  }, [ready, animationSpeed]);
+
   const shellBg = transparent ? 'transparent' : '#0B1220';
+
+  const onIframeLoad = () => {
+    // Если ready ушёл до подписки родителя — переспросим.
+    postToIframe({ type: 'ping' });
+  };
 
   return createElement(
     'div',
@@ -145,29 +198,39 @@ export const DiceStage = forwardRef<DiceStageHandle, DiceStageProps>(function Di
         flex: 1,
         width: '100%',
         height: '100%',
-        minHeight: transparent ? 0 : 260,
+        minHeight: transparent ? 120 : 260,
         borderRadius: transparent ? 0 : 20,
         overflow: 'hidden',
         background: shellBg,
         position: 'relative',
-        pointerEvents: transparent ? 'none' : 'auto',
+        pointerEvents: 'none',
       },
     },
     createElement('iframe', {
       ref: iframeRef,
       title: 'Dice roller',
       src,
+      onLoad: onIframeLoad,
+      // iOS Safari: full-screen iframe can eat touches even under opacity:0 parents.
+      // Keep the stage visual-only; chat UI stays interactive underneath.
+      tabIndex: -1,
+      'aria-hidden': true,
       style: {
+        position: 'absolute',
+        inset: 0,
         width: '100%',
         height: '100%',
-        minHeight: transparent ? 0 : 260,
         border: '0',
         display: 'block',
         background: shellBg,
+        backgroundColor: shellBg,
+        colorScheme: 'normal',
         pointerEvents: 'none',
       },
-      sandbox: 'allow-scripts allow-same-origin',
-      allow: 'accelerometer; gyroscope',
+      // Без sandbox: WebKit роняет динамический import() внутри sandbox-iframe
+      // («Importing a module script failed»), а dice-box так тянет world.onscreen.
+      // allow-scripts + allow-same-origin на своём же origin защиты и не давали.
+      allow: 'autoplay; accelerometer; gyroscope',
     }),
     !ready && !error && !transparent
       ? createElement('div', {

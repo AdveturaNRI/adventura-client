@@ -1,0 +1,512 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+  <style>
+    html, body {
+      margin: 0;
+      width: 100%;
+      height: 100%;
+      position: absolute;
+      inset: 0;
+      background: transparent;
+      overflow: hidden;
+      pointer-events: none;
+    }
+    #dice-box {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      margin: 0;
+      background: transparent;
+      overflow: hidden;
+      pointer-events: none;
+    }
+    #dice-box canvas {
+      width: 100% !important;
+      height: 100% !important;
+      display: block;
+      pointer-events: none;
+      background: transparent !important;
+    }
+  </style>
+</head>
+<body>
+  <div id="dice-box"></div>
+  <script type="module">
+    import DiceBox from '/vendor/dice-box-threejs/dice-box-threejs.es.js';
+
+    // Защита от upstream-опечатки Object.apply (не Object.assign) в updateConfig.
+    // Без этого applyAccent на каждом броске кидает TypeError → куба нет, баннер есть.
+    if (DiceBox?.prototype?.updateConfig) {
+      const broken = DiceBox.prototype.updateConfig;
+      DiceBox.prototype.updateConfig = async function patchedUpdateConfig(options = {}) {
+        try {
+          return await broken.call(this, options);
+        } catch (err) {
+          const msg = String(err && err.message || err);
+          if (!msg.includes('Object.apply') && !msg.includes('apply is not a function')) {
+            throw err;
+          }
+          Object.assign(this, options);
+          this.theme_customColorset = options.theme_customColorset
+            ? options.theme_customColorset
+            : null;
+          if (options.theme_colorset) this.theme_colorset = options.theme_colorset;
+          if (options.theme_texture) this.theme_texture = options.theme_texture;
+          if (options.theme_material) this.theme_material = options.theme_material;
+          if (
+            options.theme_colorset ||
+            options.theme_texture ||
+            options.theme_material ||
+            options.theme_customColorset
+          ) {
+            await this.loadTheme({
+              colorset: this.theme_colorset,
+              texture: this.theme_texture,
+              material: this.theme_material,
+            });
+          }
+        }
+      };
+    }
+
+    function post(msg) {
+      const payload = JSON.stringify(msg);
+      if (window.parent && window.parent !== window) {
+        window.parent.postMessage(payload, '*');
+      }
+      if (window.ReactNativeWebView?.postMessage) {
+        window.ReactNativeWebView.postMessage(payload);
+      }
+    }
+
+    function normalizeAccent(hex) {
+      const m = String(hex || '').trim().match(/^#?([0-9A-Fa-f]{6})$/);
+      return m ? `#${m[1].toUpperCase()}` : '#157AFE';
+    }
+
+    function buildColorSet(accentHex) {
+      const bg = normalizeAccent(accentHex);
+      return {
+        name: `adventura-${bg.slice(1)}`,
+        foreground: '#FFFFFF',
+        background: bg,
+        outline: '#0B1220',
+        texture: 'none',
+        material: 'glass',
+      };
+    }
+
+    function flattenThreejs(results, notation) {
+      const groups = [];
+      const values = [];
+      const sets = results?.sets || [];
+      for (const set of sets) {
+        const rolls = (set.rolls || []).map((die) => {
+          const v = typeof die.value === 'number' ? die.value : Number(die.value);
+          return Number.isFinite(v) ? v : 0;
+        });
+        rolls.forEach((v) => values.push(v));
+        const sides =
+          Number(set.sides) ||
+          Number(String(set.type || '').replace(/^d/i, '')) ||
+          0;
+        groups.push({
+          sides,
+          values: rolls,
+          sum: rolls.reduce((a, b) => a + b, 0),
+        });
+      }
+      const label = Array.isArray(notation)
+        ? notation.join(' + ')
+        : String(notation || results?.notation || '');
+      return {
+        values,
+        sum: values.reduce((a, b) => a + b, 0),
+        notation: label,
+        groups,
+      };
+    }
+
+    function normalizeNotation(notation) {
+      if (Array.isArray(notation)) {
+        // threejs: одна строка с @ по всем кубам слева направо
+        return notation.filter(Boolean).join('+');
+      }
+      if (notation && typeof notation === 'object') {
+        const qty = notation.qty ?? 1;
+        const sides = notation.sides;
+        const forced = Array.isArray(notation.values)
+          ? `@${notation.values.join(',')}`
+          : '';
+        return `${qty}d${sides}${forced}`;
+      }
+      return notation || '1d20';
+    }
+
+    function parseForcedValues(notation) {
+      const text = String(notation || '');
+      const at = text.indexOf('@');
+      if (at < 0) return [];
+      const matches = text.slice(at + 1).match(/-?\d+/g);
+      return matches ? matches.map(Number) : [];
+    }
+
+    /**
+     * threejs делает swap по результату simulateThrow, а animateThrow может
+     * лечь другой гранью — у зрителя куб ≠ карточка. После остановки
+     * ещё раз выравниваем материалы под @values.
+     */
+    function enforceForcedFaces(forced) {
+      if (!forced.length || !box?.diceList?.length) return;
+      for (let i = 0; i < forced.length; i++) {
+        const die = box.diceList[i];
+        if (!die) continue;
+        const want = Number(forced[i]);
+        if (!Number.isFinite(want)) continue;
+        try {
+          if (!die.result || die.result.length < 1) {
+            die.storeRolledValue?.('forced');
+          }
+          const current = Number(die.getLastValue?.()?.value);
+          if (current === want) continue;
+          box.swapDiceFace?.(die, want);
+          die.resultReason = 'forced';
+          die.storeRolledValue?.('forced');
+          const after = Number(die.getLastValue?.()?.value);
+          if (after !== want && Array.isArray(die.result) && die.result.length > 0) {
+            const last = die.result[die.result.length - 1];
+            die.result[die.result.length - 1] = {
+              ...last,
+              value: want,
+              reason: 'forced',
+            };
+          }
+        } catch (err) {
+          console.warn('enforceForcedFaces', err);
+        }
+      }
+      try {
+        box.renderer?.render(box.scene, box.camera);
+      } catch {
+        // ignore
+      }
+    }
+
+    function outcomeWithForced(outcome, forced) {
+      if (!forced.length) return outcome;
+      let index = 0;
+      const groups = (outcome.groups || []).map((group) => {
+        const values = (group.values || []).map(() => {
+          const v = forced[index++];
+          return Number.isFinite(v) ? v : 0;
+        });
+        return {
+          ...group,
+          values,
+          sum: values.reduce((a, b) => a + b, 0),
+        };
+      });
+      if (index === 0) {
+        return {
+          ...outcome,
+          values: forced.slice(),
+          sum: forced.reduce((a, b) => a + b, 0),
+        };
+      }
+      const values = groups.flatMap((g) => g.values);
+      return {
+        ...outcome,
+        groups,
+        values,
+        sum: values.reduce((a, b) => a + b, 0),
+      };
+    }
+
+    let currentAccent = '#157AFE';
+    let currentSpeed = 'normal';
+    let ready = false;
+    let generation = 0;
+    let box = null;
+
+    function buildBoxConfig(withSounds, speed) {
+      const fast = speed === 'fast';
+      return {
+        assetPath: '/dice-box-threejs/',
+        sounds: withSounds,
+        volume: fast ? 55 : 70,
+        sound_dieMaterial: 'plastic',
+        shadows: false,
+        theme_surface: 'green-felt',
+        theme_colorset: 'white',
+        theme_material: 'glass',
+        // Сильнее бросок: library default = 1. Fast — выше гравитация, короче полёт.
+        strength: fast ? 2.2 : 3,
+        gravity_multiplier: fast ? 900 : 400,
+        light_intensity: 1.1,
+        // threejs ждёт hex-строки (#RRGGBB), не 0xRRGGBB — иначе куб чёрный.
+        theme_customColorset: buildColorSet(currentAccent),
+      };
+    }
+
+    try {
+      box = new DiceBox('#dice-box', buildBoxConfig(true, currentSpeed));
+      await box.initialize();
+      // Mobile Safari часто инициализирует iframe до layout → 0×0. Дожидаемся размера.
+      await syncWorldSize();
+      ready = true;
+      post({ type: 'ready' });
+    } catch (err) {
+      console.warn('dice init with sounds failed, retry silent', err);
+      try {
+        document.getElementById('dice-box')?.replaceChildren();
+        box = new DiceBox('#dice-box', buildBoxConfig(false, currentSpeed));
+        await box.initialize();
+        await syncWorldSize();
+        ready = true;
+        post({ type: 'ready' });
+      } catch (err2) {
+        console.error(err2);
+        post({ type: 'error', message: String(err2 && err2.message || err2) });
+      }
+    }
+
+    async function applyAccent(next) {
+      currentAccent = normalizeAccent(next || currentAccent);
+      if (!box) return currentAccent;
+      // Не updateConfig: в vendor было Object.apply (= Function.apply), поля strength/theme
+      // не копировались. Пишем напрямую + loadTheme.
+      const colorSet = buildColorSet(currentAccent);
+      Object.assign(box, {
+        strength: currentSpeed === 'fast' ? 2.2 : 3,
+        gravity_multiplier: currentSpeed === 'fast' ? 900 : 400,
+        volume: currentSpeed === 'fast' ? 55 : 70,
+        sound_dieMaterial: 'plastic',
+        theme_customColorset: colorSet,
+      });
+      if (typeof box.loadTheme === 'function') {
+        await box.loadTheme({
+          colorset: box.theme_colorset,
+          texture: box.theme_texture,
+          material: box.theme_material,
+        });
+      }
+      return currentAccent;
+    }
+
+    async function applySpeed(speed) {
+      if (speed !== 'fast' && speed !== 'normal') {
+        return;
+      }
+      currentSpeed = speed;
+      if (!box) return;
+      Object.assign(box, {
+        strength: currentSpeed === 'fast' ? 2.2 : 3,
+        gravity_multiplier: currentSpeed === 'fast' ? 900 : 400,
+        volume: currentSpeed === 'fast' ? 55 : 70,
+      });
+      if (typeof box.world?.gravity?.set === 'function') {
+        box.world.gravity.set(0, 0, -9.8 * (currentSpeed === 'fast' ? 900 : 400));
+      }
+    }
+
+    /** Браузер глушит Audio без жеста — прогреваем сэмплы перед броском. */
+    function unlockAudio() {
+      try {
+        const tables = box?.sounds_table;
+        const dice = box?.sounds_dice;
+        const samples = [
+          ...(tables?.felt || []),
+          ...(dice?.plastic || []),
+        ].filter(Boolean);
+        for (const audio of samples.slice(0, 3)) {
+          const prev = audio.volume;
+          audio.muted = true;
+          audio.volume = 0;
+          void audio.play().then(() => {
+            audio.pause();
+            audio.currentTime = 0;
+            audio.muted = false;
+            audio.volume = prev;
+          }).catch(() => {
+            audio.muted = false;
+            audio.volume = prev;
+          });
+        }
+      } catch {
+        // ignore
+      }
+    }
+
+    function readContainerSize() {
+      const el = box?.container;
+      if (!el) return { w: 0, h: 0 };
+      const w = el.clientWidth || el.offsetWidth || 0;
+      const h = el.clientHeight || el.offsetHeight || 0;
+      return { w, h };
+    }
+
+    /**
+     * resizeWorld() только вешает window.resize listener и сам размер не ставит.
+     * setDimensions() без аргументов берёт clientWidth/2 — мир и камера ломаются.
+     * Нужен Vector2 с полным clientWidth/Height, как при initialize().
+     */
+    function applyWorldSize(w, h) {
+      if (!box || w < 2 || h < 2) return false;
+      box.setDimensions({ x: w, y: h });
+      return true;
+    }
+
+    function waitForContainerSize(timeoutMs = 2500) {
+      return new Promise((resolve) => {
+        const immediate = readContainerSize();
+        if (immediate.w >= 2 && immediate.h >= 2) {
+          resolve(immediate);
+          return;
+        }
+        const started = Date.now();
+        let settled = false;
+        const finish = (size) => {
+          if (settled) return;
+          settled = true;
+          cleanup();
+          resolve(size);
+        };
+        const tick = () => {
+          const size = readContainerSize();
+          if (size.w >= 2 && size.h >= 2) {
+            finish(size);
+            return;
+          }
+          if (Date.now() - started >= timeoutMs) {
+            finish(size);
+          }
+        };
+        const ro =
+          typeof ResizeObserver !== 'undefined' && box?.container
+            ? new ResizeObserver(tick)
+            : null;
+        if (ro && box.container) ro.observe(box.container);
+        const interval = setInterval(tick, 50);
+        const onWin = () => tick();
+        window.addEventListener('resize', onWin);
+        const cleanup = () => {
+          ro?.disconnect();
+          clearInterval(interval);
+          window.removeEventListener('resize', onWin);
+        };
+        requestAnimationFrame(tick);
+      });
+    }
+
+    async function syncWorldSize() {
+      if (!box?.container) return false;
+      const size = await waitForContainerSize();
+      return applyWorldSize(size.w, size.h);
+    }
+
+    async function runRoll(notation, themeColor, speed) {
+      const token = ++generation;
+      if (speed === 'fast' || speed === 'normal') {
+        await applySpeed(speed);
+      }
+      await applyAccent(themeColor);
+      unlockAudio();
+      try {
+        const sized = await syncWorldSize();
+        if (!sized) {
+          throw new Error('Dice stage has no layout size');
+        }
+        const normalized = normalizeNotation(notation);
+        const forced = parseForcedValues(normalized);
+        const results = await box.roll(normalized);
+        if (forced.length) {
+          enforceForcedFaces(forced);
+        }
+        if (token === generation) {
+          const outcome = outcomeWithForced(
+            flattenThreejs(results, normalized),
+            forced,
+          );
+          post({ type: 'done', outcome });
+        }
+      } catch (err) {
+        if (token === generation) {
+          post({ type: 'error', message: String(err && err.message || err) });
+        }
+      }
+    }
+
+    function parseHostMessage(raw) {
+      // Родитель шлёт JSON.stringify({ type }). Чужие postMessage (HMR, расширения)
+      // не считаем ошибкой кубиков — иначе на экране SyntaxError.
+      if (raw == null) return null;
+      if (typeof raw === 'object') {
+        return typeof raw.type === 'string' ? raw : null;
+      }
+      if (typeof raw !== 'string') return null;
+      const trimmed = raw.trim();
+      if (!trimmed.startsWith('{')) return null;
+      try {
+        const data = JSON.parse(trimmed);
+        return data && typeof data === 'object' && typeof data.type === 'string'
+          ? data
+          : null;
+      } catch {
+        return null;
+      }
+    }
+
+    async function onMessage(raw) {
+      const data = parseHostMessage(raw);
+      if (!data || !ready || !box) return;
+
+      try {
+        if (data.type === 'ping') {
+          if (ready) {
+            post({ type: 'ready' });
+          }
+          return;
+        }
+
+        if (data.type === 'setAccent') {
+          await applyAccent(data.themeColor);
+          return;
+        }
+
+        if (data.type === 'setSpeed') {
+          await applySpeed(data.speed);
+          return;
+        }
+
+        if (data.type === 'resize') {
+          await syncWorldSize();
+          return;
+        }
+
+        if (data.type === 'preview') {
+          // В чате превью не используем — только бросок.
+          return;
+        }
+
+        if (data.type === 'roll') {
+          await runRoll(data.notation ?? '1d20', data.themeColor, data.speed);
+          return;
+        }
+
+        if (data.type === 'clear') {
+          generation += 1;
+          box.clearDice();
+        }
+      } catch (err) {
+        post({ type: 'error', message: String(err && err.message || err) });
+      }
+    }
+
+    window.addEventListener('message', (e) => onMessage(e.data));
+  </script>
+</body>
+</html>

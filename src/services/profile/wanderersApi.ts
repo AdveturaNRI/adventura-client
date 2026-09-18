@@ -34,17 +34,22 @@ export type WandererBucketCounts = {
 
 export function fetchWanderers(bucket: WandererBucket = 'feed') {
   const query = bucket === 'feed' ? '' : `?bucket=${bucket}`;
-  return apiRequest<WandererCardItem[]>(`/users/wanderers${query}`);
+  return apiRequest<WandererCardItem[]>(`/users/wanderers${query}`, {
+    skipLoading: true,
+  });
 }
 
 export function fetchUserCard(userId: string) {
   return apiRequest<WandererCardItem>(
     `/users/${encodeURIComponent(userId)}/card`,
+    { skipLoading: true },
   );
 }
 
 export function fetchWandererBucketCounts() {
-  return apiRequest<WandererBucketCounts>('/users/wanderers/counts');
+  return apiRequest<WandererBucketCounts>('/users/wanderers/counts', {
+    skipLoading: true,
+  });
 }
 
 export function upsertWandererReaction(targetUserId: string, type: WandererReactionType) {

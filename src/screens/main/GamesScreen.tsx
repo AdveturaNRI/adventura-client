@@ -3,6 +3,8 @@ import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import {
   ActivityIndicator,
   Modal,
+  type NativeScrollEvent,
+  type NativeSyntheticEvent,
   Platform,
   Pressable,
   ScrollView,
@@ -18,6 +20,10 @@ import { GamesFiltersPanel } from '@/components/games/GamesFiltersPanel';
 import { MobileScreenHeader } from '@/components/navigation/MobileScreenHeader';
 import { useIsDesktopSidebarVisible, useIsDesktopWeb } from '@/components/navigation/DesktopThemeToggle';
 import { ScreenTransition } from '@/components/navigation/ScreenTransition';
+import {
+  ScrollToTopButton,
+  shouldShowScrollToTop,
+} from '@/components/navigation/ScrollToTopButton';
 import { toast } from '@/components/ui';
 import { FontSize, Radius, Spacing, type ThemeColors } from '@/constants/theme';
 import { useProfile } from '@/context/ProfileContext';
@@ -55,11 +61,11 @@ const DESKTOP_GRID_GAP = Spacing.lg;
 function createLocalStyles(colors: ThemeColors, isDesktopWeb: boolean) {
   return StyleSheet.create({
     shell: {
-      flex: 1,
       width: '100%',
       maxWidth: isDesktopWeb ? DESKTOP_CONTENT_MAX : undefined,
       alignSelf: isDesktopWeb ? 'center' : undefined,
       gap: isDesktopWeb ? Spacing.lg : Spacing.md,
+      paddingBottom: Spacing.xl,
     },
     headerBlock: {
       gap: Spacing.xs,
@@ -78,8 +84,6 @@ function createLocalStyles(colors: ThemeColors, isDesktopWeb: boolean) {
     },
     toolbar: {
       gap: Spacing.sm,
-      flexGrow: 0,
-      flexShrink: 0,
     },
     filtersRow: {
       flexDirection: 'row',
@@ -199,28 +203,22 @@ function createLocalStyles(colors: ThemeColors, isDesktopWeb: boolean) {
     filterChipLabelSelected: {
       color: colors.primary,
     },
-    gridScroll: {
-      flex: 1,
-      minHeight: 0,
-    },
     grid: {
       flexDirection: isDesktopWeb ? 'row' : 'column',
       flexWrap: isDesktopWeb ? 'wrap' : 'nowrap',
       alignContent: 'flex-start',
       gap: isDesktopWeb ? DESKTOP_GRID_GAP : Spacing.md,
-      paddingBottom: Spacing.xl,
     },
     cardSlot: {
       width: isDesktopWeb ? DESKTOP_CARD_WIDTH : '100%',
       maxWidth: isDesktopWeb ? DESKTOP_CARD_WIDTH : '100%',
     },
     stateWrap: {
-      flex: 1,
       alignItems: 'center',
       justifyContent: 'center',
       gap: Spacing.md,
       paddingHorizontal: Spacing.xl,
-      paddingBottom: Spacing.xl,
+      paddingVertical: Spacing.xl,
     },
     emptyIconWrap: {
       width: 56,
@@ -338,7 +336,9 @@ export default function GamesScreen() {
   const [busyGameId, setBusyGameId] = useState<string | null>(null);
   const [applyTarget, setApplyTarget] = useState<GameListItem | null>(null);
   const [applyMessage, setApplyMessage] = useState('');
+  const [showScrollTop, setShowScrollTop] = useState(false);
   const lastAppliedParamsSignature = useRef<string>('');
+  const scrollRef = useRef<ScrollView>(null);
 
   const searchParamsSignature = useMemo(
     () =>
@@ -650,7 +650,17 @@ export default function GamesScreen() {
 
   return (
     <ScreenTransition animateOnFocus>
-      <View style={mainStyles.container}>
+      <View style={{ flex: 1 }}>
+      <ScrollView
+        ref={scrollRef}
+        style={mainStyles.scroll}
+        contentContainerStyle={mainStyles.content}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
+        scrollEventThrottle={16}
+        onScroll={(event: NativeSyntheticEvent<NativeScrollEvent>) => {
+          setShowScrollTop(shouldShowScrollToTop(event.nativeEvent.contentOffset.y));
+        }}>
         <View style={styles.shell}>
           {showCompactNav ? (
             <View style={styles.headerBlock}>
@@ -775,10 +785,7 @@ export default function GamesScreen() {
               <Text style={styles.emptyHint}>{emptyHint}</Text>
             </View>
           ) : (
-            <ScrollView
-              style={styles.gridScroll}
-              contentContainerStyle={styles.grid}
-              showsVerticalScrollIndicator={false}>
+            <View style={styles.grid}>
               {items.map((item) => (
                 <View key={item.id} style={styles.cardSlot}>
                   <GameFeedCard
@@ -793,9 +800,15 @@ export default function GamesScreen() {
                   />
                 </View>
               ))}
-            </ScrollView>
+            </View>
           )}
         </View>
+      </ScrollView>
+
+      <ScrollToTopButton
+        visible={showScrollTop}
+        onPress={() => scrollRef.current?.scrollTo({ y: 0, animated: true })}
+      />
       </View>
 
       <Modal

@@ -66,6 +66,9 @@ for (const name of [
   'world.onscreen.min.js',
   'world.offscreen.min.js',
   'world.none.min.js',
+  // world.onscreen/world.none импортируют ./Dice.min.js — без него dice-box.init()
+  // падает с «Importing a module script failed».
+  'Dice.min.js',
 ]) {
   const src = path.join(pkgDist, name);
   if (fs.existsSync(src)) {
@@ -74,3 +77,28 @@ for (const name of [
 }
 
 console.log('[copy-dice-box-assets] → public/dice-box + public/vendor/dice-box');
+
+// Chat overlay: threejs fork with forced `@values` so everyone sees the same faces.
+const threePkg = path.join(root, 'node_modules', '@3d-dice', 'dice-box-threejs');
+const threeDist = path.join(threePkg, 'dist', 'dice-box-threejs.es.js');
+const threeVendor = path.join(root, 'public', 'vendor', 'dice-box-threejs');
+const threeAssets = path.join(root, 'public', 'dice-box-threejs');
+if (fs.existsSync(threeDist)) {
+  fs.mkdirSync(threeVendor, { recursive: true });
+  const vendorFile = path.join(threeVendor, 'dice-box-threejs.es.js');
+  fs.copyFileSync(threeDist, vendorFile);
+  // Upstream typo: Object.apply is not a function → every chat roll throws before draw.
+  const bundled = fs.readFileSync(vendorFile, 'utf8');
+  const fixed = bundled.replace(/Object\.apply\(this,\s*e\)/g, 'Object.assign(this, e)');
+  if (fixed === bundled) {
+    console.warn('[copy-dice-box-assets] Object.apply→assign patch: pattern not found');
+  } else {
+    fs.writeFileSync(vendorFile, fixed);
+  }
+  fs.rmSync(threeAssets, { recursive: true, force: true });
+  const publicSrc = path.join(threePkg, 'public');
+  if (fs.existsSync(publicSrc)) {
+    copyRecursive(publicSrc, threeAssets);
+  }
+  console.log('[copy-dice-box-assets] → public/dice-box-threejs + vendor');
+}
