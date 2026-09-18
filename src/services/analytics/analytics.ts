@@ -3,6 +3,7 @@ import { Platform } from 'react-native';
 
 import { apiRequest } from '@/services/api/client';
 import { ApiError } from '@/services/api/api-error';
+import { reachYandexMetrikaGoal } from '@/services/analytics/yandex-metrika';
 
 export type AnalyticsPlatform = 'WEB' | 'ANDROID' | 'IOS';
 export type AnalyticsEntityKind = 'club' | 'player' | 'game';
@@ -12,6 +13,17 @@ export const IMPRESSION_DWELL_MS = 3000;
 const CLIENT_ANALYTICS_EVENTS = {
   USER_SESSION_STARTED: 'user_session_started',
 } as const;
+
+/** Map product events → Metrika goal names (create same goals in Metrika UI). */
+const METRIKA_GOAL_BY_EVENT: Record<string, string> = {
+  user_session_started: 'session_started',
+  user_registered: 'register',
+  player_profile_created: 'profile_created',
+  game_listing_created: 'listing_created',
+  game_application_sent: 'application_sent',
+  player_match_completed: 'match_completed',
+  club_profile_created: 'club_created',
+};
 
 type TrackPayload = {
   name: string;
@@ -77,6 +89,32 @@ function scheduleFlush() {
   }, QUEUE_FLUSH_MS);
 }
 
+function mirrorToYandexMetrika(
+  name: string,
+  props?: TrackPayload['props'],
+): void {
+  if (Platform.OS !== 'web') {
+    return;
+  }
+  const goal = METRIKA_GOAL_BY_EVENT[name];
+  if (!goal) {
+    return;
+  }
+  const flat: Record<string, string | number | boolean> = {};
+  if (props) {
+    for (const [key, value] of Object.entries(props)) {
+      if (
+        typeof value === 'string' ||
+        typeof value === 'number' ||
+        typeof value === 'boolean'
+      ) {
+        flat[key] = value;
+      }
+    }
+  }
+  reachYandexMetrikaGoal(goal, flat);
+}
+
 export function trackAnalyticsEvent(
   name: string,
   props?: TrackPayload['props'],
@@ -86,6 +124,7 @@ export function trackAnalyticsEvent(
     props,
     occurredAt: new Date().toISOString(),
   });
+  mirrorToYandexMetrika(name, props);
   if (queue.length >= MAX_BATCH) {
     void flushAnalyticsQueue();
     return;
@@ -162,6 +201,10 @@ export function trackEntityTransition(
   const trimmed = id.trim();
   if (!trimmed || !shouldSendLocal(localTransitionSentAt, entity, trimmed)) {
     return;
+  }
+
+  if (Platform.OS === 'web') {
+    reachYandexMetrikaGoal(`open_${entity}`, { id: trimmed });
   }
 
   void apiRequest<{ recorded: boolean }>('/analytics/transitions', {

@@ -5,6 +5,7 @@ type RegisterPayload = {
   email: string;
   nickname: string;
   password: string;
+  acquisitionSource?: string;
 };
 
 type LoginPayload = {

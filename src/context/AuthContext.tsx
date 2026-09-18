@@ -7,6 +7,7 @@ import {
   useState,
   type ReactNode,
 } from 'react';
+import { Platform } from 'react-native';
 
 import { toast } from '@/components/ui/feedback/toast';
 import {
@@ -28,8 +29,27 @@ import {
 } from '@/utils/auth-storage';
 import { localizeErrorMessage } from '@/utils/localizeError';
 import { ensureUploadLimits } from '@/utils/upload-limits';
-import { markOfferPushAfterRegister } from '@/services/push/pushAttention';
 import { trackUserSessionStarted } from '@/services/analytics/analytics';
+import {
+  bootstrapYandexMetrika,
+  reachYandexMetrikaGoal,
+  setYandexMetrikaUserId,
+} from '@/services/analytics/yandex-metrika';
+import { markOfferPushAfterRegister } from '@/services/push/pushAttention';
+
+function resolveAcquisitionSource(): string {
+  if (Platform.OS !== 'web') {
+    return Platform.OS;
+  }
+  try {
+    if (typeof document !== 'undefined' && document.referrer) {
+      return `web:${new URL(document.referrer).hostname}`.slice(0, 64);
+    }
+  } catch {
+    // ignore bad referrer
+  }
+  return 'web';
+}
 
 type AuthContextValue = {
   user: AuthUser | null;
@@ -52,6 +72,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [token, setToken] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [redirectToQuestionnaire, setRedirectToQuestionnaire] = useState(false);
+
+  useEffect(() => {
+    if (Platform.OS !== 'web') {
+      return;
+    }
+    void bootstrapYandexMetrika().then(() => {
+      setYandexMetrikaUserId(user?.id ?? null);
+    });
+  }, [user?.id]);
 
   useEffect(() => {
     void ensureUploadLimits().catch(() => {});
@@ -138,7 +167,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const signUp = useCallback(
     async (email: string, nickname: string, password: string) => {
       try {
-        const response = await registerUser({ email, nickname, password });
+        const response = await registerUser({
+          email,
+          nickname,
+          password,
+          acquisitionSource: resolveAcquisitionSource(),
+        });
         await saveAuthSession(
           response.accessToken,
           response.refreshToken,
@@ -149,6 +183,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setRedirectToQuestionnaire(true);
         void markOfferPushAfterRegister();
         trackUserSessionStarted('register');
+        reachYandexMetrikaGoal('register');
         toast.success('Аккаунт создан');
         return true;
       } catch (error) {

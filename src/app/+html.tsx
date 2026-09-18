@@ -1,6 +1,8 @@
 import { ScrollViewStyleReset } from 'expo-router/html';
 import { type PropsWithChildren } from 'react';
 
+const YANDEX_METRIKA_ID = process.env.EXPO_PUBLIC_YANDEX_METRIKA_ID?.trim() ?? '';
+
 // Keep the app root locked to the layout viewport so RN Web flex layout
 // stays aligned when the browser zoom level changes.
 const responsiveRootCss = `
@@ -61,7 +63,26 @@ body {
 }
 `;
 
+function yandexMetrikaBootstrap(counterId: string) {
+  return `
+(function(m,e,t,r,i,k,a){
+  m[i]=m[i]||function(){(m[i].a=m[i].a||[]).push(arguments)};
+  m[i].l=1*new Date();
+  for (var j = 0; j < document.scripts.length; j++) {if (document.scripts[j].src === r) { return; }}
+  k=e.createElement(t),a=e.getElementsByTagName(t)[0],k.async=1,k.src=r,a.parentNode.insertBefore(k,a)
+})(window, document, "script", "https://mc.yandex.ru/metrika/tag.js", "ym");
+ym(${counterId}, "init", {
+  clickmap:true,
+  trackLinks:true,
+  accurateTrackBounce:true,
+  webvisor:true
+});
+`.trim();
+}
+
 export default function Root({ children }: PropsWithChildren) {
+  const metrikaId = /^\d+$/.test(YANDEX_METRIKA_ID) ? YANDEX_METRIKA_ID : '';
+
   return (
     <html lang="ru">
       <head>
@@ -76,8 +97,26 @@ export default function Root({ children }: PropsWithChildren) {
         <link rel="apple-touch-icon" href="/icons/icon-192.png" />
         <ScrollViewStyleReset />
         <style dangerouslySetInnerHTML={{ __html: responsiveRootCss }} />
+        {metrikaId ? (
+          <script
+            dangerouslySetInnerHTML={{ __html: yandexMetrikaBootstrap(metrikaId) }}
+          />
+        ) : null}
       </head>
-      <body>{children}</body>
+      <body>
+        {children}
+        {metrikaId ? (
+          <noscript>
+            <div>
+              <img
+                src={`https://mc.yandex.ru/watch/${metrikaId}`}
+                style={{ position: 'absolute', left: -9999 }}
+                alt=""
+              />
+            </div>
+          </noscript>
+        ) : null}
+      </body>
     </html>
   );
 }

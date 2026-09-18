@@ -9,6 +9,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { stackScreenOptions } from '@/constants/navigation.config';
 import { AppToast } from '@/components/ui';
 import { GlobalLoadingOverlay } from '@/components/ui/feedback/GlobalLoadingOverlay';
+import { YandexMetrikaTracker } from '@/components/analytics/YandexMetrikaTracker';
 import { ThemeProvider } from '@/context/ThemeContext';
 import { AuthProvider } from '@/context/AuthContext';
 import { ProfileProvider } from '@/context/ProfileContext';
@@ -47,6 +48,7 @@ export default function RootLayout() {
               <ProfileProvider>
                 <PushPromptProvider>
                   <View style={rootStyles.container}>
+                    <YandexMetrikaTracker />
                     <RootNavigator />
                     <AppToast />
                     <GlobalLoadingOverlay />

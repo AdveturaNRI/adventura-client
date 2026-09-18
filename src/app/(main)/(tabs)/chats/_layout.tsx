@@ -63,6 +63,7 @@ const styles = StyleSheet.create({
     minWidth: 300,
     borderRightWidth: 1,
     minHeight: 0,
+    overflow: 'hidden',
   },
   pane: {
     flex: 1,
