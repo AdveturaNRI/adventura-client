@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 import { Link, useLocalSearchParams, useRouter } from 'expo-router';
 
@@ -31,21 +31,33 @@ function firstParam(value: string | string[] | undefined): string {
   return value ?? '';
 }
 
+function tokenFromWindow(): string {
+  if (typeof window === 'undefined') return '';
+  try {
+    return new URLSearchParams(window.location.search).get('token')?.trim() ?? '';
+  } catch {
+    return '';
+  }
+}
+
 type Status = 'loading' | 'ok' | 'error';
 
 export default function VerifyEmailScreen() {
   const router = useRouter();
   const params = useLocalSearchParams<{ token?: string | string[] }>();
-  const token = useMemo(() => firstParam(params.token).trim(), [params.token]);
+  const paramToken = useMemo(() => firstParam(params.token).trim(), [params.token]);
+  const token = paramToken || tokenFromWindow();
   const { isAuthenticated, updateUser } = useAuth();
   const styles = useThemedStyles(createStyles);
   const [status, setStatus] = useState<Status>(token ? 'loading' : 'error');
   const [message, setMessage] = useState(
     token ? 'Подтверждаем почту...' : 'В ссылке нет токена',
   );
+  const didVerify = useRef(false);
 
   useEffect(() => {
-    if (!token) return;
+    if (!token || didVerify.current) return;
+    didVerify.current = true;
 
     let cancelled = false;
 
@@ -54,18 +66,16 @@ export default function VerifyEmailScreen() {
         await verifyEmail(token);
         if (cancelled) return;
 
-        if (isAuthenticated) {
-          try {
-            const accessToken = await getStoredToken();
-            if (accessToken) {
-              const me = await fetchCurrentUser(accessToken, { skipLoading: true });
-              await updateUser(me);
-            } else {
-              await updateUser({ emailVerified: true });
-            }
-          } catch {
+        try {
+          const accessToken = await getStoredToken();
+          if (accessToken) {
+            const me = await fetchCurrentUser(accessToken, { skipLoading: true });
+            await updateUser(me);
+          } else {
             await updateUser({ emailVerified: true });
           }
+        } catch {
+          await updateUser({ emailVerified: true });
         }
 
         setStatus('ok');
@@ -80,7 +90,7 @@ export default function VerifyEmailScreen() {
     return () => {
       cancelled = true;
     };
-  }, [token, isAuthenticated, updateUser]);
+  }, [token, updateUser]);
 
   return (
     <AuthScreenLayout>

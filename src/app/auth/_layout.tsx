@@ -1,4 +1,4 @@
-import { Redirect, Stack, usePathname } from 'expo-router';
+import { Redirect, Stack, usePathname, useRootNavigationState } from 'expo-router';
 import { ActivityIndicator, StyleSheet, View } from 'react-native';
 
 import { AuthHeader } from '@/components/navigation/header';
@@ -8,18 +8,36 @@ import { useAuth } from '@/context/AuthContext';
 import { useTheme } from '@/hooks/use-theme';
 import { QUESTIONNAIRE_ENTRY } from '@/screens/questionnaire/questionnaire.config';
 
-/** Token flows must stay reachable even when already logged in. */
-const AUTH_PUBLIC_WHEN_LOGGED_IN = new Set([
-  '/auth/verify-email',
-  '/auth/reset-password',
-]);
+function isEmailTokenPath(path: string) {
+  const normalized = path.split('?')[0].replace(/\/$/, '');
+  return (
+    normalized.endsWith('/verify-email') ||
+    normalized.endsWith('/reset-password') ||
+    normalized.includes('/verify-email') ||
+    normalized.includes('/reset-password')
+  );
+}
+
+/** Prefer window path on web — usePathname can lag on first paint / static hydrate. */
+function useIsEmailTokenRoute() {
+  const pathname = usePathname();
+  if (typeof window !== 'undefined' && isEmailTokenPath(window.location.pathname)) {
+    return true;
+  }
+  return isEmailTokenPath(pathname);
+}
 
 export default function AuthLayout() {
   const pathname = usePathname();
+  const navigationState = useRootNavigationState();
+  const isEmailTokenRoute = useIsEmailTokenRoute();
   const { isAuthenticated, isLoading, redirectToQuestionnaire } = useAuth();
   const colors = useTheme();
 
-  if (isLoading) {
+  const navReady = Boolean(navigationState?.key);
+
+  // Don't unmount token screens while session restores — otherwise verify never runs.
+  if ((isLoading || !navReady) && !isEmailTokenRoute) {
     return (
       <View style={[styles.loader, { backgroundColor: colors.background }]}>
         <ActivityIndicator color={colors.primary} />
@@ -27,9 +45,7 @@ export default function AuthLayout() {
     );
   }
 
-  const allowWhileLoggedIn = AUTH_PUBLIC_WHEN_LOGGED_IN.has(pathname);
-
-  if (isAuthenticated && !allowWhileLoggedIn) {
+  if (navReady && isAuthenticated && !isLoading && !isEmailTokenRoute) {
     return <Redirect href={redirectToQuestionnaire ? QUESTIONNAIRE_ENTRY : MAIN_APP_ENTRY} />;
   }
 
@@ -47,7 +63,7 @@ export default function AuthLayout() {
         <Stack.Screen name="reset-password" />
         <Stack.Screen name="verify-email" />
       </Stack>
-      {pathname.startsWith('/auth') ? <AuthHeader /> : null}
+      {pathname.startsWith('/auth') || isEmailTokenRoute ? <AuthHeader /> : null}
     </View>
   );
 }
