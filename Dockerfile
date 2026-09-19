@@ -2,7 +2,9 @@ FROM node:22-bookworm-slim AS build
 WORKDIR /app
 
 ARG EXPO_PUBLIC_API_URL=https://api.adventu.ru/api
-ARG EXPO_PUBLIC_YANDEX_METRIKA_ID=
+# Optional bake-in for Metrika HTML checkers. Runtime still reads admin
+# /api/config/public; set this on image build so ym(ID) appears in index.html.
+ARG EXPO_PUBLIC_YANDEX_METRIKA_ID=112799671
 ENV EXPO_PUBLIC_API_URL=$EXPO_PUBLIC_API_URL
 ENV EXPO_PUBLIC_YANDEX_METRIKA_ID=$EXPO_PUBLIC_YANDEX_METRIKA_ID
 ENV CI=1

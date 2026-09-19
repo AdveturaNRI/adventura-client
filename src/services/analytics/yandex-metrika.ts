@@ -2,15 +2,12 @@ import { Platform } from 'react-native';
 
 import { apiRequest } from '@/services/api/client';
 
-type YmFn = (
-  counterId: number | string,
-  method: string,
-  ...args: unknown[]
-) => void;
+type YmFn = (...args: unknown[]) => void;
 
 declare global {
   interface Window {
     ym?: YmFn;
+    __ADVENTURA_YM_ID__?: string;
   }
 }
 
@@ -37,10 +34,16 @@ export function getYandexMetrikaId(): string | null {
   if (Platform.OS !== 'web') {
     return null;
   }
-  return resolvedId ?? normalizeCounterId(ENV_COUNTER_ID);
+  return (
+    resolvedId ??
+    normalizeCounterId(
+      typeof window !== 'undefined' ? window.__ADVENTURA_YM_ID__ : null,
+    ) ??
+    normalizeCounterId(ENV_COUNTER_ID)
+  );
 }
 
-function ym(...args: Parameters<YmFn>): void {
+function ym(...args: unknown[]): void {
   if (typeof window === 'undefined' || typeof window.ym !== 'function') {
     return;
   }
@@ -51,56 +54,94 @@ function ym(...args: Parameters<YmFn>): void {
   }
 }
 
-function loadTagScript(): Promise<void> {
+function ensureYmStub(): void {
+  if (typeof window === 'undefined' || typeof window.ym === 'function') {
+    return;
+  }
+  // Official Metrika queue stub (`arguments`, not a rest-array).
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const stub: any = function () {
+    // eslint-disable-next-line prefer-rest-params
+    (stub.a = stub.a || []).push(arguments);
+  };
+  stub.l = Date.now();
+  window.ym = stub;
+}
+
+function loadTagScript(counterId: string): Promise<void> {
   if (typeof document === 'undefined') {
     return Promise.resolve();
   }
-  if (typeof window.ym === 'function') {
-    return Promise.resolve();
+
+  ensureYmStub();
+
+  const src = `https://mc.yandex.ru/metrika/tag.js?id=${counterId}`;
+  const existing = document.querySelector<HTMLScriptElement>(
+    'script[src*="mc.yandex.ru/metrika/tag.js"]',
+  );
+
+  if (existing) {
+    if (existing.dataset.loaded === '1' || existing.dataset.loaded === 'error') {
+      return Promise.resolve();
+    }
+    return new Promise((resolve) => {
+      existing.addEventListener(
+        'load',
+        () => {
+          existing.dataset.loaded = '1';
+          resolve();
+        },
+        { once: true },
+      );
+      existing.addEventListener(
+        'error',
+        () => {
+          existing.dataset.loaded = 'error';
+          resolve();
+        },
+        { once: true },
+      );
+    });
   }
 
   return new Promise((resolve) => {
-    const existing = document.querySelector<HTMLScriptElement>(
-      'script[src="https://mc.yandex.ru/metrika/tag.js"]',
-    );
-    if (existing) {
-      existing.addEventListener('load', () => resolve(), { once: true });
-      existing.addEventListener('error', () => resolve(), { once: true });
-      // ym stub may already exist from +html bootstrap
-      if (typeof window.ym === 'function') {
-        resolve();
-      }
-      return;
-    }
-
-    window.ym =
-      window.ym ||
-      function (...args: unknown[]) {
-        (window.ym as YmFn & { a?: unknown[] }).a =
-          (window.ym as YmFn & { a?: unknown[] }).a || [];
-        (window.ym as YmFn & { a?: unknown[] }).a!.push(args);
-      };
-
     const script = document.createElement('script');
     script.async = true;
-    script.src = 'https://mc.yandex.ru/metrika/tag.js';
-    script.onload = () => resolve();
-    script.onerror = () => resolve();
+    script.src = src;
+    script.onload = () => {
+      script.dataset.loaded = '1';
+      resolve();
+    };
+    script.onerror = () => {
+      script.dataset.loaded = 'error';
+      resolve();
+    };
     document.head.appendChild(script);
   });
 }
 
 function initCounter(config: YandexMetrikaRuntimeConfig): void {
-  if (initializedId === config.counterId) {
+  if (
+    initializedId === config.counterId ||
+    window.__ADVENTURA_YM_ID__ === config.counterId
+  ) {
+    initializedId = config.counterId;
     return;
   }
-  ym(config.counterId, 'init', {
+  // SPA: defer disables automatic pageview; hits go through hitYandexMetrika.
+  ym(Number(config.counterId), 'init', {
+    defer: true,
+    ssr: true,
     clickmap: config.clickmap,
     trackLinks: config.trackLinks,
     accurateTrackBounce: config.accurateTrackBounce,
     webvisor: config.webvisor,
+    triggerEvent: true,
+    referrer: typeof document !== 'undefined' ? document.referrer : undefined,
+    url: typeof location !== 'undefined' ? location.href : undefined,
   });
   initializedId = config.counterId;
+  window.__ADVENTURA_YM_ID__ = config.counterId;
 }
 
 async function fetchRuntimeConfig(): Promise<
@@ -123,7 +164,6 @@ async function fetchRuntimeConfig(): Promise<
 
     const counterId = normalizeCounterId(payload.yandexMetrika?.counterId);
     if (!counterId) {
-      // Admin explicitly disabled (empty ID) — do not fall back to env.
       return { source: 'api', config: null };
     }
 
@@ -157,6 +197,13 @@ export async function bootstrapYandexMetrika(): Promise<string | null> {
   }
 
   bootPromise = (async () => {
+    const already = normalizeCounterId(window.__ADVENTURA_YM_ID__);
+    if (already) {
+      resolvedId = already;
+      initializedId = already;
+      return already;
+    }
+
     const fetched = await fetchRuntimeConfig();
 
     let config: YandexMetrikaRuntimeConfig | null = null;
@@ -180,7 +227,7 @@ export async function bootstrapYandexMetrika(): Promise<string | null> {
       return null;
     }
 
-    await loadTagScript();
+    await loadTagScript(config.counterId);
     initCounter(config);
     resolvedId = config.counterId;
     return config.counterId;
@@ -198,7 +245,7 @@ export function hitYandexMetrika(
   if (!id) {
     return;
   }
-  ym(id, 'hit', url, {
+  ym(Number(id), 'hit', url, {
     title: options?.title,
     referer: options?.referer,
   });
@@ -213,10 +260,10 @@ export function reachYandexMetrikaGoal(
     return;
   }
   if (params && Object.keys(params).length > 0) {
-    ym(id, 'reachGoal', goal, params);
+    ym(Number(id), 'reachGoal', goal, params);
     return;
   }
-  ym(id, 'reachGoal', goal);
+  ym(Number(id), 'reachGoal', goal);
 }
 
 export function setYandexMetrikaUserId(userId: string | null): void {
@@ -225,8 +272,8 @@ export function setYandexMetrikaUserId(userId: string | null): void {
     return;
   }
   if (userId) {
-    ym(id, 'setUserID', userId);
+    ym(Number(id), 'setUserID', userId);
     return;
   }
-  ym(id, 'userParams', { UserID: null });
+  ym(Number(id), 'userParams', { UserID: null });
 }

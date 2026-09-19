@@ -2,6 +2,9 @@ import { ScrollViewStyleReset } from 'expo-router/html';
 import { type PropsWithChildren } from 'react';
 
 const YANDEX_METRIKA_ID = process.env.EXPO_PUBLIC_YANDEX_METRIKA_ID?.trim() ?? '';
+const API_BASE_URL =
+  process.env.EXPO_PUBLIC_API_URL?.replace(/\/$/, '') ??
+  'https://api.adventu.ru/api';
 
 // Keep the app root locked to the layout viewport so RN Web flex layout
 // stays aligned when the browser zoom level changes.
@@ -63,25 +66,75 @@ body {
 }
 `;
 
-function yandexMetrikaBootstrap(counterId: string) {
+/** Official snippet when ID is known at build time (helps Metrika HTML checker). */
+function yandexMetrikaStaticBootstrap(counterId: string) {
   return `
 (function(m,e,t,r,i,k,a){
   m[i]=m[i]||function(){(m[i].a=m[i].a||[]).push(arguments)};
   m[i].l=1*new Date();
   for (var j = 0; j < document.scripts.length; j++) {if (document.scripts[j].src === r) { return; }}
   k=e.createElement(t),a=e.getElementsByTagName(t)[0],k.async=1,k.src=r,a.parentNode.insertBefore(k,a)
-})(window, document, "script", "https://mc.yandex.ru/metrika/tag.js", "ym");
+})(window, document, "script", "https://mc.yandex.ru/metrika/tag.js?id=${counterId}", "ym");
 ym(${counterId}, "init", {
+  defer:true,
+  ssr:true,
   clickmap:true,
   trackLinks:true,
   accurateTrackBounce:true,
-  webvisor:true
+  webvisor:true,
+  triggerEvent:true,
+  referrer: document.referrer,
+  url: location.href
 });
+window.__ADVENTURA_YM_ID__="${counterId}";
+`.trim();
+}
+
+/**
+ * Loads counter ID from admin API ASAP (before React).
+ * Puts Metrika install path in the HTML source so verification / SPA boot work
+ * even when EXPO_PUBLIC_YANDEX_METRIKA_ID was empty at build time.
+ */
+function yandexMetrikaEarlyApiLoader(apiBase: string) {
+  return `
+(function(){
+  if (window.__ADVENTURA_YM_ID__) return;
+  var api = ${JSON.stringify(apiBase)};
+  if (!api) return;
+  fetch(api + "/config/public", { credentials: "omit", cache: "no-store" })
+    .then(function(r){ return r.json(); })
+    .then(function(cfg){
+      var m = cfg && cfg.yandexMetrika;
+      var id = m && m.counterId;
+      if (!id || !/^\\d+$/.test(String(id))) return;
+      if (window.__ADVENTURA_YM_ID__) return;
+      (function(m,e,t,r,i,k,a){
+        m[i]=m[i]||function(){(m[i].a=m[i].a||[]).push(arguments)};
+        m[i].l=1*new Date();
+        for (var j = 0; j < document.scripts.length; j++) {if (document.scripts[j].src.indexOf("mc.yandex.ru/metrika/tag.js") !== -1) { return; }}
+        k=e.createElement(t),a=e.getElementsByTagName(t)[0],k.async=1,k.src=r,a.parentNode.insertBefore(k,a)
+      })(window, document, "script", "https://mc.yandex.ru/metrika/tag.js?id=" + id, "ym");
+      ym(Number(id), "init", {
+        defer: true,
+        ssr: true,
+        clickmap: m.clickmap !== false,
+        trackLinks: m.trackLinks !== false,
+        accurateTrackBounce: m.accurateTrackBounce !== false,
+        webvisor: m.webvisor !== false,
+        triggerEvent: true,
+        referrer: document.referrer,
+        url: location.href
+      });
+      window.__ADVENTURA_YM_ID__ = String(id);
+    })
+    .catch(function(){});
+})();
 `.trim();
 }
 
 export default function Root({ children }: PropsWithChildren) {
   const metrikaId = /^\d+$/.test(YANDEX_METRIKA_ID) ? YANDEX_METRIKA_ID : '';
+  const apiBase = API_BASE_URL;
 
   return (
     <html lang="ru">
@@ -99,7 +152,16 @@ export default function Root({ children }: PropsWithChildren) {
         <style dangerouslySetInnerHTML={{ __html: responsiveRootCss }} />
         {metrikaId ? (
           <script
-            dangerouslySetInnerHTML={{ __html: yandexMetrikaBootstrap(metrikaId) }}
+            dangerouslySetInnerHTML={{
+              __html: yandexMetrikaStaticBootstrap(metrikaId),
+            }}
+          />
+        ) : null}
+        {apiBase ? (
+          <script
+            dangerouslySetInnerHTML={{
+              __html: yandexMetrikaEarlyApiLoader(apiBase),
+            }}
           />
         ) : null}
       </head>
