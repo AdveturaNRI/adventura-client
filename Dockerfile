@@ -24,6 +24,7 @@ COPY src ./src
 # 404.html is what serve returns with HTTP 404 for unknown paths (see serve.json).
 RUN npx expo export -p web \
   && cp public/dice-stage.html dist/dice-stage.html \
+  && cp public/serve.json dist/serve.json \
   && cp dist/+not-found.html dist/404.html
 
 FROM node:22-bookworm-slim AS runner
