@@ -184,7 +184,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         void markOfferPushAfterRegister();
         trackUserSessionStarted('register');
         reachYandexMetrikaGoal('register');
-        toast.success('Аккаунт создан');
+        toast.success('Аккаунт создан — проверьте почту для подтверждения');
         return true;
       } catch (error) {
         const message = localizeErrorMessage(error, 'Не удалось зарегистрироваться');

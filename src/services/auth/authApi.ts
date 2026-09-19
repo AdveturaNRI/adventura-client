@@ -53,4 +53,38 @@ export function guestLogin() {
   });
 }
 
+export function requestEmailVerification(token: string) {
+  return apiRequest<{ ok: boolean; alreadyVerified?: boolean }>(
+    '/auth/verify-email/request',
+    {
+      method: 'POST',
+      token,
+    },
+  );
+}
+
+export function verifyEmail(tokenValue: string) {
+  return apiRequest<{ ok: boolean }>('/auth/verify-email', {
+    method: 'POST',
+    body: { token: tokenValue },
+    skipAuthRefresh: true,
+  });
+}
+
+export function forgotPassword(email: string) {
+  return apiRequest<{ ok: boolean }>('/auth/forgot-password', {
+    method: 'POST',
+    body: { email },
+    skipAuthRefresh: true,
+  });
+}
+
+export function resetPassword(tokenValue: string, password: string) {
+  return apiRequest<{ ok: boolean }>('/auth/reset-password', {
+    method: 'POST',
+    body: { token: tokenValue, password },
+    skipAuthRefresh: true,
+  });
+}
+
 export { logoutUser, refreshAuthTokens } from '@/services/auth/token-refresh';

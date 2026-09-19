@@ -18,7 +18,23 @@ export async function getStoredUser(): Promise<AuthUser | null> {
   const raw = await AsyncStorage.getItem(AUTH_USER_KEY);
   if (!raw) return null;
 
-  return JSON.parse(raw) as AuthUser;
+  const parsed = JSON.parse(raw) as Partial<AuthUser> & {
+    id?: string;
+    email?: string;
+    nickname?: string;
+  };
+
+  if (!parsed?.id || !parsed.email || !parsed.nickname) {
+    return null;
+  }
+
+  return {
+    id: parsed.id,
+    email: parsed.email,
+    nickname: parsed.nickname,
+    isGuest: Boolean(parsed.isGuest),
+    emailVerified: Boolean(parsed.emailVerified),
+  };
 }
 
 export async function saveAuthSession(

@@ -144,9 +144,11 @@ export default function LoginScreen() {
         />
 
         <View style={styles.forgotRow}>
-          <Pressable hitSlop={8}>
-            <LinkLabel>Забыли пароль?</LinkLabel>
-          </Pressable>
+          <Link href="/auth/forgot-password" asChild>
+            <Pressable hitSlop={8}>
+              <LinkLabel>Забыли пароль?</LinkLabel>
+            </Pressable>
+          </Link>
         </View>
       </View>
 

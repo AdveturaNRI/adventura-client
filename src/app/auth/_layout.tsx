@@ -8,6 +8,12 @@ import { useAuth } from '@/context/AuthContext';
 import { useTheme } from '@/hooks/use-theme';
 import { QUESTIONNAIRE_ENTRY } from '@/screens/questionnaire/questionnaire.config';
 
+/** Token flows must stay reachable even when already logged in. */
+const AUTH_PUBLIC_WHEN_LOGGED_IN = new Set([
+  '/auth/verify-email',
+  '/auth/reset-password',
+]);
+
 export default function AuthLayout() {
   const pathname = usePathname();
   const { isAuthenticated, isLoading, redirectToQuestionnaire } = useAuth();
@@ -21,7 +27,9 @@ export default function AuthLayout() {
     );
   }
 
-  if (isAuthenticated) {
+  const allowWhileLoggedIn = AUTH_PUBLIC_WHEN_LOGGED_IN.has(pathname);
+
+  if (isAuthenticated && !allowWhileLoggedIn) {
     return <Redirect href={redirectToQuestionnaire ? QUESTIONNAIRE_ENTRY : MAIN_APP_ENTRY} />;
   }
 
@@ -35,6 +43,9 @@ export default function AuthLayout() {
         }}>
         <Stack.Screen name="login" />
         <Stack.Screen name="register" />
+        <Stack.Screen name="forgot-password" />
+        <Stack.Screen name="reset-password" />
+        <Stack.Screen name="verify-email" />
       </Stack>
       {pathname.startsWith('/auth') ? <AuthHeader /> : null}
     </View>
