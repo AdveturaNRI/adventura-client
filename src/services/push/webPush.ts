@@ -1,20 +1,33 @@
 import { Platform } from 'react-native';
 
 import { apiRequest } from '@/services/api/client';
+import {
+  firebaseWebConfig,
+  firebaseWebVapidKey,
+  isFirebaseWebConfigured,
+} from '@/services/push/firebase-config';
 
 const SW_PATH = '/service-worker.js';
+const FCM_TOKEN_KEY = '@adventura/fcm-device-token';
 
-/** Временно скрыто: пункт в настройках и все запросы разрешения. */
-export const WEB_PUSH_OPT_IN_ENABLED = false;
+/** Firebase Cloud Messaging opt-in (settings + soft prompt). */
+export const WEB_PUSH_OPT_IN_ENABLED = true;
 
 type VapidPublicKeyResponse = {
   publicKey: string | null;
   enabled: boolean;
+  provider?: 'fcm' | 'webpush';
+  reason?: 'missing_vapid' | 'provider_unconfigured' | null;
 };
 
 type PushStatusResponse = {
   subscribed: boolean;
 };
+
+let messagingPromise: Promise<import('firebase/messaging').Messaging | null> | null =
+  null;
+let vapidCache: { key: string; at: number } | null = null;
+const VAPID_CACHE_MS = 5 * 60_000;
 
 function canUseWebPush(): boolean {
   return (
@@ -27,7 +40,7 @@ function canUseWebPush(): boolean {
 }
 
 export function isWebPushSupported(): boolean {
-  return canUseWebPush();
+  return canUseWebPush() && isFirebaseWebConfigured();
 }
 
 export function getNotificationPermission(): NotificationPermission | 'unsupported' {
@@ -58,15 +71,30 @@ export function isIosSafariNeedPwaHint(): boolean {
   return !isStandalone;
 }
 
-function urlBase64ToUint8Array(base64String: string): Uint8Array {
-  const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
-  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
-  const rawData = atob(base64);
-  const outputArray = new Uint8Array(rawData.length);
-  for (let i = 0; i < rawData.length; i += 1) {
-    outputArray[i] = rawData.charCodeAt(i);
+function rememberToken(token: string | null) {
+  try {
+    if (typeof localStorage === 'undefined') {
+      return;
+    }
+    if (token) {
+      localStorage.setItem(FCM_TOKEN_KEY, token);
+    } else {
+      localStorage.removeItem(FCM_TOKEN_KEY);
+    }
+  } catch {
+    // ignore
   }
-  return outputArray;
+}
+
+function readRememberedToken(): string | null {
+  try {
+    if (typeof localStorage === 'undefined') {
+      return null;
+    }
+    return localStorage.getItem(FCM_TOKEN_KEY);
+  } catch {
+    return null;
+  }
 }
 
 async function ensureServiceWorker(): Promise<ServiceWorkerRegistration | null> {
@@ -76,32 +104,142 @@ async function ensureServiceWorker(): Promise<ServiceWorkerRegistration | null> 
   return navigator.serviceWorker.register(SW_PATH);
 }
 
-export async function getCurrentPushEndpoint(): Promise<string | null> {
-  if (!canUseWebPush()) {
+async function getFirebaseMessaging(): Promise<
+  import('firebase/messaging').Messaging | null
+> {
+  if (!canUseWebPush() || !isFirebaseWebConfigured()) {
     return null;
   }
-  const registration = await navigator.serviceWorker.getRegistration(SW_PATH);
-  const subscription = await registration?.pushManager.getSubscription();
-  return subscription?.endpoint ?? null;
+  if (!messagingPromise) {
+    messagingPromise = (async () => {
+      const { initializeApp, getApps } = await import('firebase/app');
+      const { getMessaging, isSupported } = await import('firebase/messaging');
+      if (!(await isSupported())) {
+        return null;
+      }
+      const app =
+        getApps().length > 0 ? getApps()[0]! : initializeApp(firebaseWebConfig);
+      return getMessaging(app);
+    })().catch(() => null);
+  }
+  return messagingPromise;
+}
+
+/**
+ * VAPID for FCM getToken: server key → client EXPO_PUBLIC_FIREBASE_VAPID_KEY.
+ * Cached — settings/prompt otherwise spam /push/vapid-public-key.
+ */
+async function resolveVapidKey(): Promise<{
+  key: string | null;
+  reason?: 'missing_vapid' | 'provider_unconfigured' | 'server_disabled';
+}> {
+  if (vapidCache && Date.now() - vapidCache.at < VAPID_CACHE_MS) {
+    return { key: vapidCache.key };
+  }
+
+  try {
+    const vapid = await apiRequest<VapidPublicKeyResponse>('/push/vapid-public-key', {
+      skipLoading: true,
+    });
+    const serverKey = vapid?.publicKey?.trim() || '';
+    if (vapid?.enabled && serverKey) {
+      vapidCache = { key: serverKey, at: Date.now() };
+      return { key: serverKey };
+    }
+    if (firebaseWebVapidKey) {
+      vapidCache = { key: firebaseWebVapidKey, at: Date.now() };
+      return { key: firebaseWebVapidKey };
+    }
+    return {
+      key: null,
+      reason: vapid?.reason === 'missing_vapid' ? 'missing_vapid' : 'server_disabled',
+    };
+  } catch {
+    if (firebaseWebVapidKey) {
+      vapidCache = { key: firebaseWebVapidKey, at: Date.now() };
+      return { key: firebaseWebVapidKey };
+    }
+    return { key: null, reason: 'server_disabled' };
+  }
+}
+
+export async function getCurrentPushEndpoint(): Promise<string | null> {
+  return readRememberedToken();
 }
 
 export async function fetchPushStatusForThisDevice(): Promise<boolean> {
-  const endpoint = await getCurrentPushEndpoint();
-  if (!endpoint) {
+  const token = readRememberedToken();
+  if (!token) {
     return false;
   }
   const status = await apiRequest<PushStatusResponse>(
-    `/push/subscriptions/status?endpoint=${encodeURIComponent(endpoint)}`,
+    `/push/fcm-tokens/status?token=${encodeURIComponent(token)}`,
     { skipLoading: true },
   );
   return status.subscribed;
+}
+
+/**
+ * Re-bind current device FCM token to the logged-in user (no permission prompt).
+ * Call after login / session restore when Notification.permission === 'granted'.
+ */
+export async function syncWebPushToUser(): Promise<boolean> {
+  if (!WEB_PUSH_OPT_IN_ENABLED || !canUseWebPush() || !isFirebaseWebConfigured()) {
+    return false;
+  }
+  if (Notification.permission !== 'granted') {
+    return false;
+  }
+  if (isIosSafariNeedPwaHint()) {
+    return false;
+  }
+
+  try {
+    const { key } = await resolveVapidKey();
+    if (!key) {
+      return false;
+    }
+
+    const registration = await ensureServiceWorker();
+    if (!registration) {
+      return false;
+    }
+    await navigator.serviceWorker.ready;
+
+    const messaging = await getFirebaseMessaging();
+    if (!messaging) {
+      return false;
+    }
+
+    const { getToken } = await import('firebase/messaging');
+    const token = await getToken(messaging, {
+      vapidKey: key,
+      serviceWorkerRegistration: registration,
+    });
+    if (!token) {
+      return false;
+    }
+
+    rememberToken(token);
+    await apiRequest('/push/fcm-tokens', {
+      method: 'POST',
+      body: {
+        token,
+        userAgent: typeof navigator !== 'undefined' ? navigator.userAgent : undefined,
+      },
+      skipLoading: true,
+    });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export async function enableWebPush(): Promise<{ ok: boolean; reason?: string }> {
   if (!WEB_PUSH_OPT_IN_ENABLED) {
     return { ok: false, reason: 'unsupported' };
   }
-  if (!canUseWebPush()) {
+  if (!canUseWebPush() || !isFirebaseWebConfigured()) {
     return { ok: false, reason: 'unsupported' };
   }
 
@@ -120,22 +258,9 @@ export async function enableWebPush(): Promise<{ ok: boolean; reason?: string }>
     return { ok: false, reason: 'denied' };
   }
 
-  const vapid = await apiRequest<VapidPublicKeyResponse>('/push/vapid-public-key', {
-    skipLoading: true,
-  });
-  if (!vapid?.enabled || !vapid.publicKey?.trim()) {
-    return { ok: false, reason: 'server_disabled' };
-  }
-
-  let applicationServerKey: Uint8Array;
-  try {
-    applicationServerKey = urlBase64ToUint8Array(vapid.publicKey.trim());
-    // VAPID public key is an uncompressed P-256 point (65 bytes).
-    if (applicationServerKey.byteLength !== 65) {
-      return { ok: false, reason: 'server_disabled' };
-    }
-  } catch {
-    return { ok: false, reason: 'server_disabled' };
+  const { key, reason: vapidReason } = await resolveVapidKey();
+  if (!key) {
+    return { ok: false, reason: vapidReason ?? 'server_disabled' };
   }
 
   const registration = await ensureServiceWorker();
@@ -145,47 +270,39 @@ export async function enableWebPush(): Promise<{ ok: boolean; reason?: string }>
 
   await navigator.serviceWorker.ready;
 
-  let subscription = await registration.pushManager.getSubscription();
-  try {
-    if (!subscription) {
-      subscription = await registration.pushManager.subscribe({
-        userVisibleOnly: true,
-        applicationServerKey: applicationServerKey as BufferSource,
-      });
-    }
-  } catch {
-    // Старая подписка могла быть на другой/битый VAPID — пересоздаём.
-    try {
-      await subscription?.unsubscribe();
-    } catch {
-      // ignore
-    }
-    try {
-      subscription = await registration.pushManager.subscribe({
-        userVisibleOnly: true,
-        applicationServerKey: applicationServerKey as BufferSource,
-      });
-    } catch {
-      return { ok: false, reason: 'subscribe_failed' };
-    }
+  const messaging = await getFirebaseMessaging();
+  if (!messaging) {
+    return { ok: false, reason: 'unsupported' };
   }
 
-  const json = subscription.toJSON();
-  if (!json.endpoint || !json.keys?.p256dh || !json.keys?.auth) {
+  let token: string;
+  try {
+    const { getToken } = await import('firebase/messaging');
+    token = await getToken(messaging, {
+      vapidKey: key,
+      serviceWorkerRegistration: registration,
+    });
+  } catch {
     return { ok: false, reason: 'subscribe_failed' };
   }
 
-  await apiRequest('/push/subscriptions', {
-    method: 'POST',
-    body: {
-      endpoint: json.endpoint,
-      keys: {
-        p256dh: json.keys.p256dh,
-        auth: json.keys.auth,
+  if (!token) {
+    return { ok: false, reason: 'subscribe_failed' };
+  }
+
+  rememberToken(token);
+
+  try {
+    await apiRequest('/push/fcm-tokens', {
+      method: 'POST',
+      body: {
+        token,
+        userAgent: typeof navigator !== 'undefined' ? navigator.userAgent : undefined,
       },
-      userAgent: typeof navigator !== 'undefined' ? navigator.userAgent : undefined,
-    },
-  });
+    });
+  } catch {
+    return { ok: false, reason: 'server_disabled' };
+  }
 
   return { ok: true };
 }
@@ -195,21 +312,28 @@ export async function disableWebPush(): Promise<void> {
     return;
   }
 
-  const registration = await navigator.serviceWorker.getRegistration(SW_PATH);
-  const subscription = await registration?.pushManager.getSubscription();
-  if (!subscription) {
-    return;
+  const token = readRememberedToken();
+  if (token) {
+    try {
+      await apiRequest('/push/fcm-tokens', {
+        method: 'DELETE',
+        body: { token },
+        skipLoading: true,
+      });
+    } catch {
+      // Still drop local token if API fails.
+    }
   }
 
-  const endpoint = subscription.endpoint;
   try {
-    await apiRequest('/push/subscriptions', {
-      method: 'DELETE',
-      body: { endpoint },
-    });
+    const messaging = await getFirebaseMessaging();
+    if (messaging) {
+      const { deleteToken } = await import('firebase/messaging');
+      await deleteToken(messaging);
+    }
   } catch {
-    // Still drop local subscription if API fails (e.g. already gone).
+    // ignore
   }
 
-  await subscription.unsubscribe();
+  rememberToken(null);
 }

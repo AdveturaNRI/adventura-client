@@ -35,7 +35,7 @@ import {
   reachYandexMetrikaGoal,
   setYandexMetrikaUserId,
 } from '@/services/analytics/yandex-metrika';
-import { markOfferPushAfterRegister } from '@/services/push/pushAttention';
+import { markOfferPushAfterAuth } from '@/services/push/pushAttention';
 
 function resolveAcquisitionSource(): string {
   if (Platform.OS !== 'web') {
@@ -152,6 +152,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         response.refreshToken,
         response.user,
       );
+      if (!response.user.isGuest) {
+        await markOfferPushAfterAuth();
+      }
       setToken(response.accessToken);
       setUser(response.user);
       trackUserSessionStarted('password');
@@ -178,10 +181,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           response.refreshToken,
           response.user,
         );
+        await markOfferPushAfterAuth();
         setToken(response.accessToken);
         setUser(response.user);
         setRedirectToQuestionnaire(true);
-        void markOfferPushAfterRegister();
         trackUserSessionStarted('register');
         reachYandexMetrikaGoal('register');
         toast.success('Аккаунт создан — проверьте почту для подтверждения');
@@ -217,6 +220,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const signOut = useCallback(async () => {
+    try {
+      const { disableWebPush } = await import('@/services/push/webPush');
+      await disableWebPush();
+    } catch {
+      // ignore push unbind errors
+    }
     const refreshToken = await getStoredRefreshToken();
     await logoutUser(refreshToken);
     await clearAuthSession();

@@ -4,19 +4,23 @@ import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 import { FontSize, Spacing, type ThemeColors } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { useThemedStyles } from '@/hooks/use-themed-styles';
+import type { PushOptInVariant } from '@/services/push/pushAttention';
 
 type PushOptInDialogProps = {
   visible: boolean;
   busy?: boolean;
+  variant?: PushOptInVariant;
   onEnable: () => void;
   onLater: () => void;
 };
 
 function createStyles(colors: ThemeColors) {
+  const isDark = colors.background === '#000000';
+
   return StyleSheet.create({
     backdrop: {
       flex: 1,
-      backgroundColor: colors.overlay,
+      backgroundColor: isDark ? 'rgba(0,0,0,0.72)' : colors.overlay,
       justifyContent: 'center',
       alignItems: 'center',
       paddingHorizontal: Spacing.lg,
@@ -26,6 +30,8 @@ function createStyles(colors: ThemeColors) {
       maxWidth: 420,
       borderRadius: 20,
       backgroundColor: colors.surface,
+      borderWidth: 1,
+      borderColor: colors.border,
       padding: Spacing.lg,
       gap: Spacing.md,
     },
@@ -40,7 +46,7 @@ function createStyles(colors: ThemeColors) {
       borderRadius: 18,
       alignItems: 'center',
       justifyContent: 'center',
-      backgroundColor: colors.primaryLight,
+      backgroundColor: isDark ? 'rgba(21, 122, 254, 0.22)' : colors.primaryLight,
       flexShrink: 0,
     },
     headerText: {
@@ -94,11 +100,13 @@ function createStyles(colors: ThemeColors) {
 export function PushOptInDialog({
   visible,
   busy = false,
+  variant = 'opt-in',
   onEnable,
   onLater,
 }: PushOptInDialogProps) {
   const colors = useTheme();
   const styles = useThemedStyles(createStyles);
+  const isReconnect = variant === 'reconnect';
 
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onLater}>
@@ -109,9 +117,13 @@ export function PushOptInDialog({
               <Ionicons name="notifications-outline" size={18} color={colors.primary} />
             </View>
             <View style={styles.headerText}>
-              <Text style={styles.title}>Уведомления</Text>
+              <Text style={styles.title}>
+                {isReconnect ? 'Подключим уведомления заново' : 'Уведомления'}
+              </Text>
               <Text style={styles.message}>
-                Хотите вовремя узнавать об откликах на игры и новых сообщениях?
+                {isReconnect
+                  ? 'Разрешение браузера уже есть, но доставка ещё не настроена. Нажмите «Подключить» — системный запрос больше не появится.'
+                  : 'Хотите вовремя узнавать об откликах на игры и новых сообщениях?'}
               </Text>
             </View>
           </View>
@@ -121,7 +133,9 @@ export function PushOptInDialog({
               style={({ pressed }) => [styles.enableButton, pressed || busy ? styles.pressed : null]}
               disabled={busy}
               onPress={onEnable}>
-              <Text style={styles.enableLabel}>{busy ? 'Подключаем…' : 'Включить'}</Text>
+              <Text style={styles.enableLabel}>
+                {busy ? 'Подключаем…' : isReconnect ? 'Подключить' : 'Включить'}
+              </Text>
             </Pressable>
             <Pressable
               style={styles.laterButton}

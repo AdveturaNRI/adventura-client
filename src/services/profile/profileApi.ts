@@ -29,6 +29,9 @@ export type UpdateProfilePayload = {
   prefersFreeOnly?: boolean;
   questionnaireStep?: number;
   isPublic?: boolean;
+  notificationSoundsEnabled?: boolean;
+  notificationSoundPresetId?: string | null;
+  useCustomNotificationSound?: boolean;
 };
 
 function parseQuestionnaireAge(age: string): number | null {
@@ -156,6 +159,24 @@ export function deleteProfileCard() {
   inflightProfileRequest = null;
 
   return apiRequest<UserProfile>('/users/me/profile-card', {
+    method: 'DELETE',
+  });
+}
+
+export async function uploadNotificationSound(localUri: string, options?: {
+  fileName?: string;
+  mimeType?: string;
+}) {
+  inflightProfileRequest = null;
+  return apiUpload<UserProfile>('/users/me/notification-sound', 'sound', localUri, {
+    fileName: options?.fileName ?? 'notify.mp3',
+    mimeType: options?.mimeType ?? 'audio/mpeg',
+  });
+}
+
+export function deleteNotificationSound() {
+  inflightProfileRequest = null;
+  return apiRequest<UserProfile>('/users/me/notification-sound', {
     method: 'DELETE',
   });
 }

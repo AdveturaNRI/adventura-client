@@ -20,6 +20,7 @@ import {
 import { openConversationWith } from '@/services/chats/chatsApi';
 import { upsertWandererReaction } from '@/services/profile/wanderersApi';
 import { localizeErrorMessage } from '@/utils/localizeError';
+import { getPortalNotificationHref } from '@/utils/portal-notification-href';
 
 import { useNotificationsScreenStyles } from './notifications-screen.styles';
 
@@ -223,6 +224,18 @@ export default function NotificationsScreen() {
     [router],
   );
 
+  const openNotificationTarget = useCallback(
+    (notification: PortalNotification) => {
+      const href =
+        notification.href?.trim() || getPortalNotificationHref(notification);
+      if (!href) {
+        return;
+      }
+      router.push(href as never);
+    },
+    [router],
+  );
+
   return (
     <ScreenTransition animateOnFocus>
       <ScrollView style={styles.scroll} contentContainerStyle={styles.content}>
@@ -245,11 +258,19 @@ export default function NotificationsScreen() {
               exiting={FadeOut.duration(220)}
               layout={LinearTransition.duration(220)}>
               <NotificationCard
-                actorName={item.actor.nickname}
-                actorAvatarUrl={item.actor.avatarUrl}
-                actionText={item.actionText}
+                actorName={
+                  item.type === 'system_announcement'
+                    ? item.subject || 'Adventura'
+                    : item.actor.nickname
+                }
+                actorAvatarUrl={
+                  item.type === 'system_announcement' ? null : item.actor.avatarUrl
+                }
+                actionText={item.type === 'system_announcement' ? '' : item.actionText}
                 messageText={item.messageText}
-                subject={item.subject || undefined}
+                subject={
+                  item.type === 'system_announcement' ? undefined : item.subject || undefined
+                }
                 timestamp={formatTimestamp(item.updatedAt)}
                 unread={!item.readAt}
                 variant={
@@ -266,7 +287,16 @@ export default function NotificationsScreen() {
                   item.canAddBack ? () => void handleAddBack(item) : undefined
                 }
                 onDeletePress={() => handleDeletePress(item)}
-                onActorPress={() => openActorProfile(item)}
+                onPress={
+                  item.href || getPortalNotificationHref(item)
+                    ? () => openNotificationTarget(item)
+                    : undefined
+                }
+                onActorPress={
+                  item.type === 'system_announcement'
+                    ? undefined
+                    : () => openActorProfile(item)
+                }
               />
             </Animated.View>
           ))

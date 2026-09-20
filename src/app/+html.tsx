@@ -64,6 +64,54 @@ body {
   margin-left: auto !important;
   margin-right: auto !important;
 }
+
+/* In-app toasts: Safari/Chrome paint <button>/Pressable white and kill dark contrast. */
+.adventura-toast,
+.adventura-toast [role="button"],
+.adventura-toast button {
+  -webkit-appearance: none !important;
+  appearance: none !important;
+  background-image: none !important;
+  color: inherit !important;
+}
+
+html[data-theme="dark"] .adventura-toast {
+  background: #1c1c1e !important;
+  background-color: #1c1c1e !important;
+  border-color: #38383a !important;
+  color: #ffffff !important;
+}
+
+html[data-theme="dark"] .adventura-toast-title {
+  color: #ffffff !important;
+}
+
+html[data-theme="dark"] .adventura-toast-message {
+  color: #c7c7cc !important;
+}
+
+html[data-theme="dark"] .adventura-toast-action {
+  background: rgba(21, 122, 254, 0.22) !important;
+}
+
+html[data-theme="dark"] .adventura-toast-action-label {
+  color: #84b9ff !important;
+}
+
+html[data-theme="light"] .adventura-toast {
+  background: #ffffff !important;
+  background-color: #ffffff !important;
+  border-color: #e8e8e8 !important;
+  color: #000000 !important;
+}
+
+html[data-theme="light"] .adventura-toast-title {
+  color: #000000 !important;
+}
+
+html[data-theme="light"] .adventura-toast-message {
+  color: #4c4c4c !important;
+}
 `;
 
 /** Official snippet when ID is known at build time (helps Metrika HTML checker). */

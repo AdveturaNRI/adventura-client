@@ -29,6 +29,7 @@ import {
   stopNewMessageTitleBlink,
   unlockChatAlerts,
 } from '@/utils/chat-alerts';
+import { hydrateNotificationSoundSettingsFromProfile } from '@/utils/notification-sound-settings';
 
 type RealtimeContextValue = {
   unreadChats: number;
@@ -102,6 +103,7 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
     connectRealtime(token);
     let cancelled = false;
     let hasUnreadSynced = false;
+    void hydrateNotificationSoundSettingsFromProfile();
 
     const unbind = bindRealtimeHandlers({
       onMessageNew: (message) => {
@@ -116,7 +118,7 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
           message.kind !== 'favorite_removed' &&
           message.kind !== 'user_blocked'
         ) {
-          notifyIncomingChatMessage();
+          notifyIncomingChatMessage(message.conversationId);
         }
       },
       onConversationUpdated: (conversation) => {
@@ -174,8 +176,10 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
       return;
     }
 
-    const onInteract = () => {
+    const onGestureUnlock = () => {
       unlockChatAlerts();
+    };
+    const onInteract = () => {
       stopNewMessageTitleBlink();
     };
     const onVisibility = () => {
@@ -184,17 +188,25 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
       }
     };
 
+    // One gesture is enough to unlock autoplay — do not re-fetch sounds on every click.
+    window.addEventListener('pointerdown', onGestureUnlock, {
+      capture: true,
+      once: true,
+    });
+    window.addEventListener('keydown', onGestureUnlock, {
+      capture: true,
+      once: true,
+    });
+
     window.addEventListener('pointerdown', onInteract, true);
-    window.addEventListener('touchstart', onInteract, true);
-    window.addEventListener('click', onInteract, true);
     window.addEventListener('keydown', onInteract, true);
     window.addEventListener('focus', stopNewMessageTitleBlink);
     document.addEventListener('visibilitychange', onVisibility);
 
     return () => {
+      window.removeEventListener('pointerdown', onGestureUnlock, true);
+      window.removeEventListener('keydown', onGestureUnlock, true);
       window.removeEventListener('pointerdown', onInteract, true);
-      window.removeEventListener('touchstart', onInteract, true);
-      window.removeEventListener('click', onInteract, true);
       window.removeEventListener('keydown', onInteract, true);
       window.removeEventListener('focus', stopNewMessageTitleBlink);
       document.removeEventListener('visibilitychange', onVisibility);

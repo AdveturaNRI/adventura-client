@@ -22,6 +22,8 @@ export type NotificationCardProps = {
   onDeletePress?: () => void;
   /** Opens the actor profile — only avatar + nickname are interactive. */
   onActorPress?: () => void;
+  /** Opens the related entity (game / club / profile). */
+  onPress?: () => void;
   unread?: boolean;
   variant?: NotificationCardVariant;
 };
@@ -45,6 +47,15 @@ function createStyles(colors: ThemeColors) {
     cardUnread: {
       borderColor: colors.primary,
       backgroundColor: colors.surfaceMuted,
+    },
+    cardPressable: {
+      ...Platform.select({
+        web: { cursor: 'pointer' } as object,
+        default: {},
+      }),
+    },
+    cardPressed: {
+      opacity: 0.92,
     },
     headerRow: {
       flexDirection: 'row',
@@ -278,6 +289,7 @@ export function NotificationCard({
   onButtonPress,
   onDeletePress,
   onActorPress,
+  onPress,
   unread = false,
   variant = 'default',
 }: NotificationCardProps) {
@@ -285,8 +297,8 @@ export function NotificationCard({
   const styles = useThemedStyles(createStyles);
   const isFavorite = variant === 'favorite' || variant === 'returned';
 
-  return (
-    <View style={[styles.card, unread && styles.cardUnread]}>
+  const content = (
+    <>
       <View style={styles.headerRow}>
         <ActorAvatar
           name={actorName}
@@ -371,6 +383,25 @@ export function NotificationCard({
           </Pressable>
         ) : null}
       </View>
-    </View>
+    </>
   );
+
+  if (onPress) {
+    return (
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={`Открыть: ${subject || actorName}`}
+        onPress={onPress}
+        style={({ pressed }) => [
+          styles.card,
+          unread && styles.cardUnread,
+          styles.cardPressable,
+          pressed && styles.cardPressed,
+        ]}>
+        {content}
+      </Pressable>
+    );
+  }
+
+  return <View style={[styles.card, unread && styles.cardUnread]}>{content}</View>;
 }

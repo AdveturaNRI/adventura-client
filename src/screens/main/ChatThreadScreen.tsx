@@ -32,6 +32,9 @@ import { useIsDesktopSidebarVisible, useIsDesktopWeb } from '@/components/naviga
 import { ScreenTransition } from '@/components/navigation/ScreenTransition';
 import { BlockUserDialog } from '@/components/chats/BlockUserDialog';
 import { ChatAlbumGrid } from '@/components/chats/ChatAlbumGrid';
+import { ChatBackgroundLayer } from '@/components/chats/ChatBackgroundLayer';
+import { ChatBackgroundPickerSheet } from '@/components/chats/ChatBackgroundPickerSheet';
+import { applySharedConversationBackground } from '@/utils/chat-background-settings';
 import { ChatDiceBubble } from '@/components/chats/ChatDiceBubble';
 import {
   ChatDiceOverlay,
@@ -97,6 +100,7 @@ import {
   loadDiceAnimationSpeed,
   subscribeDiceAnimationSpeed,
 } from '@/utils/dice-animations-storage';
+import { setFocusedChatConversation } from '@/utils/chat-alerts';
 import { localizeErrorMessage } from '@/utils/localizeError';
 import { shouldSendChatOnEnter } from '@/utils/chat-enter-key';
 import {
@@ -502,6 +506,7 @@ function createStyles(colors: ThemeColors, bottomPad: number, isDark: boolean) {
       borderBottomWidth: StyleSheet.hairlineWidth,
       borderBottomColor: colors.borderLight,
       backgroundColor: colors.surface,
+      zIndex: 2,
     },
     headerAvatarWrap: {
       width: 40,
@@ -811,6 +816,8 @@ function createStyles(colors: ThemeColors, bottomPad: number, isDark: boolean) {
     list: {
       flex: 1,
       minHeight: 0,
+      zIndex: 1,
+      backgroundColor: 'transparent',
       ...(Platform.OS === 'web'
         ? ({
             overflow: 'auto',
@@ -1001,6 +1008,7 @@ function createStyles(colors: ThemeColors, bottomPad: number, isDark: boolean) {
     composerShell: {
       position: 'relative',
       overflow: 'visible',
+      zIndex: 2,
       borderTopWidth: StyleSheet.hairlineWidth,
       borderTopColor: colors.borderLight,
       backgroundColor: colors.background,
@@ -1197,6 +1205,17 @@ export default function ChatThreadScreen() {
   const bottomPad = keyboardInset > 0 ? keyboardInset : bottomSafe;
   const styles = useThemedStyles((themeColors) => createStyles(themeColors, bottomPad, isDark));
 
+  useEffect(() => {
+    if (!conversationId) {
+      setFocusedChatConversation(null);
+      return;
+    }
+    setFocusedChatConversation(conversationId);
+    return () => {
+      setFocusedChatConversation(null);
+    };
+  }, [conversationId]);
+
   const [conversation, setConversation] = useState<ConversationListItem | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [peerLastReadAt, setPeerLastReadAt] = useState<string | null>(null);
@@ -1221,6 +1240,7 @@ export default function ChatThreadScreen() {
   const [suppressFavoriteBack, setSuppressFavoriteBack] = useState(false);
   const [unblocking, setUnblocking] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [backgroundPickerOpen, setBackgroundPickerOpen] = useState(false);
   const [pendingDelete, setPendingDelete] = useState(false);
   const [pendingBlock, setPendingBlock] = useState(false);
   const [isMenuBusy, setIsMenuBusy] = useState(false);
@@ -1679,6 +1699,18 @@ export default function ChatThreadScreen() {
     setConversation(lastConversationUpdate);
     setPeerLastReadAt(lastConversationUpdate.peerLastReadAt);
   }, [conversationId, lastConversationUpdate]);
+
+  // Shared wallpaper → локальный override (и у себя, и у собеседника по realtime).
+  useEffect(() => {
+    if (!conversationId || !conversation) return;
+    void applySharedConversationBackground(conversationId, conversation.background ?? null);
+  }, [
+    conversationId,
+    conversation?.background?.kind,
+    conversation?.background?.presetId,
+    conversation?.background?.url,
+    conversation == null,
+  ]);
 
   useEffect(() => {
     if (!lastConversationDeleted || lastConversationDeleted.conversationId !== conversationId) {
@@ -2496,6 +2528,7 @@ export default function ChatThreadScreen() {
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         keyboardVerticalOffset={0}>
         <View ref={dropZoneRef} style={styles.dropZone} collapsable={false}>
+        <ChatBackgroundLayer isDark={isDark} conversationId={conversationId} />
         {Platform.OS === 'web' && isDraggingFile ? (
           <View style={styles.dropOverlay} pointerEvents="none">
             <View style={styles.dropOverlayCard}>
@@ -3232,6 +3265,16 @@ export default function ChatThreadScreen() {
           <View style={styles.menuRoot}>
             <Pressable style={styles.menuBackdrop} onPress={handleCloseMenu} />
             <View style={[styles.menu, { top: headerPadTop + 44 }]}>
+              <Pressable
+                accessibilityRole="button"
+                onPress={() => {
+                  handleCloseMenu();
+                  setBackgroundPickerOpen(true);
+                }}
+                style={({ pressed }) => [styles.menuItem, pressed && styles.menuItemPressed]}>
+                <Ionicons name="image-outline" size={18} color={colors.primary} />
+                <Text style={[styles.menuItemLabel, { color: colors.primary }]}>Фон чата</Text>
+              </Pressable>
               {isGroup ? (
                 <>
                   <Pressable
@@ -3356,6 +3399,16 @@ export default function ChatThreadScreen() {
           onOpenProfile={(userId) => {
             setMembersOpen(false);
             router.push(`/users/${userId}`);
+          }}
+        />
+
+        <ChatBackgroundPickerSheet
+          visible={backgroundPickerOpen}
+          conversationId={conversationId}
+          onClose={() => setBackgroundPickerOpen(false)}
+          onConversationUpdated={(next) => {
+            setConversation(next);
+            publishConversationUpdate(next);
           }}
         />
 
