@@ -340,7 +340,7 @@ function buildConnectionUi(opts: {
   color: string;
   label: string;
   detail: string | null;
-  tone: 'connecting' | 'ok' | 'error' | 'idle';
+  tone: 'connecting' | 'ok' | 'error' | 'warn' | 'idle';
 } {
   if (opts.status === 'error') {
     return {
@@ -359,6 +359,14 @@ function buildConnectionUi(opts: {
     };
   }
   if (opts.status === 'connected') {
+    if (opts.error) {
+      return {
+        color: '#F0B232',
+        label: 'Сервер ок · микрофон не поднялся',
+        detail: opts.error,
+        tone: 'warn',
+      };
+    }
     return {
       color: '#23A559',
       label: 'Соединение установлено',
@@ -632,7 +640,7 @@ export function VoiceCallOverlay({
       : connection.label;
   const miniStatusLine = failed
     ? connection.detail || connection.label
-    : linking
+    : linking || connection.tone === 'warn'
       ? connection.detail || connection.label
       : `${statusLine}${mediaReady ? ` · ${formatCallDuration(elapsedSec)}` : ''}`;
 
@@ -884,8 +892,8 @@ export function VoiceCallOverlay({
                   style={[
                     styles.statusText,
                     failed && styles.statusError,
-                    mediaReady && styles.statusOk,
-                    linking && styles.statusConnecting,
+                    mediaReady && !error && styles.statusOk,
+                    (linking || Boolean(mediaReady && error)) && styles.statusConnecting,
                   ]}
                   numberOfLines={1}>
                   {statusLine}
@@ -914,14 +922,22 @@ export function VoiceCallOverlay({
             ) : null}
           </View>
 
-          {linking || failed ? (
+          {linking || failed || connection.tone === 'warn' ? (
             <View
               style={[
                 styles.connectionBanner,
-                failed ? styles.connectionBannerError : styles.connectionBannerConnecting,
+                failed
+                  ? styles.connectionBannerError
+                  : styles.connectionBannerConnecting,
               ]}>
               <Ionicons
-                name={failed ? 'cloud-offline-outline' : 'sync-outline'}
+                name={
+                  failed
+                    ? 'cloud-offline-outline'
+                    : connection.tone === 'warn'
+                      ? 'mic-off-outline'
+                      : 'sync-outline'
+                }
                 size={18}
                 color={failed ? '#FFB4B4' : '#FFE6A8'}
               />
@@ -934,7 +950,7 @@ export function VoiceCallOverlay({
                   {connection.label}
                 </Text>
                 {connection.detail ? (
-                  <Text style={styles.connectionBannerDetail} numberOfLines={3}>
+                  <Text style={styles.connectionBannerDetail} numberOfLines={4}>
                     {connection.detail}
                   </Text>
                 ) : null}

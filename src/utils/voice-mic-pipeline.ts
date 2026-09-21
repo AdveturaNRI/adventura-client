@@ -145,10 +145,30 @@ export class AdventuraMicProcessor
   }
 }
 
+const MIC_PUBLISH_TIMEOUT_MS = 12_000;
+
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(new Error(label));
+    }, ms);
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (err) => {
+        clearTimeout(timer);
+        reject(err);
+      },
+    );
+  });
+}
+
 export async function applyMicPipelineToRoom(
   room: Room,
   opts?: { deviceId?: string | null; micGain?: number; noiseSuppression?: boolean },
-): Promise<{ usedKrisp: boolean }> {
+): Promise<{ usedKrisp: boolean; enabled: boolean }> {
   const micGain = clampMicGain(opts?.micGain ?? MIC_GAIN_DEFAULT);
   const noiseSuppression = opts?.noiseSuppression ?? NOISE_SUPPRESSION_DEFAULT;
   const capture = buildMicCaptureOptions({
@@ -156,23 +176,57 @@ export async function applyMicPipelineToRoom(
     micGain,
     noiseSuppression,
   });
-  try {
-    await room.localParticipant.setMicrophoneEnabled(true, capture);
-  } catch {
-    // Retry without experimental voiceIsolation if the browser rejected constraints.
-    const { voiceIsolation: _ignored, ...safe } = capture;
-    await room.localParticipant.setMicrophoneEnabled(true, safe);
+
+  const tryEnable = async (options: AudioCaptureOptions): Promise<boolean> => {
+    try {
+      const pub = await withTimeout(
+        room.localParticipant.setMicrophoneEnabled(true, options),
+        MIC_PUBLISH_TIMEOUT_MS,
+        'mic_publish_timeout',
+      );
+      return Boolean(pub) || room.localParticipant.isMicrophoneEnabled;
+    } catch {
+      try {
+        // Cancel a stuck pending publish so the next attempt can start clean.
+        await room.localParticipant.setMicrophoneEnabled(false);
+      } catch {
+        // ignore
+      }
+      return false;
+    }
+  };
+
+  let enabled = await tryEnable(capture);
+  if (!enabled) {
+    const { voiceIsolation: _ignored, ...withoutIsolation } = capture;
+    enabled = await tryEnable(withoutIsolation);
+  }
+  if (!enabled && capture.deviceId) {
+    // Saved device may be gone / blocked — fall back to default mic.
+    const { deviceId: _device, voiceIsolation: _vi, ...defaults } = capture;
+    enabled = await tryEnable(defaults);
+  }
+  if (!enabled) {
+    enabled = await tryEnable({
+      echoCancellation: true,
+      noiseSuppression: true,
+      autoGainControl: true,
+    });
+  }
+
+  if (!enabled) {
+    return { usedKrisp: false, enabled: false };
   }
 
   // Krisp / GainNode живут в Web Audio — нативному WebRTC это не нужно.
   if (Platform.OS !== 'web') {
-    return { usedKrisp: false };
+    return { usedKrisp: false, enabled: true };
   }
 
   const pub = room.localParticipant.getTrackPublication(Track.Source.Microphone);
   const track = pub?.track as LocalAudioTrack | undefined;
   if (!track || typeof track.setProcessor !== 'function') {
-    return { usedKrisp: false };
+    return { usedKrisp: false, enabled: true };
   }
 
   // Re-applying the processor on every unmute can kill the track in Chrome.
@@ -182,19 +236,19 @@ export async function applyMicPipelineToRoom(
     if (typeof current.setGain === 'function') {
       current.setGain(micGain);
     }
-    return { usedKrisp: current.usesKrisp };
+    return { usedKrisp: current.usesKrisp, enabled: true };
   }
 
   const processor = new AdventuraMicProcessor(micGain, noiseSuppression);
   try {
     await track.setProcessor(processor);
-    return { usedKrisp: processor.usesKrisp };
+    return { usedKrisp: processor.usesKrisp, enabled: true };
   } catch {
     try {
       await track.stopProcessor();
     } catch {
       // ignore
     }
-    return { usedKrisp: false };
+    return { usedKrisp: false, enabled: true };
   }
 }

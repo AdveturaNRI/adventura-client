@@ -530,17 +530,25 @@ export function useChatLiveVoice(conversationId: string | null): UseChatLiveVoic
         }
       }
 
-      await applyMicPipelineToRoom(room, {
+      const mic = await applyMicPipelineToRoom(room, {
         deviceId: prefs.inputDeviceId,
         micGain: prefs.micGain,
         noiseSuppression: prefs.noiseSuppression,
       });
       await applyPreferredOutputToAllRemote();
-      setMuted(!room.localParticipant.isMicrophoneEnabled);
+      const micOn = mic.enabled && room.localParticipant.isMicrophoneEnabled;
+      setMuted(!micOn);
       setDeafened(false);
       setCameraOn(false);
       deafenedRef.current = false;
       setStatus('connected');
+      if (!micOn) {
+        setError(
+          'Микрофон не включился: соединение с сервером есть, а медиа-канал не поднялся. Проверь разрешение мика или сеть — иногда нужен VPN.',
+        );
+      } else {
+        setError(null);
+      }
       refreshParticipants();
     } catch (err) {
       if (connectTimedOut) {
@@ -593,7 +601,11 @@ export function useChatLiveVoice(conversationId: string | null): UseChatLiveVoic
       playMicToggleSound(false);
       refreshParticipants();
       if (!finallyEnabled) {
-        setError('Не удалось включить микрофон — проверь разрешение браузера');
+        setError(
+          'Микрофон не включился: соединение с сервером есть, а медиа-канал не поднялся. Проверь разрешение мика или сеть — иногда нужен VPN.',
+        );
+      } else {
+        setError(null);
       }
     } catch (err) {
       setMuted(!room.localParticipant.isMicrophoneEnabled);
