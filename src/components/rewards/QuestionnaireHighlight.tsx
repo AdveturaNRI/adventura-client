@@ -11,6 +11,12 @@ import Animated, {
 
 import { AleMugs } from '@/components/rewards/AleMugs';
 import {
+  CARD_FX_DRAGON_RIGHT_NARROW,
+  CARD_FX_DRAGON_RIGHT_WIDE,
+  CARD_FX_DRAGON_TOP_NARROW,
+  CARD_FX_DRAGON_TOP_WIDE,
+  CARD_FX_DRAGON_WIDTH_NARROW,
+  CARD_FX_DRAGON_WIDTH_WIDE,
   CARD_FX_MUG_SIZE_NARROW,
   CARD_FX_MUG_SIZE_WIDE,
 } from '@/components/rewards/card-fx-layout';
@@ -93,7 +99,7 @@ function WebCardFx({
     <View
       style={[{ position: 'relative', borderRadius: radius, overflow: 'visible' }, style]}
       {...webFxClass(`adv-card-fx adv-card-fx--${id}${wide ? ' is-wide' : ''}`)}>
-      {id === 'void_runes' ? <FoundingDragonPeek wide={wide} /> : null}
+      {id === 'void_runes' && wide ? <FoundingDragonPeek wide={wide} /> : null}
       <View pointerEvents="none" {...webFxClass('adv-card-fx-glow')} style={styles.fxLayer} />
       <View
         pointerEvents="none"
@@ -126,18 +132,18 @@ const FOUNDING_DRAGON = require('../../../assets/rewards/founding-dragon.png');
 const DRAGON_ASPECT = 320 / 328;
 
 function FoundingDragonPeek({ wide }: { wide: boolean }) {
-  const width = wide ? 188 : 108;
+  const width = wide ? CARD_FX_DRAGON_WIDTH_WIDE : CARD_FX_DRAGON_WIDTH_NARROW;
   return (
     <View
       pointerEvents="none"
       {...webFxClass('adv-founding-dragon')}
       style={{
         position: 'absolute',
-        zIndex: 0,
+        zIndex: 2,
         width,
         height: Math.round(width / DRAGON_ASPECT),
-        right: wide ? -28 : -8,
-        top: wide ? -122 : -58,
+        right: wide ? -CARD_FX_DRAGON_RIGHT_WIDE : -CARD_FX_DRAGON_RIGHT_NARROW,
+        top: wide ? -CARD_FX_DRAGON_TOP_WIDE : -CARD_FX_DRAGON_TOP_NARROW,
       }}>
       <Image source={FOUNDING_DRAGON} style={{ width: '100%', height: '100%' }} contentFit="contain" />
     </View>

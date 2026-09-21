@@ -496,29 +496,24 @@ export function UserCard({
   const iconSize = CARD_SIZE_CONFIG[size].iconSize;
   const [officialNames, setOfficialNames] = useState<Set<string>>(new Set());
   const fillsDeck = layout === 'deck' && deckFill;
+  // Feed/swipe needs a fixed frame. List cards (favorites/skipped) grow with content
+  // so the action bar stays below the card instead of floating over the body.
+  const lockDeckHeight =
+    Boolean(deckSize) && (layout === 'deckWide' || fillsDeck || Boolean(swipe));
 
   const deckFrame: ViewStyle | undefined =
     (layout === 'deck' || layout === 'deckWide') && deckSize
-      ? layout === 'deck'
-        ? fillsDeck
-          ? {
-              width: '100%',
-              height: deckSize.height,
-              maxHeight: deckSize.height,
-              minHeight: deckSize.height,
-              flexGrow: 0,
-              flexShrink: 0,
-            }
-          : {
-              width: '100%',
-            }
-        : {
+      ? lockDeckHeight
+        ? {
             width: '100%',
             height: deckSize.height,
             maxHeight: deckSize.height,
             minHeight: deckSize.height,
             flexGrow: 0,
             flexShrink: 0,
+          }
+        : {
+            width: '100%',
           }
       : undefined;
   const deckWidePhoto =
@@ -754,22 +749,8 @@ export function UserCard({
   );
 
   const cardRadius = isDeckStacked ? 20 : CARD_SIZE_CONFIG[size].borderRadius;
-  const highlighted = (
-    <QuestionnaireHighlight
-      auraId={auraId}
-      badges={badges}
-      radius={cardRadius}
-      overlay={false}
-      style={deckFrame}>
-      {card}
-    </QuestionnaireHighlight>
-  );
 
-  if (!swipe) {
-    return highlighted;
-  }
-
-  return (
+  const swipeCard = swipe ? (
     <SwipeBlock
       variant="corner"
       style={
@@ -787,8 +768,21 @@ export function UserCard({
       onSwipeLeft={swipe.onSwipeLeft}
       onSwipeRight={swipe.onSwipeRight}
       dismissRequest={swipe.dismissRequest}>
-      {highlighted}
+      {card}
     </SwipeBlock>
+  ) : (
+    card
+  );
+
+  return (
+    <QuestionnaireHighlight
+      auraId={auraId}
+      badges={badges}
+      radius={cardRadius}
+      overlay={false}
+      style={deckFrame}>
+      {swipeCard}
+    </QuestionnaireHighlight>
   );
 }
 

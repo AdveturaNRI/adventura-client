@@ -398,7 +398,7 @@ function createStyles(
       overflow: 'visible',
     },
     listContent: {
-      gap: Spacing.md,
+      gap: Spacing.xl + Spacing.md,
       paddingBottom: Spacing.xl,
       overflow: 'visible',
       ...(isDesktopWeb ? { alignItems: 'stretch' as const } : null),
@@ -406,7 +406,7 @@ function createStyles(
     listRow: {
       flexDirection: isDesktopWeb ? 'row' : 'column',
       alignItems: isDesktopWeb ? 'center' : 'stretch',
-      gap: isDesktopWeb ? Spacing.lg : Spacing.sm,
+      gap: isDesktopWeb ? Spacing.lg : Spacing.md,
       width: '100%',
       maxWidth: '100%',
       overflow: 'visible',
@@ -422,6 +422,7 @@ function createStyles(
     },
     listCardPressable: {
       ...(isDesktopWeb ? { flex: 1, minHeight: 0 } : { width: '100%' as const }),
+      overflow: 'visible',
     },
     cardMenuButton: {
       position: 'absolute',
@@ -513,6 +514,7 @@ export function WandererDeck({
   );
   const [headerHeight, setHeaderHeight] = useState(MOBILE_HEADER_ESTIMATE);
   const [deckSlotHeight, setDeckSlotHeight] = useState(0);
+  const [index, setIndex] = useState(0);
   const mobileDeckSize = useMemo(() => {
     if (isDesktopWeb) {
       return null;
@@ -526,11 +528,17 @@ export function WandererDeck({
       MOBILE_ACTION_FOOTER_HEIGHT -
       Spacing.lg -
       Spacing.md;
-    const availableDeckHeight =
-      deckSlotHeight > 0 ? Math.max(0, deckSlotHeight - 8) : fallbackHeight;
+    const availableDeckHeight = deckSlotHeight > 0 ? deckSlotHeight : fallbackHeight;
 
     return computeMobileDeckSize(contentWidth, availableDeckHeight);
-  }, [deckSlotHeight, headerHeight, isDesktopWeb, topPadding, windowHeight, windowWidth]);
+  }, [
+    deckSlotHeight,
+    headerHeight,
+    isDesktopWeb,
+    topPadding,
+    windowHeight,
+    windowWidth,
+  ]);
   const mobileListDeckSize = useMemo(() => {
     if (isDesktopWeb || !mobileDeckSize) {
       return null;
@@ -546,7 +554,6 @@ export function WandererDeck({
     createStyles(themeColors, topPadding, bottomPadding, isDesktopWeb, isMobileNative),
   );
 
-  const [index, setIndex] = useState(0);
   const [history, setHistory] = useState<number[]>([]);
   const [reactionHistory, setReactionHistory] = useState<WandererReactionType[]>([]);
   const [feedUndoIds, setFeedUndoIds] = useState<string[]>([]);

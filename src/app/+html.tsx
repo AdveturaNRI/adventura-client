@@ -37,6 +37,11 @@ body {
   scrollbar-color: rgba(0, 0, 0, 0.28) transparent;
 }
 
+/* Horizontal deck swipe — don't let the browser steal the touch. */
+[data-adv-swipe-deck] {
+  touch-action: none !important;
+}
+
 .user-card-body-scroll::-webkit-scrollbar {
   width: 5px;
 }

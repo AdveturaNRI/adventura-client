@@ -643,9 +643,6 @@ const CSS = `
   filter: drop-shadow(0 6px 10px rgba(20, 4, 0, 0.5));
   animation: adv-dragon-perch 3.6s ease-in-out infinite;
 }
-.adv-card-fx:not(.is-wide) .adv-founding-dragon {
-  display: none;
-}
 .adv-card-shield {
   pointer-events: none;
   z-index: 3;
