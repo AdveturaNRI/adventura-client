@@ -218,6 +218,21 @@ function clearRemoteAudioElements() {
   remoteAudioElements.clear();
 }
 
+function voiceConnectErrorMessage(err: unknown): string {
+  const raw = localizeErrorMessage(err, '');
+  const lower = raw.toLowerCase();
+  if (
+    /ice|webrtc|turn|timeout|timed out|network|failed to fetch|websocket|connection|econn|unreachable|offline|abort/.test(
+      lower,
+    )
+  ) {
+    return 'Не удалось установить соединение. Проверь интернет — иногда нужен VPN.';
+  }
+  return localizeErrorMessage(err, 'Не удалось подключиться к голосовому чату');
+}
+
+const VOICE_CONNECT_TIMEOUT_MS = 20_000;
+
 /**
  * LiveKit media session for a chat thread.
  * Web uses browser WebRTC; native registers globals via `@livekit/react-native`.
@@ -280,6 +295,7 @@ export function useChatLiveVoice(conversationId: string | null): UseChatLiveVoic
     }
     setParticipants(mapParticipants(room));
     setCameraOn(Boolean(getCameraVideoTrack(room.localParticipant)));
+    setMuted(!room.localParticipant.isMicrophoneEnabled);
   }, []);
 
   const teardownRoom = useCallback(async (room: Room | null) => {
@@ -335,6 +351,7 @@ export function useChatLiveVoice(conversationId: string | null): UseChatLiveVoic
     setError(null);
 
     let room: Room | null = null;
+    let connectTimedOut = false;
     try {
       if (Platform.OS !== 'web') {
         await startLivekitAudioSession();
@@ -447,15 +464,44 @@ export function useChatLiveVoice(conversationId: string | null): UseChatLiveVoic
             return;
           }
           setStatus('error');
-          setError('Соединение с голосовым чатом оборвалось');
+          setError(
+            'Соединение с голосовым чатом оборвалось. Проверь интернет — иногда нужен VPN.',
+          );
         })
         .on(RoomEvent.MediaDevicesError, (err: Error) => {
           setError(localizeErrorMessage(err, 'Нет доступа к камере или микрофону'));
         });
 
-      await room.connect(url, token, { autoSubscribe: true });
-      if (intentionalLeaveRef.current || roomRef.current !== room) {
-        await teardownRoom(room);
+      let connectTimeoutHandle: ReturnType<typeof setTimeout> | null = setTimeout(() => {
+        if (roomRef.current !== room || intentionalLeaveRef.current) {
+          return;
+        }
+        if (room.state === ConnectionState.Connected) {
+          return;
+        }
+        connectTimedOut = true;
+        roomRef.current = null;
+        joiningRef.current = false;
+        void teardownRoom(room).finally(() => {
+          setStatus('error');
+          setError(
+            'Не удалось установить соединение за 20 сек. Проверь интернет — иногда нужен VPN.',
+          );
+        });
+      }, VOICE_CONNECT_TIMEOUT_MS);
+
+      try {
+        await room.connect(url, token, { autoSubscribe: true });
+      } finally {
+        if (connectTimeoutHandle) {
+          clearTimeout(connectTimeoutHandle);
+          connectTimeoutHandle = null;
+        }
+      }
+      if (connectTimedOut || intentionalLeaveRef.current || roomRef.current !== room) {
+        if (!connectTimedOut) {
+          await teardownRoom(room);
+        }
         return;
       }
 
@@ -490,17 +536,20 @@ export function useChatLiveVoice(conversationId: string | null): UseChatLiveVoic
         noiseSuppression: prefs.noiseSuppression,
       });
       await applyPreferredOutputToAllRemote();
-      setMuted(false);
+      setMuted(!room.localParticipant.isMicrophoneEnabled);
       setDeafened(false);
       setCameraOn(false);
       deafenedRef.current = false;
       setStatus('connected');
       refreshParticipants();
     } catch (err) {
+      if (connectTimedOut) {
+        return;
+      }
       roomRef.current = null;
       await teardownRoom(room);
       setStatus('error');
-      setError(localizeErrorMessage(err, 'Не удалось подключиться к голосовому чату'));
+      setError(voiceConnectErrorMessage(err));
     } finally {
       joiningRef.current = false;
     }
@@ -511,20 +560,47 @@ export function useChatLiveVoice(conversationId: string | null): UseChatLiveVoic
     if (!room || status !== 'connected') {
       return;
     }
-    const next = !muted;
-    if (next) {
-      await room.localParticipant.setMicrophoneEnabled(false);
-    } else {
-      const prefs = await loadVoiceDevicePrefs();
-      await applyMicPipelineToRoom(room, {
-        deviceId: prefs.inputDeviceId,
-        micGain: prefs.micGain,
-        noiseSuppression: prefs.noiseSuppression,
-      });
+    const currentlyMuted = !room.localParticipant.isMicrophoneEnabled;
+    try {
+      if (!currentlyMuted) {
+        await room.localParticipant.setMicrophoneEnabled(false);
+        setMuted(true);
+        playMicToggleSound(true);
+        refreshParticipants();
+        return;
+      }
+
+      // Prefer a plain unmute when the track already exists — re-running the
+      // full capture/processor pipeline often leaves the mic stuck off.
+      const pub = room.localParticipant.getTrackPublication(Track.Source.Microphone);
+      if (pub?.track) {
+        await room.localParticipant.setMicrophoneEnabled(true);
+      } else {
+        const prefs = await loadVoiceDevicePrefs();
+        await applyMicPipelineToRoom(room, {
+          deviceId: prefs.inputDeviceId,
+          micGain: prefs.micGain,
+          noiseSuppression: prefs.noiseSuppression,
+        });
+      }
+
+      const enabled = room.localParticipant.isMicrophoneEnabled;
+      if (!enabled) {
+        await room.localParticipant.setMicrophoneEnabled(true);
+      }
+      const finallyEnabled = room.localParticipant.isMicrophoneEnabled;
+      setMuted(!finallyEnabled);
+      playMicToggleSound(false);
+      refreshParticipants();
+      if (!finallyEnabled) {
+        setError('Не удалось включить микрофон — проверь разрешение браузера');
+      }
+    } catch (err) {
+      setMuted(!room.localParticipant.isMicrophoneEnabled);
+      setError(localizeErrorMessage(err, 'Не удалось переключить микрофон'));
+      refreshParticipants();
     }
-    setMuted(next);
-    playMicToggleSound(next);
-  }, [muted, status]);
+  }, [refreshParticipants, status]);
 
   const toggleDeafen = useCallback(async () => {
     if (status !== 'connected') {

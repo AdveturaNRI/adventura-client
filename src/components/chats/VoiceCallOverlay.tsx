@@ -22,6 +22,7 @@ import type { RewardBadgeType } from '@/data/rewards/catalog';
 import { VoiceCallDiceLayer } from '@/components/chats/VoiceCallDiceLayer';
 import { CallVideoView } from '@/components/chats/CallVideoView';
 import { FontSize, Radius, Spacing } from '@/constants/theme';
+import { useProfile } from '@/context/ProfileContext';
 import type { ChatLiveVoiceParticipant, ChatLiveVoiceStatus } from '@/hooks/use-chat-live-voice';
 import type { VideoTrack } from 'livekit-client';
 
@@ -332,18 +333,57 @@ function ParticipantTile({
   );
 }
 
-function buildSubtitle(opts: {
+function buildConnectionUi(opts: {
+  status: ChatLiveVoiceStatus;
+  error: string | null;
+}): {
+  color: string;
+  label: string;
+  detail: string | null;
+  tone: 'connecting' | 'ok' | 'error' | 'idle';
+} {
+  if (opts.status === 'error') {
+    return {
+      color: '#ED4245',
+      label: 'Ошибка соединения',
+      detail: opts.error || 'Не удалось подключиться к голосовому серверу',
+      tone: 'error',
+    };
+  }
+  if (opts.status === 'connecting') {
+    return {
+      color: '#F0B232',
+      label: 'Подключение…',
+      detail: 'Соединяемся с голосовым сервером',
+      tone: 'connecting',
+    };
+  }
+  if (opts.status === 'connected') {
+    return {
+      color: '#23A559',
+      label: 'Соединение установлено',
+      detail: null,
+      tone: 'ok',
+    };
+  }
+  return {
+    color: '#B5BAC1',
+    label: 'Голосовой чат',
+    detail: null,
+    tone: 'idle',
+  };
+}
+
+function buildCallPhaseLabel(opts: {
   isGroup: boolean;
   ringing: boolean;
-  failed: boolean;
-  connected: boolean;
-  error: string | null;
+  mediaReady: boolean;
   liveCount: number;
   waitingCount: number;
 }): string | null {
-  const { isGroup, ringing, failed, connected, error, liveCount, waitingCount } = opts;
-  if (failed) {
-    return error || 'Ошибка соединения';
+  const { isGroup, ringing, mediaReady, liveCount, waitingCount } = opts;
+  if (!mediaReady) {
+    return null;
   }
   if (ringing) {
     if (isGroup) {
@@ -356,9 +396,6 @@ function buildSubtitle(opts: {
       return `Вызов · ждём ${waitingCount}`;
     }
     return waitingCount > 0 ? 'Вызов…' : 'Ждём, кто присоединится';
-  }
-  if (!connected && liveCount <= 1 && waitingCount > 0) {
-    return 'Подключаемся…';
   }
   if (isGroup) {
     const liveLabel =
@@ -376,7 +413,7 @@ function buildSubtitle(opts: {
   if (liveCount > 1) {
     return 'В эфире';
   }
-  return connected ? 'Ждём, кто присоединится' : 'Подключаемся…';
+  return 'Ждём, кто присоединится';
 }
 
 /** Discord-style full-screen voice overlay with avatar tiles. */
@@ -407,22 +444,50 @@ export function VoiceCallOverlay({
 }: Props) {
   const insets = useSafeAreaInsets();
   const isDesktop = useIsDesktopWeb();
+  const { avatarUrl: profileAvatarUrl } = useProfile();
   const { width, height } = useWindowDimensions();
   const [miniOffset, setMiniOffset] = useState(savedMiniOffset);
   const miniOffsetRef = useRef(savedMiniOffset);
   const miniSizeRef = useRef({ width: 280, height: 56 });
   const suppressExpandRef = useRef(false);
   const failed = status === 'error';
-  const connected = status === 'connected' && !ringing;
+  const mediaReady = status === 'connected';
+  const linking = status === 'connecting';
   const [elapsedSec, setElapsedSec] = useState(0);
   const startedAtRef = useRef<number | null>(null);
   const [nowTick, setNowTick] = useState(Date.now());
   const [diceOpen, setDiceOpen] = useState(false);
+  const connectPulse = useRef(new Animated.Value(1)).current;
   // Пока звонок на экране — не ждём LiveKit `connected` / ответ собеседника.
   const canRollDice = Boolean(conversationId?.trim()) && status !== 'error';
 
   useEffect(() => {
-    if (!visible || failed) {
+    if (!linking) {
+      connectPulse.setValue(1);
+      return;
+    }
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(connectPulse, {
+          toValue: 0.3,
+          duration: 650,
+          easing: Easing.inOut(Easing.ease),
+          useNativeDriver: true,
+        }),
+        Animated.timing(connectPulse, {
+          toValue: 1,
+          duration: 650,
+          easing: Easing.inOut(Easing.ease),
+          useNativeDriver: true,
+        }),
+      ]),
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [connectPulse, linking]);
+
+  useEffect(() => {
+    if (!visible || failed || !mediaReady) {
       startedAtRef.current = null;
       setElapsedSec(0);
       return;
@@ -442,7 +507,7 @@ export function VoiceCallOverlay({
     tick();
     const id = setInterval(tick, 1000);
     return () => clearInterval(id);
-  }, [failed, visible]);
+  }, [failed, mediaReady, visible]);
 
   useEffect(() => {
     if (!visible) {
@@ -507,7 +572,7 @@ export function VoiceCallOverlay({
     const live = participants.map((p) => ({
       key: p.identity,
       name: p.name,
-      avatarUrl: p.avatarUrl,
+      avatarUrl: p.isLocal && profileAvatarUrl ? profileAvatarUrl : p.avatarUrl,
       speaking: p.speaking,
       muted: p.muted,
       cameraOn: p.cameraOn,
@@ -546,22 +611,30 @@ export function VoiceCallOverlay({
       }
       return a.name.localeCompare(b.name, 'ru');
     });
-  }, [nowTick, participants, urgentUntilById, waitingPeers]);
+  }, [nowTick, participants, profileAvatarUrl, urgentUntilById, waitingPeers]);
 
   const liveCount = participants.length;
   const waitingCount = waitingPeers.filter(
     (peer) => peer.id && !participants.some((p) => p.identity === peer.id),
   ).length;
 
-  const subtitle = buildSubtitle({
+  const connection = buildConnectionUi({ status, error });
+  const callPhase = buildCallPhaseLabel({
     isGroup,
     ringing: Boolean(ringing),
-    failed,
-    connected,
-    error,
+    mediaReady,
     liveCount,
     waitingCount,
   });
+  const statusLine =
+    connection.tone === 'ok' && callPhase
+      ? `${connection.label} · ${callPhase}`
+      : connection.label;
+  const miniStatusLine = failed
+    ? connection.detail || connection.label
+    : linking
+      ? connection.detail || connection.label
+      : `${statusLine}${mediaReady ? ` · ${formatCallDuration(elapsedSec)}` : ''}`;
 
   const layout = useMemo(() => {
     const count = Math.max(tiles.length, 1);
@@ -596,7 +669,7 @@ export function VoiceCallOverlay({
     return null;
   }
 
-  const statusColor = failed ? '#ED4245' : ringing ? '#157AFE' : connected ? '#23A559' : '#B5BAC1';
+  const statusColor = connection.color;
   const timerLabel = formatCallDuration(elapsedSec);
 
   const diceLayer =
@@ -650,15 +723,20 @@ export function VoiceCallOverlay({
               : null,
             pressed && styles.pressed,
           ]}>
-          <View style={[styles.miniDot, { backgroundColor: statusColor }]} />
+          <Animated.View
+            style={[
+              styles.miniDot,
+              { backgroundColor: statusColor, opacity: linking ? connectPulse : 1 },
+            ]}
+          />
           <View style={styles.miniCopy}>
             <Text style={styles.miniTitle} numberOfLines={1}>
               {title}
             </Text>
-            <Text style={styles.miniMeta} numberOfLines={1}>
-              {failed
-                ? error || 'Ошибка'
-                : `${subtitle ? `${subtitle} · ` : ''}${timerLabel}`}
+            <Text
+              style={[styles.miniMeta, failed && styles.statusError]}
+              numberOfLines={1}>
+              {miniStatusLine}
             </Text>
           </View>
           {pinToTop ? null : <Ionicons name="expand" size={18} color="#F2F3F5" />}
@@ -732,7 +810,7 @@ export function VoiceCallOverlay({
               styles.miniPinned,
               {
                 paddingTop: insets.top,
-                backgroundColor: connected ? '#123524' : '#1E1F22',
+                backgroundColor: mediaReady ? '#123524' : linking || failed ? '#2B1D1D' : '#1E1F22',
               },
             ]}>
             {miniBar}
@@ -793,15 +871,26 @@ export function VoiceCallOverlay({
                 {title}
               </Text>
               <View style={styles.statusRow}>
-                <View style={[styles.statusDot, { backgroundColor: statusColor }]} />
-                {subtitle ? (
-                  <Text
-                    style={[styles.statusText, failed && styles.statusError]}
-                    numberOfLines={1}>
-                    {subtitle}
-                  </Text>
-                ) : null}
-                {!failed ? (
+                <Animated.View
+                  style={[
+                    styles.statusDot,
+                    {
+                      backgroundColor: statusColor,
+                      opacity: linking ? connectPulse : 1,
+                    },
+                  ]}
+                />
+                <Text
+                  style={[
+                    styles.statusText,
+                    failed && styles.statusError,
+                    mediaReady && styles.statusOk,
+                    linking && styles.statusConnecting,
+                  ]}
+                  numberOfLines={1}>
+                  {statusLine}
+                </Text>
+                {mediaReady ? (
                   <Text style={styles.timerText} accessibilityLabel={`Длительность ${timerLabel}`}>
                     {timerLabel}
                   </Text>
@@ -824,6 +913,34 @@ export function VoiceCallOverlay({
               </View>
             ) : null}
           </View>
+
+          {linking || failed ? (
+            <View
+              style={[
+                styles.connectionBanner,
+                failed ? styles.connectionBannerError : styles.connectionBannerConnecting,
+              ]}>
+              <Ionicons
+                name={failed ? 'cloud-offline-outline' : 'sync-outline'}
+                size={18}
+                color={failed ? '#FFB4B4' : '#FFE6A8'}
+              />
+              <View style={styles.connectionBannerCopy}>
+                <Text
+                  style={[
+                    styles.connectionBannerTitle,
+                    failed && styles.connectionBannerTitleError,
+                  ]}>
+                  {connection.label}
+                </Text>
+                {connection.detail ? (
+                  <Text style={styles.connectionBannerDetail} numberOfLines={3}>
+                    {connection.detail}
+                  </Text>
+                ) : null}
+              </View>
+            </View>
+          ) : null}
 
           <ScrollView
             style={styles.stageScroll}
@@ -869,13 +986,13 @@ export function VoiceCallOverlay({
               accessibilityLabel={
                 muted ? 'Включить микрофон (Ctrl+Shift+M)' : 'Выключить микрофон (Ctrl+Shift+M)'
               }
-              disabled={!connected && !ringing}
+              disabled={!mediaReady}
               onPress={onToggleMute}
               style={({ pressed }) => [
                 styles.controlBtn,
                 muted ? styles.controlBtnMuted : styles.controlBtnSecondary,
                 pressed && styles.pressed,
-                !connected && !ringing && styles.controlDisabled,
+                !mediaReady && styles.controlDisabled,
               ]}>
               <Ionicons name={muted ? 'mic-off' : 'mic'} size={22} color="#FFFFFF" />
             </Pressable>
@@ -886,13 +1003,13 @@ export function VoiceCallOverlay({
                 accessibilityLabel={
                   cameraOn ? 'Выключить камеру (Ctrl+Shift+V)' : 'Включить камеру (Ctrl+Shift+V)'
                 }
-                disabled={!connected && !ringing}
+                disabled={!mediaReady}
                 onPress={onToggleCamera}
                 style={({ pressed }) => [
                   styles.controlBtn,
                   cameraOn ? styles.controlBtnSecondary : styles.controlBtnMuted,
                   pressed && styles.pressed,
-                  !connected && !ringing && styles.controlDisabled,
+                  !mediaReady && styles.controlDisabled,
                 ]}>
                 <Ionicons name={cameraOn ? 'videocam' : 'videocam-off'} size={22} color="#FFFFFF" />
               </Pressable>
@@ -903,13 +1020,13 @@ export function VoiceCallOverlay({
               accessibilityLabel={
                 deafened ? 'Включить звук (Ctrl+Shift+D)' : 'Отключить звук (Ctrl+Shift+D)'
               }
-              disabled={!connected && !ringing}
+              disabled={!mediaReady}
               onPress={onToggleDeafen}
               style={({ pressed }) => [
                 styles.controlBtn,
                 deafened ? styles.controlBtnMuted : styles.controlBtnSecondary,
                 pressed && styles.pressed,
-                !connected && !ringing && styles.controlDisabled,
+                !mediaReady && styles.controlDisabled,
               ]}>
               <MaterialCommunityIcons
                 name={deafened ? 'headphones-off' : 'headphones'}
@@ -936,13 +1053,13 @@ export function VoiceCallOverlay({
               <Pressable
                 accessibilityRole="button"
                 accessibilityLabel="Срочная заявка"
-                disabled={!connected}
+                disabled={!mediaReady}
                 onPress={onUrgentRequest}
                 style={({ pressed }) => [
                   styles.controlBtn,
                   styles.controlBtnUrgent,
                   pressed && styles.pressed,
-                  !connected && styles.controlDisabled,
+                  !mediaReady && styles.controlDisabled,
                 ]}>
                 <Ionicons name="flash" size={22} color="#FFFFFF" />
               </Pressable>
@@ -1162,6 +1279,49 @@ const styles = StyleSheet.create({
   },
   statusError: {
     color: '#ED4245',
+  },
+  statusOk: {
+    color: '#3BA55D',
+  },
+  statusConnecting: {
+    color: '#F0B232',
+  },
+  connectionBanner: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 10,
+    marginHorizontal: Spacing.md,
+    marginBottom: Spacing.sm,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+  },
+  connectionBannerConnecting: {
+    backgroundColor: 'rgba(240, 178, 50, 0.12)',
+    borderColor: 'rgba(240, 178, 50, 0.35)',
+  },
+  connectionBannerError: {
+    backgroundColor: 'rgba(237, 66, 69, 0.14)',
+    borderColor: 'rgba(237, 66, 69, 0.4)',
+  },
+  connectionBannerCopy: {
+    flex: 1,
+    gap: 4,
+  },
+  connectionBannerTitle: {
+    color: '#FFE6A8',
+    fontSize: FontSize.caption,
+    fontWeight: '700',
+  },
+  connectionBannerTitleError: {
+    color: '#FFB4B4',
+  },
+  connectionBannerDetail: {
+    color: '#DCDDDE',
+    fontSize: 12,
+    lineHeight: 16,
+    fontWeight: '500',
   },
   headerBadge: {
     flexDirection: 'row',

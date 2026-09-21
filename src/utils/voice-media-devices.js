@@ -1,0 +1,227 @@
+import { Platform } from 'react-native';
+function canUseMediaDevices() {
+    return (Platform.OS === 'web' &&
+        typeof navigator !== 'undefined' &&
+        Boolean(navigator.mediaDevices?.enumerateDevices));
+}
+function labelFor(device, index) {
+    const raw = device.label?.trim();
+    if (raw) {
+        return raw;
+    }
+    if (device.kind === 'audioinput') {
+        return `Микрофон ${index + 1}`;
+    }
+    if (device.kind === 'audiooutput') {
+        return `Динамики ${index + 1}`;
+    }
+    if (device.kind === 'videoinput') {
+        return `Камера ${index + 1}`;
+    }
+    return `Устройство ${index + 1}`;
+}
+/** Request mic once so device labels are available in Chrome. */
+export async function ensureMicrophonePermission() {
+    if (!canUseMediaDevices() || !navigator.mediaDevices.getUserMedia) {
+        return false;
+    }
+    try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+        for (const track of stream.getTracks()) {
+            track.stop();
+        }
+        return true;
+    }
+    catch {
+        return false;
+    }
+}
+export async function listAudioDevices() {
+    if (!canUseMediaDevices()) {
+        return { inputs: [], outputs: [] };
+    }
+    const devices = await navigator.mediaDevices.enumerateDevices();
+    const inputs = [];
+    const outputs = [];
+    let inputIndex = 0;
+    let outputIndex = 0;
+    for (const device of devices) {
+        if (device.kind === 'audioinput') {
+            inputs.push({
+                deviceId: device.deviceId || `input-${inputIndex}`,
+                label: labelFor(device, inputIndex),
+                kind: 'audioinput',
+            });
+            inputIndex += 1;
+        }
+        else if (device.kind === 'audiooutput') {
+            outputs.push({
+                deviceId: device.deviceId || `output-${outputIndex}`,
+                label: labelFor(device, outputIndex),
+                kind: 'audiooutput',
+            });
+            outputIndex += 1;
+        }
+    }
+    return { inputs, outputs };
+}
+export async function ensureCameraPermission() {
+    if (!canUseMediaDevices() || !navigator.mediaDevices.getUserMedia) {
+        return false;
+    }
+    try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: false, video: true });
+        for (const track of stream.getTracks()) {
+            track.stop();
+        }
+        return true;
+    }
+    catch {
+        return false;
+    }
+}
+export async function listVideoDevices() {
+    if (!canUseMediaDevices()) {
+        return [];
+    }
+    const devices = await navigator.mediaDevices.enumerateDevices();
+    const cameras = [];
+    let index = 0;
+    for (const device of devices) {
+        if (device.kind !== 'videoinput') {
+            continue;
+        }
+        cameras.push({
+            deviceId: device.deviceId || `camera-${index}`,
+            label: labelFor(device, index),
+            kind: 'videoinput',
+        });
+        index += 1;
+    }
+    return cameras;
+}
+export function supportsAudioOutputSelection() {
+    if (Platform.OS !== 'web' || typeof HTMLMediaElement === 'undefined') {
+        return false;
+    }
+    return typeof HTMLMediaElement.prototype.setSinkId ===
+        'function';
+}
+export async function applyAudioOutputToElement(el, deviceId) {
+    if (!deviceId || !supportsAudioOutputSelection()) {
+        return;
+    }
+    const withSink = el;
+    if (typeof withSink.setSinkId !== 'function') {
+        return;
+    }
+    try {
+        await withSink.setSinkId(deviceId);
+    }
+    catch {
+        // browser may reject sink while element is idle
+    }
+}
+/** Open mic stream, play it locally, and return 0..1 level meter via AnalyserNode. */
+export async function startMicrophoneTest(deviceId, micGain = 1, outputDeviceId, noiseSuppression = true) {
+    if (!canUseMediaDevices() || !navigator.mediaDevices.getUserMedia) {
+        throw new Error('Микрофон недоступен в этом браузере');
+    }
+    const AudioCtx = window.AudioContext ||
+        window.webkitAudioContext;
+    if (!AudioCtx) {
+        throw new Error('Web Audio не поддерживается');
+    }
+    const clampGain = (value) => Math.min(2, Math.max(0, Number.isFinite(value) ? value : 1));
+    let gainValue = clampGain(micGain);
+    const audioConstraints = {
+        echoCancellation: true,
+        noiseSuppression,
+        autoGainControl: Math.abs(gainValue - 1) < 0.05,
+        ...(deviceId?.trim() ? { deviceId: { exact: deviceId.trim() } } : {}),
+    };
+    const constraints = {
+        audio: audioConstraints,
+        video: false,
+    };
+    const stream = await navigator.mediaDevices.getUserMedia(constraints);
+    const ctx = new AudioCtx();
+    if (ctx.state === 'suspended') {
+        await ctx.resume().catch(() => undefined);
+    }
+    const applyOutputSink = async (sinkId) => {
+        if (!sinkId?.trim() || !supportsAudioOutputSelection()) {
+            return;
+        }
+        const withSink = ctx;
+        if (typeof withSink.setSinkId !== 'function') {
+            return;
+        }
+        try {
+            await withSink.setSinkId(sinkId.trim());
+        }
+        catch {
+            // keep current / default speakers
+        }
+    };
+    await applyOutputSink(outputDeviceId);
+    const source = ctx.createMediaStreamSource(stream);
+    const gainNode = ctx.createGain();
+    // Meter/pipeline gain = what you'd send. Monitor is quieter on purpose.
+    gainNode.gain.value = gainValue;
+    const analyser = ctx.createAnalyser();
+    analyser.fftSize = 256;
+    analyser.smoothingTimeConstant = 0.7;
+    // Full-volume self-monitor → speakers bleed into the mic → AEC chews the signal
+    // into muddy/robotic noise. Keep playback soft and soft-limit peaks.
+    const monitorGain = ctx.createGain();
+    monitorGain.gain.value = Math.min(1, gainValue) * 0.22;
+    const compressor = ctx.createDynamicsCompressor();
+    compressor.threshold.value = -28;
+    compressor.knee.value = 20;
+    compressor.ratio.value = 10;
+    compressor.attack.value = 0.003;
+    compressor.release.value = 0.15;
+    source.connect(gainNode);
+    gainNode.connect(analyser);
+    gainNode.connect(monitorGain);
+    monitorGain.connect(compressor);
+    compressor.connect(ctx.destination);
+    const data = new Uint8Array(analyser.frequencyBinCount);
+    return {
+        getLevel: () => {
+            analyser.getByteTimeDomainData(data);
+            let sum = 0;
+            for (let i = 0; i < data.length; i += 1) {
+                const v = (data[i] - 128) / 128;
+                sum += v * v;
+            }
+            const rms = Math.sqrt(sum / data.length);
+            return Math.min(1, rms * 3.2);
+        },
+        setMicGain: (nextGain) => {
+            gainValue = clampGain(nextGain);
+            gainNode.gain.value = gainValue;
+            monitorGain.gain.value = Math.min(1, gainValue) * 0.22;
+        },
+        setOutputDeviceId: async (nextOutputId) => {
+            await applyOutputSink(nextOutputId);
+        },
+        stop: () => {
+            try {
+                source.disconnect();
+                gainNode.disconnect();
+                analyser.disconnect();
+                monitorGain.disconnect();
+                compressor.disconnect();
+            }
+            catch {
+                // already gone
+            }
+            for (const track of stream.getTracks()) {
+                track.stop();
+            }
+            void ctx.close().catch(() => undefined);
+        },
+    };
+}

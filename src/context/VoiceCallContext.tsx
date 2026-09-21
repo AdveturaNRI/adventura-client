@@ -658,7 +658,7 @@ export function VoiceCallProvider({ children }: { children: ReactNode }) {
           minimized={minimized}
           title={overlayTitle}
           isGroup={Boolean(session?.isGroup)}
-          status={session?.phase === 'outgoing' ? 'connecting' : liveStatus}
+          status={liveStatus}
           ringing={session?.phase === 'outgoing'}
           error={liveError}
           muted={muted}

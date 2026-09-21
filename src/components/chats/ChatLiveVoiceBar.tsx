@@ -22,24 +22,30 @@ function statusLabel(
   error: string | null,
   ringing?: boolean,
 ): string {
+  if (status === 'error') {
+    return error || 'Ошибка соединения';
+  }
+  if (status === 'connecting') {
+    return 'Подключение к серверу…';
+  }
+  if (status === 'connected') {
+    if (ringing) {
+      return 'Соединение ок · вызов…';
+    }
+    const others = participants.filter((p) => !p.isLocal).length;
+    if (others === 0) {
+      return 'Соединение ок · ждём ответа';
+    }
+    if (others === 1) {
+      const peer = participants.find((p) => !p.isLocal);
+      return peer ? `Соединение ок · ${peer.name}` : 'Соединение ок';
+    }
+    return `Соединение ок · ${others + 1} в эфире`;
+  }
   if (ringing) {
     return 'Вызов…';
   }
-  if (status === 'connecting') {
-    return 'Подключаемся…';
-  }
-  if (status === 'error') {
-    return error || 'Не удалось подключиться';
-  }
-  const others = participants.filter((p) => !p.isLocal).length;
-  if (others === 0) {
-    return 'Ждём ответа';
-  }
-  if (others === 1) {
-    const peer = participants.find((p) => !p.isLocal);
-    return peer ? `С ${peer.name}` : 'В эфире';
-  }
-  return `В эфире · ${others + 1}`;
+  return 'Голосовой чат';
 }
 
 /** Compact in-thread LiveKit voice controls (mute / hang up). */
@@ -54,26 +60,36 @@ export function ChatLiveVoiceBar({
   onRetry,
 }: Props) {
   const colors = useTheme();
-  const busy = status === 'connecting' || Boolean(ringing);
-  const connected = status === 'connected' && !ringing;
+  const linking = status === 'connecting';
+  const mediaReady = status === 'connected';
   const failed = status === 'error';
+  const barTint = failed
+    ? { backgroundColor: 'rgba(237, 66, 69, 0.12)', borderColor: 'rgba(237, 66, 69, 0.28)' }
+    : linking
+      ? { backgroundColor: 'rgba(240, 178, 50, 0.12)', borderColor: 'rgba(240, 178, 50, 0.3)' }
+      : mediaReady
+        ? { backgroundColor: 'rgba(35, 165, 89, 0.12)', borderColor: 'rgba(35, 165, 89, 0.28)' }
+        : {
+            backgroundColor: 'rgba(21, 122, 254, 0.1)',
+            borderColor: 'rgba(21, 122, 254, 0.22)',
+          };
+  const labelColor = failed
+    ? colors.destructive
+    : linking
+      ? '#C98900'
+      : mediaReady
+        ? colors.success
+        : colors.primary;
 
   if (status === 'idle') {
     return null;
   }
 
   return (
-    <View
-      style={[
-        styles.bar,
-        {
-          backgroundColor: 'rgba(21, 122, 254, 0.1)',
-          borderColor: 'rgba(21, 122, 254, 0.22)',
-        },
-      ]}>
+    <View style={[styles.bar, barTint]}>
       <View style={styles.left}>
-        {busy ? (
-          <ActivityIndicator size="small" color={colors.primary} />
+        {linking ? (
+          <ActivityIndicator size="small" color="#C98900" />
         ) : (
           <View
             style={[
@@ -83,14 +99,14 @@ export function ChatLiveVoiceBar({
                   ? colors.destructive
                   : participants.some((p) => p.speaking)
                     ? colors.success
-                    : colors.primary,
+                    : mediaReady
+                      ? colors.success
+                      : colors.primary,
               },
             ]}
           />
         )}
-        <Text
-          style={[styles.label, { color: failed ? colors.destructive : colors.primary }]}
-          numberOfLines={1}>
+        <Text style={[styles.label, { color: labelColor }]} numberOfLines={1}>
           {statusLabel(status, participants, error, ringing)}
         </Text>
       </View>
@@ -107,7 +123,7 @@ export function ChatLiveVoiceBar({
           </Pressable>
         ) : null}
 
-        {connected ? (
+        {mediaReady ? (
           <Pressable
             accessibilityRole="button"
             accessibilityLabel={muted ? 'Включить микрофон' : 'Выключить микрофон'}

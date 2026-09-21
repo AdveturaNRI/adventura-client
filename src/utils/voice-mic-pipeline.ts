@@ -175,6 +175,16 @@ export async function applyMicPipelineToRoom(
     return { usedKrisp: false };
   }
 
+  // Re-applying the processor on every unmute can kill the track in Chrome.
+  const existing = typeof track.getProcessor === 'function' ? track.getProcessor() : null;
+  if (existing?.name === 'adventura-mic') {
+    const current = existing as AdventuraMicProcessor;
+    if (typeof current.setGain === 'function') {
+      current.setGain(micGain);
+    }
+    return { usedKrisp: current.usesKrisp };
+  }
+
   const processor = new AdventuraMicProcessor(micGain, noiseSuppression);
   try {
     await track.setProcessor(processor);
