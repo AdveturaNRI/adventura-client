@@ -412,7 +412,7 @@ export default function RewardsLabScreen() {
           <Text style={styles.kicker}>Витрина</Text>
           <Text style={styles.title}>Награды первопроходцев</Text>
           <Text style={styles.lead}>
-            Статусы с рамкой, свечением анкеты и скинами кубиков. Награды выдаются вручную из админки.
+            Статусы с рамкой, свечением анкеты и скинами кубиков. Награды выдаются вручную.
           </Text>
         </View>
 

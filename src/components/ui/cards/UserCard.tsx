@@ -181,10 +181,7 @@ function createStyles(
     cardDeck: {
       ...(fillsDeck
         ? {
-            flex: 1,
-            minHeight: 0,
-            maxHeight: '100%' as const,
-            height: '100%' as const,
+            width: '100%' as const,
           }
         : {
             width: '100%' as const,
@@ -193,11 +190,8 @@ function createStyles(
     },
     cardDeckWide: {
       flexDirection: 'row',
-      flex: 1,
-      minHeight: 0,
       width: '100%',
-      height: '100%',
-      maxHeight: '100%',
+      // Height comes from deckFrame — avoid height:100% collapse on RN web.
     },
     photoWrap: {
       width: isDeckWide ? undefined : '100%',
@@ -242,39 +236,46 @@ function createStyles(
       paddingTop: isDeckStacked ? Spacing.sm : undefined,
     },
     bodyScroll: {
-      flex: 1,
+      width: '100%',
       minHeight: 0,
       ...Platform.select({
         web: {
-          flexBasis: 0,
           overflowY: 'auto',
           scrollbarWidth: 'thin',
           scrollbarColor: `${colors.border} transparent`,
         } as object,
-        default: {},
+        default: {
+          flex: 1,
+        },
       }),
     },
     bodyScrollContent: {
-      flexGrow: 1,
+      flexGrow: 0,
     },
     cardScrollHost: {
-      flex: 1,
+      width: '100%',
       minHeight: 0,
+      ...Platform.select({
+        default: {
+          flex: 1,
+        },
+      }),
     },
     bodyScrollWide: {
-      flex: 1,
       minWidth: 0,
       borderLeftWidth: StyleSheet.hairlineWidth,
       borderLeftColor: colors.borderLight,
+      ...Platform.select({
+        default: {
+          flex: 1,
+        },
+      }),
     },
     bodyScrollWideContent: {
       flexGrow: 1,
     },
     swipeDeck: {
-      flex: 1,
-      minHeight: 0,
       width: '100%',
-      height: '100%',
       ...Platform.select({
         web: {
           userSelect: 'none',
@@ -501,13 +502,12 @@ export function UserCard({
       ? layout === 'deck'
         ? fillsDeck
           ? {
-              // Explicit height — don't rely on flex:1 through QuestionnaireHighlight
-              // (unbounded parent lets the card grow with bio and cover siblings).
               width: '100%',
               height: deckSize.height,
               maxHeight: deckSize.height,
-              flex: 0,
-              minHeight: 0,
+              minHeight: deckSize.height,
+              flexGrow: 0,
+              flexShrink: 0,
             }
           : {
               width: '100%',
@@ -517,7 +517,8 @@ export function UserCard({
             height: deckSize.height,
             maxHeight: deckSize.height,
             minHeight: deckSize.height,
-            flex: 0,
+            flexGrow: 0,
+            flexShrink: 0,
           }
       : undefined;
   const deckWidePhoto =
@@ -527,7 +528,9 @@ export function UserCard({
   const deckStackedPhoto =
     layout === 'deck' && deckSize?.photoHeight != null
       ? { height: deckSize.photoHeight, aspectRatio: undefined as undefined }
-      : undefined;
+      : layout === 'deck'
+        ? { aspectRatio: USER_CARD_PHOTO_ASPECT_RATIO_DECK }
+        : undefined;
 
   useEffect(() => {
     void getOfficialGameSystemNames().then(setOfficialNames);
@@ -687,7 +690,7 @@ export function UserCard({
 
   const stackedBodyScroll = (
     <DeckScrollView
-      style={styles.bodyScroll}
+      style={[styles.bodyScroll, fillsDeck && deckSize ? { height: deckSize.height } : null]}
       contentContainerStyle={styles.bodyScrollContent}
       {...(Platform.OS === 'web' ? { className: 'user-card-body-scroll' } : {})}
       showsVerticalScrollIndicator
@@ -701,7 +704,7 @@ export function UserCard({
   );
 
   const stackedScroll = fillsDeck ? (
-    <View style={styles.cardScrollHost}>
+    <View style={[styles.cardScrollHost, deckSize ? { height: deckSize.height } : null]}>
       {nativeScrollGesture ? (
         <GestureDetector gesture={nativeScrollGesture}>{stackedBodyScroll}</GestureDetector>
       ) : (

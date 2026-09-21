@@ -40,10 +40,12 @@ const DESKTOP_CARD_MIN_HEIGHT = 280;
 const DESKTOP_CARD_MAX_HEIGHT = 520;
 const DESKTOP_CARD_WIDTH_FROM_HEIGHT = (3 / 4) * (1 + 1.35);
 const MOBILE_CARD_MIN_HEIGHT = 240;
-const MOBILE_PHOTO_HEIGHT_RATIO = 0.64;
-const MOBILE_PHOTO_MIN_HEIGHT = 180;
+const MOBILE_PHOTO_HEIGHT_RATIO = 0.58;
+const MOBILE_PHOTO_MIN_HEIGHT = 160;
+const MOBILE_BODY_MIN_HEIGHT = 120;
 const MOBILE_PHOTO_ASPECT = 3 / 4;
 const MOBILE_PHOTO_INSET = Spacing.md * 2;
+const MOBILE_PHOTO_SECTION_PAD = Spacing.md;
 
 const MOBILE_ACTION_FOOTER_HEIGHT = 72;
 const MOBILE_HEADER_ESTIMATE = 84;
@@ -118,11 +120,19 @@ function computeMobileDeckSize(
   photoHeightRatio = MOBILE_PHOTO_HEIGHT_RATIO,
 ): UserCardDeckSize {
   const cardWidth = contentWidth;
-  const cardHeight = Math.max(MOBILE_CARD_MIN_HEIGHT, availableDeckHeight);
-  const photoInnerWidth = cardWidth - MOBILE_PHOTO_INSET;
-  let photoHeight = Math.round(photoInnerWidth / MOBILE_PHOTO_ASPECT);
-  const maxPhotoHeight = Math.round(cardHeight * photoHeightRatio);
-  photoHeight = Math.max(MOBILE_PHOTO_MIN_HEIGHT, Math.min(photoHeight, maxPhotoHeight));
+  const cardHeight = Math.max(MOBILE_CARD_MIN_HEIGHT, Math.floor(availableDeckHeight));
+  const photoInnerWidth = Math.max(120, cardWidth - MOBILE_PHOTO_INSET);
+  const idealPhoto = Math.round(photoInnerWidth / MOBILE_PHOTO_ASPECT);
+  const maxByRatio = Math.round(cardHeight * photoHeightRatio);
+  const maxByBody = Math.max(
+    96,
+    cardHeight - MOBILE_BODY_MIN_HEIGHT - MOBILE_PHOTO_SECTION_PAD,
+  );
+  const photoCap = Math.max(96, Math.min(maxByRatio, maxByBody));
+  const photoHeight = Math.max(
+    Math.min(MOBILE_PHOTO_MIN_HEIGHT, photoCap),
+    Math.min(idealPhoto, photoCap),
+  );
 
   return {
     width: cardWidth,
@@ -232,18 +242,14 @@ function createStyles(
       overflow: 'visible',
     },
     deckArea: {
-      flex: isDesktopWeb ? undefined : 1,
-      minHeight: 0,
       width: '100%',
       overflow: 'visible',
     },
     stack: {
       width: '100%',
-      flex: isDesktopWeb ? undefined : 1,
-      minHeight: 0,
       overflow: 'visible',
       position: 'relative',
-      paddingBottom: 14,
+      paddingBottom: isDesktopWeb ? 14 : 8,
     },
     previewShell: {
       ...StyleSheet.absoluteFill,
@@ -287,9 +293,18 @@ function createStyles(
     },
     activeCard: {
       width: '100%',
-      flex: isDesktopWeb ? undefined : 1,
-      minHeight: 0,
       zIndex: 1,
+    },
+    mobileDeckSlot: {
+      flex: 1,
+      minHeight: 0,
+      width: '100%',
+      justifyContent: 'center',
+    },
+    mobileFooter: {
+      flexShrink: 0,
+      paddingTop: Spacing.md,
+      paddingBottom: Spacing.xs,
     },
     actionBar: {
       flexShrink: 0,
@@ -319,11 +334,6 @@ function createStyles(
           boxShadow: '0 8px 28px rgba(0, 0, 0, 0.06)',
         },
       }),
-    },
-    mobileFooter: {
-      flexShrink: 0,
-      paddingTop: Spacing.lg,
-      paddingBottom: Spacing.xs,
     },
     actionRail: {
       flexShrink: 0,
@@ -502,21 +512,25 @@ export function WandererDeck({
     [hasDesktopSidebar, isDesktopWeb, windowHeight, windowWidth],
   );
   const [headerHeight, setHeaderHeight] = useState(MOBILE_HEADER_ESTIMATE);
+  const [deckSlotHeight, setDeckSlotHeight] = useState(0);
   const mobileDeckSize = useMemo(() => {
     if (isDesktopWeb) {
       return null;
     }
 
     const contentWidth = getMobileDeckContentWidth(windowWidth);
-    const availableDeckHeight =
+    const fallbackHeight =
       windowHeight -
       topPadding -
       headerHeight -
       MOBILE_ACTION_FOOTER_HEIGHT -
-      Spacing.lg;
+      Spacing.lg -
+      Spacing.md;
+    const availableDeckHeight =
+      deckSlotHeight > 0 ? Math.max(0, deckSlotHeight - 8) : fallbackHeight;
 
     return computeMobileDeckSize(contentWidth, availableDeckHeight);
-  }, [headerHeight, isDesktopWeb, topPadding, windowHeight, windowWidth]);
+  }, [deckSlotHeight, headerHeight, isDesktopWeb, topPadding, windowHeight, windowWidth]);
   const mobileListDeckSize = useMemo(() => {
     if (isDesktopWeb || !mobileDeckSize) {
       return null;
@@ -1266,18 +1280,20 @@ export function WandererDeck({
     <View
       style={[
         styles.deckArea,
-        deckSize &&
-          (isDesktopWeb
+        deckSize
+          ? isDesktopWeb
             ? { width: deckSize.width, height: deckSize.height }
-            : { height: deckSize.height }),
+            : { width: '100%', height: deckSize.height }
+          : null,
       ]}>
       <View
         style={[
           styles.stack,
-          deckSize &&
-            (isDesktopWeb
+          deckSize
+            ? isDesktopWeb
               ? { width: deckSize.width, height: deckSize.height }
-              : { height: deckSize.height }),
+              : { width: '100%', height: deckSize.height }
+            : null,
         ]}>
         {nextCardProps ? (
           <View pointerEvents="none" style={styles.previewShell}>
@@ -1296,10 +1312,11 @@ export function WandererDeck({
         <View
           style={[
             styles.activeCard,
-            deckSize &&
-              (isDesktopWeb
+            deckSize
+              ? isDesktopWeb
                 ? { width: deckSize.width, height: deckSize.height }
-                : { height: deckSize.height }),
+                : { width: '100%', height: deckSize.height }
+              : null,
           ]}>
           <UserCard
             {...currentCardProps}
@@ -1362,7 +1379,14 @@ export function WandererDeck({
           </View>
         ) : (
           <>
-            {deckContent}
+            <View
+              style={styles.mobileDeckSlot}
+              onLayout={(event) => {
+                const next = Math.floor(event.nativeEvent.layout.height);
+                setDeckSlotHeight((prev) => (prev === next ? prev : next));
+              }}>
+              {deckContent}
+            </View>
             <View style={styles.mobileFooter}>
               <View style={styles.actionBar}>{feedActionButtons}</View>
             </View>

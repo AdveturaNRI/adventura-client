@@ -106,14 +106,7 @@ function WebCardFx({
       </View>
       <View
         {...webFxClass('adv-card-fx-body')}
-        style={{
-          position: 'relative',
-          borderRadius: radius,
-          overflow: 'hidden',
-          zIndex: 1,
-          height: '100%',
-          width: '100%',
-        }}>
+        style={[styles.fxBody, { borderRadius: radius }]}>
         {children}
         {overlay ? <QuestionnaireAura auraId={id} /> : null}
       </View>
@@ -171,6 +164,13 @@ function OakCardExtras({ wide }: { wide: boolean }) {
 const styles = StyleSheet.create({
   fxLayer: {
     position: 'absolute',
+  },
+  fxBody: {
+    position: 'relative',
+    zIndex: 1,
+    overflow: 'hidden',
+    width: '100%',
+    height: '100%',
   },
 });
 

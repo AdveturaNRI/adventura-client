@@ -4,6 +4,12 @@ import { Modal, Platform, Pressable, StyleSheet, Text, View } from 'react-native
 
 import { ensureRewardsFxStyles } from '@/components/rewards/rewards-fx';
 import {
+  claimRewardTip,
+  createRewardTipId,
+  releaseRewardTip,
+  subscribeRewardTip,
+} from '@/components/rewards/reward-tip-bus';
+import {
   REWARD_BADGES,
   rewardUiTone,
   type RewardBadgeType,
@@ -72,10 +78,14 @@ export function RewardBadgeIcon({ type, size = 16, interactive = true }: Props) 
   const { colorScheme } = useThemePreference();
   const tone = rewardUiTone(spec, colorScheme === 'dark');
   const hostRef = useRef<View>(null);
+  const tipRef = useRef<HTMLDivElement | null>(null);
+  const tipIdRef = useRef(createRewardTipId());
   const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const phaseRef = useRef<'closed' | 'in' | 'out'>('closed');
   const [phase, setPhase] = useState<'closed' | 'in' | 'out'>('closed');
   const [pos, setPos] = useState<TipPos | null>(null);
   const box = size + 10;
+  phaseRef.current = phase;
 
   useEffect(() => {
     ensureRewardsFxStyles();
@@ -83,6 +93,7 @@ export function RewardBadgeIcon({ type, size = 16, interactive = true }: Props) 
       if (hideTimer.current) {
         clearTimeout(hideTimer.current);
       }
+      releaseRewardTip(tipIdRef.current);
     };
   }, []);
 
@@ -100,15 +111,6 @@ export function RewardBadgeIcon({ type, size = 16, interactive = true }: Props) 
     });
   }, []);
 
-  const show = useCallback(() => {
-    if (hideTimer.current) {
-      clearTimeout(hideTimer.current);
-      hideTimer.current = null;
-    }
-    measure();
-    setPhase('in');
-  }, [measure]);
-
   const hide = useCallback(() => {
     setPhase((current) => {
       if (current === 'closed') {
@@ -116,6 +118,7 @@ export function RewardBadgeIcon({ type, size = 16, interactive = true }: Props) 
       }
       return 'out';
     });
+    releaseRewardTip(tipIdRef.current);
     if (hideTimer.current) {
       clearTimeout(hideTimer.current);
     }
@@ -125,6 +128,30 @@ export function RewardBadgeIcon({ type, size = 16, interactive = true }: Props) 
     }, 140);
   }, []);
 
+  const show = useCallback(() => {
+    if (hideTimer.current) {
+      clearTimeout(hideTimer.current);
+      hideTimer.current = null;
+    }
+    claimRewardTip(tipIdRef.current);
+    measure();
+    setPhase('in');
+  }, [measure]);
+
+  // Another tip claimed the bus — close this one.
+  useEffect(() => {
+    return subscribeRewardTip((openId) => {
+      if (openId === tipIdRef.current) {
+        return;
+      }
+      if (phaseRef.current === 'closed') {
+        return;
+      }
+      hide();
+    });
+  }, [hide]);
+
+  // Reposition while open.
   useEffect(() => {
     if (phase === 'closed') {
       return;
@@ -140,6 +167,32 @@ export function RewardBadgeIcon({ type, size = 16, interactive = true }: Props) 
     }
   }, [phase, measure]);
 
+  // Outside click / tap closes the open tip.
+  useEffect(() => {
+    if (phase !== 'in') {
+      return;
+    }
+    if (Platform.OS === 'web' && typeof document !== 'undefined') {
+      const onPointerDown = (event: PointerEvent) => {
+        const target = event.target as Node | null;
+        if (!target) {
+          return;
+        }
+        const host = getWebElement(hostRef);
+        if (host?.contains(target)) {
+          return;
+        }
+        if (tipRef.current?.contains(target)) {
+          return;
+        }
+        hide();
+      };
+      // Capture so we win over nested stopPropagation.
+      document.addEventListener('pointerdown', onPointerDown, true);
+      return () => document.removeEventListener('pointerdown', onPointerDown, true);
+    }
+  }, [phase, hide]);
+
   const hoverHandlers =
     Platform.OS === 'web'
       ? {
@@ -153,6 +206,9 @@ export function RewardBadgeIcon({ type, size = 16, interactive = true }: Props) 
       ? Platform.OS === 'web'
         ? portalToBody(
             <div
+              ref={(node) => {
+                tipRef.current = node;
+              }}
               className={`adv-tip ${pos.place === 'above' ? 'is-above' : 'is-below'}${phase === 'out' ? ' is-out' : ''}`}
               style={{
                 top: pos.top,
@@ -168,8 +224,13 @@ export function RewardBadgeIcon({ type, size = 16, interactive = true }: Props) 
           )
         : (
             <Modal visible transparent animationType="fade" statusBarTranslucent>
-              <View pointerEvents="none" style={StyleSheet.absoluteFill}>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Закрыть подсказку"
+                onPress={hide}
+                style={styles.tipBackdrop}>
                 <View
+                  pointerEvents="none"
                   style={[
                     styles.tooltip,
                     {
@@ -182,7 +243,7 @@ export function RewardBadgeIcon({ type, size = 16, interactive = true }: Props) 
                   <Text style={[styles.tooltipTitle, { color: spec.accent }]}>{spec.label}</Text>
                   <Text style={styles.tooltipBody}>{spec.tooltip}</Text>
                 </View>
-              </View>
+              </Pressable>
             </Modal>
           )
       : null;
@@ -372,6 +433,9 @@ const styles = StyleSheet.create({
   stackName: {
     width: '100%',
     textAlign: 'center',
+  },
+  tipBackdrop: {
+    flex: 1,
   },
   tooltip: {
     position: Platform.OS === 'web' ? ('fixed' as const) : 'absolute',

@@ -148,7 +148,7 @@ export const REWARD_BADGES = {
         id: 'tavern_keeper',
         label: 'Хозяин таверны',
         shortLabel: 'Таверна',
-        tooltip: 'Владелец клуба. Выдаётся вручную из админки.',
+        tooltip: 'Владелец клуба. Выдаётся вручную.',
         emoji: '🍺',
         icon: 'beer',
         accent: '#C47A3A',
