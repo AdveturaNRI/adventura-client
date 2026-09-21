@@ -32,9 +32,11 @@ import {
   enableWebPush,
   fetchPushStatusForThisDevice,
   getNotificationPermission,
+  getWebPushBlockReason,
   isIosSafariNeedPwaHint,
   isWebPushSupported,
   WEB_PUSH_OPT_IN_ENABLED,
+  webPushBlockHint,
 } from '@/services/push/webPush';
 import { previewNotificationSound, unlockChatAlerts } from '@/utils/chat-alerts';
 import { localizeErrorMessage } from '@/utils/localizeError';
@@ -248,7 +250,9 @@ export default function SettingsScreen() {
     refreshPushAttention,
   } = usePushPrompt();
 
+  const webPushBlockReason = WEB_PUSH_OPT_IN_ENABLED ? getWebPushBlockReason() : 'unsupported';
   const webPushAvailable = WEB_PUSH_OPT_IN_ENABLED && isWebPushSupported();
+  const webPushHint = webPushBlockHint(webPushBlockReason);
   const iosHint = WEB_PUSH_OPT_IN_ENABLED && isIosSafariNeedPwaHint();
   const [pushEnabled, setPushEnabled] = useState(false);
   const [pushLoading, setPushLoading] = useState(webPushAvailable);
@@ -579,9 +583,6 @@ export default function SettingsScreen() {
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
             <Text style={styles.sectionHeaderTitle}>Уведомления и звуки</Text>
-            <Text style={styles.sectionHeaderSubtitle}>
-              Звук входящих сообщений. В открытом чате не играет. Список пресетов правится в админке.
-            </Text>
           </View>
 
           <View style={[styles.row, styles.rowBorder]}>
@@ -747,8 +748,8 @@ export default function SettingsScreen() {
                 Разрешение заблокировано. Включите уведомления в настройках браузера для этого сайта.
               </Text>
             ) : null}
-            {!webPushAvailable && !iosHint ? (
-              <Text style={styles.hint}>Этот браузер не поддерживает веб-пуши.</Text>
+            {!webPushAvailable && !iosHint && webPushHint ? (
+              <Text style={styles.hint}>{webPushHint}</Text>
             ) : null}
           </View>
         ) : null}
