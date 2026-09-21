@@ -272,20 +272,21 @@ function createStyles(colors: ThemeColors, variant: GameFeedCardVariant) {
       color: colors.onPrimary,
     },
     body: {
-      gap: isDetail ? Spacing.md : Spacing.sm,
+      gap: isDetail ? Spacing.md : 12,
       paddingHorizontal: isDetail ? Spacing.lg : Spacing.md,
       paddingTop: isDetail ? Spacing.lg : Spacing.md,
-      paddingBottom: Spacing.sm,
+      paddingBottom: isDetail ? Spacing.md : 12,
     },
     actionsWrap: {
       paddingHorizontal: isDetail ? Spacing.lg : Spacing.md,
+      paddingTop: isDetail ? 0 : Spacing.xs,
       paddingBottom: isDetail ? Spacing.lg : Spacing.md,
     },
     metaItems: {
       flexDirection: 'row',
       flexWrap: 'wrap',
       alignItems: 'center',
-      gap: 10,
+      gap: 12,
     },
     metaItem: {
       flexDirection: 'row',
@@ -412,24 +413,27 @@ function createStyles(colors: ThemeColors, variant: GameFeedCardVariant) {
     },
     filterBadgePressed: {
       opacity: 0.82,
-    },    descriptionRow: {
+    },
+    descriptionRow: {
       flexDirection: isDetail ? 'column' : 'row',
       alignItems: isDetail ? 'stretch' : 'flex-end',
       gap: Spacing.sm,
+      marginTop: isDetail ? 0 : 2,
     },
     description: {
       flex: isDetail ? undefined : 1,
       minWidth: isDetail ? undefined : 0,
       fontSize: isDetail ? FontSize.label : FontSize.caption,
       color: isDetail ? colors.textSecondary : colors.textMuted,
-      lineHeight: isDetail ? FontSize.label * 1.5 : FontSize.caption * 1.4,
+      lineHeight: isDetail ? FontSize.label * 1.5 : FontSize.caption * 1.5,
     },
     playersRow: {
       flexShrink: 0,
       flexDirection: 'row',
       alignItems: 'center',
       justifyContent: isDetail ? 'flex-start' : undefined,
-      gap: 3,
+      gap: 4,
+      paddingBottom: isDetail ? 0 : 1,
     },
     playersText: {
       fontSize: FontSize.caption,
@@ -437,7 +441,7 @@ function createStyles(colors: ThemeColors, variant: GameFeedCardVariant) {
       color: colors.textMuted,
     },
     cardAction: {
-      minHeight: isDetail ? 48 : 42,
+      minHeight: isDetail ? 48 : 44,
       borderRadius: Radius.pill,
       flexDirection: 'row',
       alignItems: 'center',
