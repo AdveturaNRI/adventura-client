@@ -16,6 +16,7 @@ import {
 } from 'livekit-client';
 
 import { sanitizeBadges, type RewardBadgeType } from '@/data/rewards/catalog';
+import { createChatVoiceToken } from '@/services/chats/chatsApi';
 import {
   startLivekitAudioSession,
   stopLivekitAudioSession,
