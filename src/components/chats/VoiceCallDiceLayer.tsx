@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
+import { Platform, StyleSheet, View } from 'react-native';
 
 import {
   ChatDiceOverlay,
@@ -22,8 +24,9 @@ type VoiceCallDiceLayerProps = {
 };
 
 /**
- * Same chat dice popover + local 3D roll, mounted inside the call Modal
- * so z-index sits above the call UI.
+ * Same chat dice popover + local 3D roll.
+ * Must sit outside the call Modal (portal on web) — WebGL under RN Modal
+ * whitescreens the tab, same as under ScreenTransition(transform).
  */
 export function VoiceCallDiceLayer({
   conversationId,
@@ -162,8 +165,12 @@ export function VoiceCallDiceLayer({
     [conversationId, localRoll, onOpenChange, senderNickname],
   );
 
-  return (
-    <>
+  const diceActive = open || busy || Boolean(localRoll) || Boolean(incoming);
+
+  const tree = (
+    <View
+      pointerEvents={diceActive ? 'box-none' : 'none'}
+      style={diceActive ? styles.host : styles.hostIdle}>
       <ChatDicePopover
         visible={open}
         busy={busy}
@@ -174,11 +181,31 @@ export function VoiceCallDiceLayer({
         request={localRoll ? null : incoming}
         localRoll={localRoll}
         onLocalRollComplete={handleLocalComplete}
-        warm={open || busy || Boolean(localRoll) || Boolean(incoming)}
-        forceActive
+        warm={diceActive}
+        forceActive={diceActive}
         onReveal={() => undefined}
         onAdvance={handleIncomingAdvance}
       />
-    </>
+    </View>
   );
+
+  if (Platform.OS === 'web' && typeof document !== 'undefined') {
+    return createPortal(tree, document.body);
+  }
+
+  return tree;
 }
+
+const styles = StyleSheet.create({
+  host: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 11000,
+  },
+  hostIdle: {
+    position: 'absolute',
+    width: 0,
+    height: 0,
+    overflow: 'hidden',
+    zIndex: 0,
+  },
+});

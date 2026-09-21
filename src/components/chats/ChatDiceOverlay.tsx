@@ -9,6 +9,10 @@ import { DiceStage, type DiceStageHandle } from '@/components/dice/DiceStage';
 import { isDiceSkinId, skinAccent, type DiceSkinId } from '@/data/rewards/catalog';
 import type { DiceRollOutcome } from '@/components/dice/dice-stage.types';
 import { FontSize, Spacing, type ThemeColors } from '@/constants/theme';
+import {
+  getVoiceCallOwnsDice,
+  subscribeVoiceCallOwnsDice,
+} from '@/context/voice-call-dice-gate';
 import { useDiceAccentColor } from '@/hooks/use-dice-accent-color';
 import { useThemedStyles } from '@/hooks/use-themed-styles';
 import {
@@ -317,7 +321,12 @@ export function ChatDiceOverlay({
   const styles = useThemedStyles(createStyles);
   const insets = useSafeAreaInsets();
   const routeFocused = useIsFocused();
-  const isFocused = forceActive || routeFocused;
+  // During a voice call the call UI owns dice (outside Modal). Chat's stage must
+  // stay cold — two Babylon iframes white-screen the tab (same class of bug as
+  // WebGL under ScreenTransition).
+  const [callOwnsDice, setCallOwnsDice] = useState(getVoiceCallOwnsDice);
+  useEffect(() => subscribeVoiceCallOwnsDice(() => setCallOwnsDice(getVoiceCallOwnsDice())), []);
+  const isFocused = forceActive || (routeFocused && !callOwnsDice);
   const stageRef = useRef<DiceStageHandle>(null);
   const onRevealRef = useRef(onReveal);
   const onAdvanceRef = useRef(onAdvance);

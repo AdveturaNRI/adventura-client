@@ -682,16 +682,12 @@ export function VoiceCallOverlay({
 
   const diceLayer =
     conversationId?.trim() ? (
-      <View
-        pointerEvents={diceOpen ? 'box-none' : 'none'}
-        style={diceOpen ? styles.diceHost : styles.diceHostIdle}>
-        <VoiceCallDiceLayer
-          conversationId={conversationId.trim()}
-          senderNickname={diceSenderNickname}
-          open={diceOpen}
-          onOpenChange={setDiceOpen}
-        />
-      </View>
+      <VoiceCallDiceLayer
+        conversationId={conversationId.trim()}
+        senderNickname={diceSenderNickname}
+        open={diceOpen}
+        onOpenChange={setDiceOpen}
+      />
     ) : null;
 
   if (minimized) {
@@ -854,6 +850,7 @@ export function VoiceCallOverlay({
   }
 
   return (
+    <>
     <Modal visible transparent animationType="fade" statusBarTranslucent>
       <View style={styles.modalRoot}>
         <View
@@ -1095,9 +1092,10 @@ export function VoiceCallOverlay({
           </View>
         </View>
         </View>
-        {diceLayer}
       </View>
     </Modal>
+    {diceLayer}
+    </>
   );
 }
 
@@ -1135,17 +1133,6 @@ const styles = StyleSheet.create({
     paddingLeft: 14,
     paddingRight: 10,
     paddingVertical: 6,
-  },
-  diceHost: {
-    ...StyleSheet.absoluteFillObject,
-    zIndex: 11000,
-  },
-  diceHostIdle: {
-    position: 'absolute',
-    width: 0,
-    height: 0,
-    overflow: 'hidden',
-    zIndex: 0,
   },
   miniBar: {
     flexDirection: 'row',

@@ -15,6 +15,7 @@ import { VoiceCallOverlay } from '@/components/chats/VoiceCallOverlay';
 import { toast } from '@/components/ui';
 import { useAuth } from '@/context/AuthContext';
 import { useRealtime } from '@/context/RealtimeContext';
+import { setVoiceCallOwnsDice } from '@/context/voice-call-dice-gate';
 import {
   useChatLiveVoice,
   type ChatLiveVoiceParticipant,
@@ -94,6 +95,31 @@ type Session = {
   phase: Exclude<VoiceCallPhase, 'idle'>;
 };
 
+/** Incoming invite while already in another call — shown without replacing the session. */
+type PendingInvite = {
+  callId: string;
+  conversationId: string;
+  peerName: string;
+  peerAvatarUrl: string | null;
+  callerName: string | null;
+  isGroup: boolean;
+};
+
+function inviteFromPayload(invite: CallInvitePayload): PendingInvite {
+  const isGroup = Boolean(invite.isGroup);
+  return {
+    callId: invite.callId,
+    conversationId: invite.conversationId,
+    peerName:
+      (isGroup ? invite.conversationTitle?.trim() : null) ||
+      invite.fromNickname ||
+      'Собеседник',
+    peerAvatarUrl: invite.fromAvatarUrl,
+    callerName: invite.fromNickname,
+    isGroup,
+  };
+}
+
 function mapInviteRinging(peers?: VoiceCallPeer[] | VoiceCallRingingPeer[]): VoiceCallRingingPeer[] {
   if (!peers?.length) {
     return [];
@@ -115,9 +141,13 @@ export function VoiceCallProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
   const sessionRef = useRef<Session | null>(null);
   sessionRef.current = session;
+  const [pendingInvite, setPendingInvite] = useState<PendingInvite | null>(null);
+  const pendingInviteRef = useRef<PendingInvite | null>(null);
+  pendingInviteRef.current = pendingInvite;
   const [minimized, setMinimized] = useState(false);
   const ringingStartedAtRef = useRef<number | null>(null);
   const hadRemoteRef = useRef(false);
+  const switchingCallRef = useRef(false);
 
   const liveConversationId =
     session && (session.phase === 'outgoing' || session.phase === 'active')
@@ -140,6 +170,11 @@ export function VoiceCallProvider({ children }: { children: ReactNode }) {
     sendUrgentRequest,
   } = useChatLiveVoice(liveConversationId);
 
+  const clearPendingInvite = useCallback(() => {
+    pendingInviteRef.current = null;
+    setPendingInvite(null);
+  }, []);
+
   const clearSession = useCallback(async (opts?: { endRemote?: boolean; playHangup?: boolean }) => {
     if (opts?.playHangup) {
       stopCallRingtone();
@@ -150,6 +185,12 @@ export function VoiceCallProvider({ children }: { children: ReactNode }) {
     ringingStartedAtRef.current = null;
     hadRemoteRef.current = false;
     setMinimized(false);
+
+    const parked = !switchingCallRef.current ? pendingInviteRef.current : null;
+    if (!switchingCallRef.current) {
+      clearPendingInvite();
+    }
+
     const current = sessionRef.current;
     sessionRef.current = null;
     setSession(null);
@@ -168,7 +209,54 @@ export function VoiceCallProvider({ children }: { children: ReactNode }) {
     } catch {
       // LiveKit may already be down
     }
-  }, [leave]);
+
+    // After leaving the current call, promote a parked invite into a normal incoming UI.
+    if (parked) {
+      const next: Session = {
+        callId: parked.callId,
+        conversationId: parked.conversationId,
+        role: 'callee',
+        peerName: parked.peerName,
+        peerAvatarUrl: parked.peerAvatarUrl,
+        callerName: parked.callerName,
+        isGroup: parked.isGroup,
+        ringingPeers: [],
+        phase: 'incoming',
+      };
+      sessionRef.current = next;
+      setSession(next);
+      startCallRingtone();
+    }
+  }, [clearPendingInvite, leave]);
+
+  const enterCallFromInvite = useCallback(
+    async (invite: PendingInvite) => {
+      const next: Session = {
+        callId: invite.callId,
+        conversationId: invite.conversationId,
+        role: 'callee',
+        peerName: invite.peerName,
+        peerAvatarUrl: invite.peerAvatarUrl,
+        callerName: invite.callerName,
+        isGroup: invite.isGroup,
+        ringingPeers: [],
+        phase: 'active',
+      };
+      sessionRef.current = next;
+      setSession(next);
+      setMinimized(false);
+      hadRemoteRef.current = false;
+      ringingStartedAtRef.current = null;
+      try {
+        await acceptChatVoiceCall(invite.conversationId, invite.callId);
+        await join(invite.conversationId);
+      } catch (error) {
+        await clearSession();
+        toast.error(localizeErrorMessage(error, 'Не удалось принять звонок'));
+      }
+    },
+    [clearSession, join],
+  );
 
   const startCall = useCallback(
     async (
@@ -262,39 +350,67 @@ export function VoiceCallProvider({ children }: { children: ReactNode }) {
   }, [clearSession]);
 
   const acceptIncoming = useCallback(async () => {
+    const parked = pendingInviteRef.current;
     const current = sessionRef.current;
+
+    // Already in another call — leave it, then join the parked invite.
+    if (parked && current && current.phase !== 'incoming') {
+      stopCallRingtone();
+      clearPendingInvite();
+      switchingCallRef.current = true;
+      try {
+        await clearSession({ endRemote: true, playHangup: true });
+        await enterCallFromInvite(parked);
+      } finally {
+        switchingCallRef.current = false;
+      }
+      return;
+    }
+
     if (!current || current.phase !== 'incoming') {
       return;
     }
     stopCallRingtone();
-    const next: Session = { ...current, phase: 'active', ringingPeers: [] };
-    sessionRef.current = next;
-    setSession(next);
-    setMinimized(false);
-    hadRemoteRef.current = false;
-    ringingStartedAtRef.current = null;
-    try {
-      await acceptChatVoiceCall(current.conversationId, current.callId);
-      await join(current.conversationId);
-    } catch (error) {
-      await clearSession();
-      toast.error(localizeErrorMessage(error, 'Не удалось принять звонок'));
-    }
-  }, [clearSession, join]);
+    clearPendingInvite();
+    const invite: PendingInvite = {
+      callId: current.callId,
+      conversationId: current.conversationId,
+      peerName: current.peerName,
+      peerAvatarUrl: current.peerAvatarUrl,
+      callerName: current.callerName,
+      isGroup: current.isGroup,
+    };
+    await enterCallFromInvite(invite);
+  }, [clearPendingInvite, clearSession, enterCallFromInvite]);
 
   const declineIncoming = useCallback(async () => {
+    const parked = pendingInviteRef.current;
     const current = sessionRef.current;
+
+    // Decline only the parked invite — keep the active call.
+    if (parked && current && current.phase !== 'incoming') {
+      stopCallRingtone();
+      clearPendingInvite();
+      try {
+        await declineChatVoiceCall(parked.conversationId, parked.callId);
+      } catch {
+        // ignore
+      }
+      return;
+    }
+
     if (!current || current.phase !== 'incoming') {
       return;
     }
     stopCallRingtone();
+    clearPendingInvite();
     try {
       await declineChatVoiceCall(current.conversationId, current.callId);
     } catch {
       // ignore
     }
     await clearSession();
-  }, [clearSession]);
+  }, [clearPendingInvite, clearSession]);
 
   const retryLive = useCallback(async () => {
     const current = sessionRef.current;
@@ -315,29 +431,50 @@ export function VoiceCallProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     return subscribeCallEvents((event) => {
       const current = sessionRef.current;
+      const parked = pendingInviteRef.current;
 
       if (event.type === 'invite') {
         const invite = event.payload as CallInvitePayload;
         if (invite.fromUserId === user?.id) {
           return;
         }
-        if (current) {
-          // Busy — soft-decline so the group call keeps ringing for others.
+
+        // Already showing this invite.
+        if (
+          (current?.phase === 'incoming' && current.callId === invite.callId) ||
+          parked?.callId === invite.callId
+        ) {
+          return;
+        }
+
+        const nextInvite = inviteFromPayload(invite);
+
+        // In another call — park the invite as a notification, do not soft-decline.
+        if (current && (current.phase === 'outgoing' || current.phase === 'active')) {
+          // Replace a previous parked invite so we don't stack modals.
+          if (parked && parked.callId !== invite.callId) {
+            void declineChatVoiceCall(parked.conversationId, parked.callId).catch(() => undefined);
+          }
+          pendingInviteRef.current = nextInvite;
+          setPendingInvite(nextInvite);
+          startCallRingtone();
+          return;
+        }
+
+        // Already ringing for someone else — keep that UI, soft-decline the new one.
+        if (current?.phase === 'incoming') {
           void declineChatVoiceCall(invite.conversationId, invite.callId).catch(() => undefined);
           return;
         }
-        const isGroup = Boolean(invite.isGroup);
+
         const next: Session = {
-          callId: invite.callId,
-          conversationId: invite.conversationId,
+          callId: nextInvite.callId,
+          conversationId: nextInvite.conversationId,
           role: 'callee',
-          peerName:
-            (isGroup ? invite.conversationTitle?.trim() : null) ||
-            invite.fromNickname ||
-            'Собеседник',
-          peerAvatarUrl: invite.fromAvatarUrl,
-          callerName: invite.fromNickname,
-          isGroup,
+          peerName: nextInvite.peerName,
+          peerAvatarUrl: nextInvite.peerAvatarUrl,
+          callerName: nextInvite.callerName,
+          isGroup: nextInvite.isGroup,
           ringingPeers: [],
           phase: 'incoming',
         };
@@ -345,7 +482,18 @@ export function VoiceCallProvider({ children }: { children: ReactNode }) {
         setSession(next);
         setMinimized(false);
         ringingStartedAtRef.current = null;
+        clearPendingInvite();
         startCallRingtone();
+        return;
+      }
+
+      // Parked invite's call ended — dismiss notification, keep current call.
+      if (parked && event.type === 'ended' && event.payload.callId === parked.callId) {
+        clearPendingInvite();
+        stopCallRingtone();
+        if (current?.phase === 'outgoing') {
+          startCallRingback();
+        }
         return;
       }
 
@@ -392,6 +540,10 @@ export function VoiceCallProvider({ children }: { children: ReactNode }) {
 
       if (event.type === 'ended') {
         const wasOutgoing = current.role === 'caller' && current.phase === 'outgoing';
+        // Switching to another call — ignore end of the call we just left.
+        if (switchingCallRef.current) {
+          return;
+        }
         stopCallRingtone();
         if (current.phase === 'active' || current.phase === 'outgoing') {
           playHangupSound();
@@ -401,12 +553,30 @@ export function VoiceCallProvider({ children }: { children: ReactNode }) {
         setMinimized(false);
         sessionRef.current = null;
         setSession(null);
-        if (wasOutgoing) {
+
+        const nextParked = pendingInviteRef.current;
+        if (nextParked) {
+          clearPendingInvite();
+          const next: Session = {
+            callId: nextParked.callId,
+            conversationId: nextParked.conversationId,
+            role: 'callee',
+            peerName: nextParked.peerName,
+            peerAvatarUrl: nextParked.peerAvatarUrl,
+            callerName: nextParked.callerName,
+            isGroup: nextParked.isGroup,
+            ringingPeers: [],
+            phase: 'incoming',
+          };
+          sessionRef.current = next;
+          setSession(next);
+          startCallRingtone();
+        } else if (wasOutgoing) {
           toast.info('Нет ответа');
         }
       }
     });
-  }, [leave, subscribeCallEvents, user?.id]);
+  }, [clearPendingInvite, leave, subscribeCallEvents, user?.id]);
 
   useEffect(() => {
     return () => {
@@ -642,6 +812,11 @@ export function VoiceCallProvider({ children }: { children: ReactNode }) {
     session?.phase === 'active' ||
     (session != null && liveStatus === 'error');
 
+  useEffect(() => {
+    setVoiceCallOwnsDice(Boolean(overlayVisible));
+    return () => setVoiceCallOwnsDice(false);
+  }, [overlayVisible]);
+
   const overlayTitle = session?.isGroup
     ? session.peerName
       ? `Группа · ${session.peerName}`
@@ -680,16 +855,30 @@ export function VoiceCallProvider({ children }: { children: ReactNode }) {
         />
         {children}
         <IncomingCallModal
-          visible={session?.phase === 'incoming'}
-          callerName={session?.peerName ?? ''}
-          callerAvatarUrl={session?.peerAvatarUrl ?? null}
-          subtitle={
-            session?.isGroup && session.callerName
-              ? `${session.callerName} звонит в группу`
-              : session?.isGroup
-                ? 'Групповой звонок'
-                : undefined
-          }
+          visible={Boolean(pendingInvite) || session?.phase === 'incoming'}
+          callerName={(pendingInvite ?? session)?.peerName ?? ''}
+          callerAvatarUrl={(pendingInvite ?? session)?.peerAvatarUrl ?? null}
+          subtitle={(() => {
+            const invite = pendingInvite ?? (session?.phase === 'incoming' ? session : null);
+            if (!invite) {
+              return undefined;
+            }
+            const switching =
+              Boolean(pendingInvite) &&
+              (session?.phase === 'outgoing' || session?.phase === 'active');
+            if (switching) {
+              return invite.isGroup && invite.callerName
+                ? `${invite.callerName} · принять — выйти из текущего`
+                : 'Принять — выйти из текущего звонка';
+            }
+            if (invite.isGroup && invite.callerName) {
+              return `${invite.callerName} звонит в группу`;
+            }
+            if (invite.isGroup) {
+              return 'Групповой звонок';
+            }
+            return undefined;
+          })()}
           onAccept={() => void acceptIncoming()}
           onDecline={() => void declineIncoming()}
         />
