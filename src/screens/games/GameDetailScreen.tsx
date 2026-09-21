@@ -1,5 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import {
   ActivityIndicator,
@@ -34,6 +34,7 @@ import {
   type GamesFeedFilters,
 } from '@/utils/games-filters';
 import { localizeErrorMessage } from '@/utils/localizeError';
+import { trackEntityTransition } from '@/services/analytics/analytics';
 
 function createStyles(
   colors: ThemeColors,
@@ -251,6 +252,12 @@ export default function GameDetailScreen() {
       void load();
     }, [load]),
   );
+
+  useEffect(() => {
+    if (item?.id) {
+      trackEntityTransition('game', item.id);
+    }
+  }, [item?.id]);
 
   const openMaster = useCallback(
     (userId: string) => {

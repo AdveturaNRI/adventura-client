@@ -77,6 +77,12 @@ export type ChatMessage = {
   } | null;
 };
 
+export type ConversationBackground = {
+  kind: 'default' | 'preset' | 'custom';
+  presetId: string | null;
+  url: string | null;
+};
+
 export type ConversationListItem = {
   id: string;
   type?: 'direct' | 'group';
@@ -103,6 +109,8 @@ export type ConversationListItem = {
   blockedMe?: boolean;
   isPinned?: boolean;
   pinSortOrder?: number | null;
+  /** Shared wallpaper; null = personal settings. */
+  background?: ConversationBackground | null;
   updatedAt: string;
 };
 
@@ -284,6 +292,43 @@ export type ChatUploadFile = {
   name: string;
   mimeType: string;
 };
+
+export async function setConversationBackground(
+  conversationId: string,
+  input:
+    | { kind: 'clear' }
+    | { kind: 'default' }
+    | { kind: 'preset'; presetId: string }
+    | { kind: 'custom'; fileUri: string; fileName?: string; mimeType?: string },
+): Promise<ConversationListItem> {
+  const formData = new FormData();
+  formData.append('kind', input.kind);
+
+  if (input.kind === 'preset') {
+    formData.append('presetId', input.presetId);
+  }
+
+  if (input.kind === 'custom') {
+    const fileName = input.fileName ?? 'chat-bg.webp';
+    const mimeType = input.mimeType ?? 'image/webp';
+    if (Platform.OS === 'web') {
+      const response = await fetch(input.fileUri);
+      const blob = await response.blob();
+      formData.append('file', blob, fileName);
+    } else {
+      formData.append('file', {
+        uri: input.fileUri,
+        name: fileName,
+        type: mimeType,
+      } as unknown as Blob);
+    }
+  }
+
+  return apiMultipart<ConversationListItem>(
+    `/chats/${conversationId}/background`,
+    formData,
+  );
+}
 
 export async function sendChatMessage(
   conversationId: string,

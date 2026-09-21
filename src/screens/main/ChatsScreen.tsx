@@ -4,6 +4,7 @@ import { useFocusEffect, usePathname, useRouter } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  FlatList,
   Modal,
   Platform,
   Pressable,
@@ -82,10 +83,10 @@ function createStyles(colors: ThemeColors, isRail: boolean, isDark: boolean) {
     container: {
       flex: 1,
       minHeight: 0,
+      overflow: 'hidden',
       backgroundColor: colors.background,
       paddingHorizontal: isRail ? Spacing.sm : Spacing.lg,
       paddingTop: isRail ? Spacing.md : undefined,
-      gap: Spacing.sm,
     },
     title: {
       fontSize: isRail ? 22 : FontSize.h1,
@@ -94,13 +95,32 @@ function createStyles(colors: ThemeColors, isRail: boolean, isDark: boolean) {
       paddingHorizontal: Spacing.sm,
       paddingBottom: Spacing.xs,
     },
+    listWrap: {
+      flex: 1,
+      flexBasis: 0,
+      minHeight: 0,
+      width: '100%',
+      overflow: 'hidden',
+    },
     list: {
       flex: 1,
       minHeight: 0,
       width: '100%',
+      ...(Platform.OS === 'web'
+        ? ({ height: '100%', overflowY: 'auto' } as object)
+        : null),
     },
     listContent: {
       paddingBottom: Spacing.xl,
+    },
+    headerRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: Spacing.sm,
+      paddingHorizontal: isRail ? 0 : undefined,
+      marginBottom: Spacing.sm,
+      flexShrink: 0,
     },
     row: {
       flexDirection: 'row',
@@ -346,13 +366,6 @@ function createStyles(colors: ThemeColors, isRail: boolean, isDark: boolean) {
       fontSize: FontSize.label,
       color: colors.textSecondary,
       lineHeight: FontSize.label * 1.45,
-    },
-    headerRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'space-between',
-      gap: Spacing.sm,
-      paddingHorizontal: isRail ? 0 : undefined,
     },
     newGroupButton: {
       flexDirection: 'row',
@@ -938,8 +951,7 @@ export default function ChatsScreen({ variant = 'page' }: ChatsScreenProps) {
       const isPinned = Boolean(item.isPinned);
       const previewMembers = item.membersPreview ?? [];
 
-      return (
-        <ScaleDecorator>
+      const row = (
           <View
             style={[
               localStyles.row,
@@ -948,7 +960,7 @@ export default function ChatsScreen({ variant = 'page' }: ChatsScreenProps) {
               isPinned && localStyles.rowPinned,
               isActive && localStyles.rowDragging,
             ]}>
-            {isPinned ? (
+            {isPinned && Platform.OS !== 'web' ? (
               <Pressable
                 accessibilityRole="button"
                 accessibilityLabel="Перетащить закреплённый чат"
@@ -969,7 +981,7 @@ export default function ChatsScreen({ variant = 'page' }: ChatsScreenProps) {
                   router.push(`/chats/${item.id}`);
                 }
               }}
-              onLongPress={isPinned ? drag : undefined}
+              onLongPress={isPinned && Platform.OS !== 'web' ? drag : undefined}
               delayLongPress={220}
               style={({ pressed }) => [
                 localStyles.rowMain,
@@ -1076,8 +1088,14 @@ export default function ChatsScreen({ variant = 'page' }: ChatsScreenProps) {
               </Pressable>
             </View>
           </View>
-        </ScaleDecorator>
       );
+
+      // ScaleDecorator requires DraggableFlatList CellProvider — skip on web FlatList.
+      if (Platform.OS === 'web') {
+        return row;
+      }
+
+      return <ScaleDecorator>{row}</ScaleDecorator>;
     },
     [colors.primary, colors.textMuted, colors.textSubtle, localStyles, openMenu, pathname, router],
   );
@@ -1086,6 +1104,7 @@ export default function ChatsScreen({ variant = 'page' }: ChatsScreenProps) {
       <View
         style={[
           isRail ? localStyles.container : pageStyles.container,
+          { flex: 1, minHeight: 0, overflow: 'hidden' },
           !isRail && voicePlayerVisible ? { paddingTop: Spacing.md } : null,
         ]}>
         {showCompactNav ? (
@@ -1128,16 +1147,33 @@ export default function ChatsScreen({ variant = 'page' }: ChatsScreenProps) {
             </Text>
           </View>
         ) : (
-          <GestureHandlerRootView style={{ flex: 1, minHeight: 0 }}>
-            <DraggableFlatList
-              style={localStyles.list}
-              contentContainerStyle={localStyles.listContent}
-              data={items}
-              keyExtractor={(item) => item.id}
-              onDragEnd={({ data }) => handlePinnedReorder(data)}
-              activationDistance={12}
-              renderItem={renderChatRow}
-            />
+          <GestureHandlerRootView style={localStyles.listWrap}>
+            {Platform.OS === 'web' ? (
+              <FlatList
+                style={localStyles.list}
+                contentContainerStyle={localStyles.listContent}
+                data={items}
+                keyExtractor={(item) => item.id}
+                renderItem={({ item }) =>
+                  renderChatRow({
+                    item,
+                    drag: () => undefined,
+                    isActive: false,
+                    getIndex: () => 0,
+                  })
+                }
+              />
+            ) : (
+              <DraggableFlatList
+                style={localStyles.list}
+                contentContainerStyle={localStyles.listContent}
+                data={items}
+                keyExtractor={(item) => item.id}
+                onDragEnd={({ data }) => handlePinnedReorder(data)}
+                activationDistance={12}
+                renderItem={renderChatRow}
+              />
+            )}
           </GestureHandlerRootView>
         )}
 

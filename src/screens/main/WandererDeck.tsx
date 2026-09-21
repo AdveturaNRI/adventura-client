@@ -13,6 +13,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useIsDesktopWeb, useIsDesktopSidebarVisible } from '@/components/navigation/DesktopThemeToggle';
+import { AnalyticsImpression, useActiveCardImpression } from '@/components/analytics/AnalyticsImpression';
 import { DESKTOP_SIDEBAR_WIDTH } from '@/components/navigation/MainDesktopSidebar';
 import { MobileScreenHeader } from '@/components/navigation/MobileScreenHeader';
 import { Button, UserCard, toast, type SwipeDismissRequest } from '@/components/ui';
@@ -572,6 +573,12 @@ export function WandererDeck({
   const currentItem = items[index] ?? null;
   const nextItem = items[index + 1] ?? null;
   const isFinished = !isEmptyFiltered && index >= total;
+
+  useActiveCardImpression(
+    'player',
+    currentItem?.id,
+    Boolean(currentItem) && !isFinished && bucket === 'feed',
+  );
   const canUndo =
     !isReacting &&
     (bucket === 'feed' ? feedUndoIds.length > 0 : history.length > 0);
@@ -1110,7 +1117,8 @@ export function WandererDeck({
               const listDeckSize = isDesktopWeb ? deckSize : mobileListDeckSize;
 
               return (
-                <View key={item.id} style={styles.listRow}>
+                <AnalyticsImpression key={item.id} entity="player" id={item.id}>
+                <View style={styles.listRow}>
                   <View
                     style={[
                       styles.listCard,
@@ -1162,6 +1170,7 @@ export function WandererDeck({
                     <View style={styles.actionBar}>{renderListActions(item)}</View>
                   )}
                 </View>
+                </AnalyticsImpression>
               );
             })}
           </ScrollView>

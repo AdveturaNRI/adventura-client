@@ -14,6 +14,7 @@ import { useIsDesktopSidebarVisible } from '@/components/navigation/DesktopTheme
 import { ScreenTransition } from '@/components/navigation/ScreenTransition';
 import { Button, toast } from '@/components/ui';
 import { FadeInImage } from '@/components/ui/media/FadeInImage';
+import { AnalyticsImpression } from '@/components/analytics/AnalyticsImpression';
 import { FontSize, Spacing, type ThemeColors } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { useThemedStyles } from '@/hooks/use-themed-styles';
@@ -130,8 +131,8 @@ export default function MyClubsScreen() {
               </View>
             ) : (
               clubs.map((club) => (
+                <AnalyticsImpression key={club.id} entity="club" id={club.id}>
                 <Pressable
-                  key={club.id}
                   onPress={() => router.push(`/clubs/${club.id}`)}
                   style={styles.card}>
                   {club.coverUrl ? (
@@ -150,6 +151,7 @@ export default function MyClubsScreen() {
                     ) : null}
                   </View>
                 </Pressable>
+                </AnalyticsImpression>
               ))
             )}
           </ScrollView>

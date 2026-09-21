@@ -16,6 +16,7 @@ export const TOAST_PORTAL_NOTIFICATION_TYPES: ReadonlySet<PortalNotification['ty
   'game_application_accepted',
   'game_application_rejected',
   'game_player_removed',
+  'system_announcement',
 ]);
 
 export function shouldToastPortalNotification(type: PortalNotification['type']): boolean {
@@ -49,6 +50,13 @@ export function getPortalNotificationCopy(
   const subject = notification.subject;
   const actionText = notification.actionText?.trim();
   const messageText = notification.messageText?.trim();
+
+  if (notification.type === 'system_announcement') {
+    return {
+      title: subject?.trim() || 'Adventura',
+      body: messageText || subject?.trim() || 'Новое объявление',
+    };
+  }
 
   if (actionText || messageText) {
     return {

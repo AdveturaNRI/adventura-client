@@ -6,6 +6,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from 'react';
@@ -16,82 +17,67 @@ import { toast } from '@/components/ui';
 import { useAuth } from '@/context/AuthContext';
 import {
   clearPushAttentionDismissed,
-  consumeOfferPushAfterRegister,
+  clearPushUserDisabled,
+  clearSoftPromptDismissed,
+  consumeOfferPushAfterAuth,
+  deviceNeedsPushOptIn,
   dismissPushAttention,
+  isPushUserDisabled,
+  isSoftPromptDismissed,
+  markFcmV1Offered,
+  markPushUserDisabled,
+  markSoftPromptDismissed,
+  peekOfferPushAfterAuth,
+  resolvePushOptInVariant,
+  shouldForceLegacyFcmOffer,
   shouldShowPushAttention,
+  type PushOptInVariant,
 } from '@/services/push/pushAttention';
 import {
   enableWebPush,
   getNotificationPermission,
-  isIosSafariNeedPwaHint,
   isWebPushSupported,
+  syncWebPushToUser,
   WEB_PUSH_OPT_IN_ENABLED,
 } from '@/services/push/webPush';
 import { localizeErrorMessage } from '@/utils/localizeError';
 
-const DISMISS_KEY = '@adventura/push-prompt-dismiss-until';
 const FIRST_MESSAGE_KEY = '@adventura/push-prompt-first-message';
-const DISMISS_MS = 7 * 24 * 60 * 60 * 1000;
+const SHOW_DELAY_MS = 700;
 
 type PushPromptContextValue = {
   requestAfterCreateGame: () => void;
   requestAfterFirstMessage: () => void;
-  /** Red ! on settings + banner in settings while push is off and not dismissed. */
   showSettingsAlert: boolean;
   refreshPushAttention: () => void;
   dismissSettingsAlert: () => void;
   notifyPushEnabled: () => void;
+  notifyPushDisabled: () => void;
 };
 
 const PushPromptContext = createContext<PushPromptContextValue | null>(null);
 
-async function isSoftPromptDismissed(): Promise<boolean> {
-  try {
-    const raw = await AsyncStorage.getItem(DISMISS_KEY);
-    if (!raw) {
-      return false;
-    }
-    const until = Number(raw);
-    if (!Number.isFinite(until)) {
-      return false;
-    }
-    return Date.now() < until;
-  } catch {
-    return false;
-  }
-}
-
-async function markSoftPromptDismissed() {
-  await AsyncStorage.setItem(DISMISS_KEY, String(Date.now() + DISMISS_MS));
-}
-
-function shouldOfferSoftPrompt(): boolean {
-  if (!WEB_PUSH_OPT_IN_ENABLED) {
-    return false;
-  }
-  if (!isWebPushSupported()) {
-    return false;
-  }
-  if (isIosSafariNeedPwaHint()) {
-    return false;
-  }
-  return getNotificationPermission() === 'default';
-}
-
 export function PushPromptProvider({ children }: { children: ReactNode }) {
   const router = useRouter();
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, user } = useAuth();
   const [visible, setVisible] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [variant, setVariant] = useState<PushOptInVariant>('opt-in');
   const [showSettingsAlert, setShowSettingsAlert] = useState(false);
+  const showTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const authPassRef = useRef(0);
 
   const refreshPushAttention = useCallback(() => {
     if (!WEB_PUSH_OPT_IN_ENABLED || Platform.OS !== 'web' || !isAuthenticated) {
       setShowSettingsAlert(false);
       return;
     }
+    if (user?.isGuest) {
+      setShowSettingsAlert(false);
+      return;
+    }
     void shouldShowPushAttention().then(setShowSettingsAlert);
-  }, [isAuthenticated]);
+  }, [isAuthenticated, user?.isGuest]);
 
   useEffect(() => {
     refreshPushAttention();
@@ -109,32 +95,135 @@ export function PushPromptProvider({ children }: { children: ReactNode }) {
     return () => sub.remove();
   }, [refreshPushAttention]);
 
-  const tryShow = useCallback(async () => {
-    if (!WEB_PUSH_OPT_IN_ENABLED || Platform.OS !== 'web') {
-      return;
-    }
-    if (!shouldOfferSoftPrompt()) {
-      return;
-    }
-    if (await isSoftPromptDismissed()) {
-      return;
-    }
-    setVisible(true);
+  useEffect(() => {
+    return () => {
+      if (showTimerRef.current) {
+        clearTimeout(showTimerRef.current);
+      }
+    };
   }, []);
+
+  const tryShow = useCallback(
+    async (options?: { force?: boolean; variant?: PushOptInVariant }) => {
+      if (!WEB_PUSH_OPT_IN_ENABLED || Platform.OS !== 'web') {
+        return;
+      }
+      if (user?.isGuest) {
+        return;
+      }
+      if (!isWebPushSupported()) {
+        return;
+      }
+      if (!(await deviceNeedsPushOptIn())) {
+        return;
+      }
+      if (!options?.force && (await isSoftPromptDismissed())) {
+        return;
+      }
+
+      const nextVariant =
+        options?.variant ?? (await resolvePushOptInVariant());
+
+      if (showTimerRef.current) {
+        clearTimeout(showTimerRef.current);
+      }
+      showTimerRef.current = setTimeout(() => {
+        showTimerRef.current = null;
+        void deviceNeedsPushOptIn().then((needs) => {
+          if (!needs) {
+            return;
+          }
+          setVariant(nextVariant);
+          setVisible(true);
+          void markFcmV1Offered();
+        });
+      }, SHOW_DELAY_MS);
+    },
+    [user?.isGuest],
+  );
+
+  const notifyPushEnabled = useCallback(() => {
+    void (async () => {
+      await clearPushAttentionDismissed();
+      await clearPushUserDisabled();
+      await clearSoftPromptDismissed();
+      await markFcmV1Offered();
+      setShowSettingsAlert(false);
+    })();
+  }, []);
+
+  const notifyPushDisabled = useCallback(() => {
+    void (async () => {
+      await markPushUserDisabled();
+      refreshPushAttention();
+    })();
+  }, [refreshPushAttention]);
 
   useEffect(() => {
     if (!WEB_PUSH_OPT_IN_ENABLED || !isAuthenticated || Platform.OS !== 'web') {
       return;
     }
+    if (user?.isGuest) {
+      return;
+    }
+
+    const passId = ++authPassRef.current;
+
     void (async () => {
-      const offer = await consumeOfferPushAfterRegister();
-      if (!offer) {
+      const authOffer = await peekOfferPushAfterAuth();
+      const legacyForce = await shouldForceLegacyFcmOffer();
+      const userDisabled = await isPushUserDisabled();
+      refreshPushAttention();
+
+      if (passId !== authPassRef.current) {
         return;
       }
-      refreshPushAttention();
-      await tryShow();
+
+      if (!(await deviceNeedsPushOptIn())) {
+        await markFcmV1Offered();
+        if (authOffer) {
+          await consumeOfferPushAfterAuth();
+        }
+        return;
+      }
+
+      const permission = getNotificationPermission();
+      const force = authOffer || legacyForce || userDisabled;
+
+      // Silent FCM bind only on session restore — not after login/register.
+      // Otherwise «выключил → вышел → зашёл» тихо включает пуш обратно.
+      if (permission === 'granted' && !userDisabled && !authOffer) {
+        const synced = await syncWebPushToUser();
+        if (passId !== authPassRef.current) {
+          return;
+        }
+        if (synced) {
+          notifyPushEnabled();
+          toast.success('Уведомления подключены на этом устройстве');
+          return;
+        }
+        await tryShow({
+          force,
+          variant: 'reconnect',
+        });
+        return;
+      }
+
+      if (authOffer) {
+        await consumeOfferPushAfterAuth();
+      }
+      await tryShow({
+        force,
+        variant: permission === 'granted' ? 'reconnect' : 'opt-in',
+      });
     })();
-  }, [isAuthenticated, refreshPushAttention, tryShow]);
+  }, [
+    isAuthenticated,
+    user?.isGuest,
+    notifyPushEnabled,
+    refreshPushAttention,
+    tryShow,
+  ]);
 
   const requestAfterCreateGame = useCallback(() => {
     void tryShow();
@@ -149,7 +238,7 @@ export function PushPromptProvider({ children }: { children: ReactNode }) {
         }
         await AsyncStorage.setItem(FIRST_MESSAGE_KEY, '1');
       } catch {
-        // still try to show once this session
+        // still try
       }
       await tryShow();
     })();
@@ -162,16 +251,10 @@ export function PushPromptProvider({ children }: { children: ReactNode }) {
     })();
   }, []);
 
-  const notifyPushEnabled = useCallback(() => {
-    void (async () => {
-      await clearPushAttentionDismissed();
-      setShowSettingsAlert(false);
-    })();
-  }, []);
-
   const handleLater = useCallback(() => {
     setVisible(false);
     void markSoftPromptDismissed();
+    void markFcmV1Offered();
     refreshPushAttention();
   }, [refreshPushAttention]);
 
@@ -182,7 +265,11 @@ export function PushPromptProvider({ children }: { children: ReactNode }) {
         const result = await enableWebPush();
         setVisible(false);
         if (result.ok) {
-          toast.success('Уведомления включены');
+          toast.success(
+            variant === 'reconnect'
+              ? 'Доставка уведомлений подключена'
+              : 'Уведомления включены',
+          );
           notifyPushEnabled();
           return;
         }
@@ -195,8 +282,10 @@ export function PushPromptProvider({ children }: { children: ReactNode }) {
           toast.info('На iPhone пуши работают, если сайт добавлен на домашний экран.');
           return;
         }
-        if (result.reason === 'server_disabled') {
-          toast.error('Пуш-уведомления на сервере выключены. Попробуйте позже.');
+        if (result.reason === 'missing_vapid' || result.reason === 'server_disabled') {
+          toast.error(
+            'Не задан Firebase Web Push VAPID key. Задай его в админке: Web Push / FCM.',
+          );
           return;
         }
         if (result.reason === 'subscribe_failed') {
@@ -211,7 +300,7 @@ export function PushPromptProvider({ children }: { children: ReactNode }) {
         setBusy(false);
       }
     })();
-  }, [notifyPushEnabled, refreshPushAttention]);
+  }, [notifyPushEnabled, refreshPushAttention, variant]);
 
   useEffect(() => {
     if (Platform.OS !== 'web' || typeof window === 'undefined' || !('serviceWorker' in navigator)) {
@@ -247,6 +336,7 @@ export function PushPromptProvider({ children }: { children: ReactNode }) {
       refreshPushAttention,
       dismissSettingsAlert,
       notifyPushEnabled,
+      notifyPushDisabled,
     }),
     [
       requestAfterCreateGame,
@@ -255,6 +345,7 @@ export function PushPromptProvider({ children }: { children: ReactNode }) {
       refreshPushAttention,
       dismissSettingsAlert,
       notifyPushEnabled,
+      notifyPushDisabled,
     ],
   );
 
@@ -265,6 +356,7 @@ export function PushPromptProvider({ children }: { children: ReactNode }) {
         <PushOptInDialog
           visible={visible}
           busy={busy}
+          variant={variant}
           onEnable={handleEnable}
           onLater={handleLater}
         />
@@ -283,6 +375,7 @@ export function usePushPrompt() {
       refreshPushAttention: () => undefined,
       dismissSettingsAlert: () => undefined,
       notifyPushEnabled: () => undefined,
+      notifyPushDisabled: () => undefined,
     };
   }
   return ctx;

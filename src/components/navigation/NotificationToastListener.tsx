@@ -12,6 +12,7 @@ import {
   getPortalNotificationToastVariant,
   shouldToastPortalNotification,
 } from '@/utils/portal-notification-copy';
+import { getPortalNotificationHref } from '@/utils/portal-notification-href';
 
 const TOAST_DURATION_MS = 5000;
 
@@ -61,6 +62,10 @@ export function NotificationToastListener() {
 
     const { title, body } = getPortalNotificationCopy(lastNotification);
     const variant = getPortalNotificationToastVariant(lastNotification.type);
+    const href =
+      lastNotification.href?.trim() ||
+      getPortalNotificationHref(lastNotification) ||
+      '/notifications';
 
     toast[variant](body, {
       title,
@@ -71,7 +76,7 @@ export function NotificationToastListener() {
       avatarUrl: lastNotification.actor.avatarUrl,
       actionLabel: 'Открыть',
       onAction: () => {
-        router.push('/notifications');
+        router.push(href as never);
       },
     });
   }, [lastNotification, alignment, router]);

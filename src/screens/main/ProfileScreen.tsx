@@ -4,6 +4,7 @@ import { Linking, Pressable, ScrollView, Text, View } from 'react-native';
 
 import { useIsDesktopSidebarVisible, useIsDesktopWeb } from '@/components/navigation/DesktopThemeToggle';
 import { MobileScreenHeader } from '@/components/navigation/MobileScreenHeader';
+import { EmailVerificationBanner } from '@/components/profile/EmailVerificationBanner';
 import { ProfileCompletionBanner } from '@/components/profile/ProfileCompletionBanner';
 import { ProfileHeaderCard } from '@/components/profile/ProfileHeaderCard';
 import { ScreenTransition } from '@/components/navigation/ScreenTransition';
@@ -119,6 +120,8 @@ export default function ProfileScreen() {
           badges={profile?.perks?.visibleBadges ?? profile?.perks?.badges}
           frameId={profile?.perks ? profile.perks.avatarFrameId : undefined}
         />
+
+        <EmailVerificationBanner />
 
         <ProfileCompletionBanner completion={completion} />
 

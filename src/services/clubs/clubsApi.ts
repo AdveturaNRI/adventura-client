@@ -25,6 +25,7 @@ export type ClubListItem = {
   tags: string[];
   links: ClubLink[];
   schedule: ClubScheduleDay[];
+  tablesCount?: number;
   isPublished: boolean;
   coverUrl: string | null;
   /** Своя иконка на карте — появится с кастомизацией клуба */
@@ -49,6 +50,7 @@ export type CreateClubPayload = {
   tags?: string[];
   links?: ClubLink[];
   isPublished?: boolean;
+  tablesCount?: number;
 };
 
 export type GeocodeResult = {

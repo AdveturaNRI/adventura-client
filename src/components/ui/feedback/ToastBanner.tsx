@@ -11,7 +11,7 @@ import {
   type ToastVariant,
 } from '@/components/ui/feedback/toast.config';
 import { FontSize, Layout, Spacing, type ThemeColors } from '@/constants/theme';
-import { useTheme } from '@/hooks/use-theme';
+import { useTheme, useThemePreference } from '@/hooks/use-theme';
 import { useThemedStyles } from '@/hooks/use-themed-styles';
 
 type ToastBannerProps = ToastConfigParams<Record<string, unknown>> & {
@@ -21,11 +21,7 @@ type ToastBannerProps = ToastConfigParams<Record<string, unknown>> & {
 type IconName = ComponentProps<typeof Ionicons>['name'];
 
 function createStyles(colors: ThemeColors) {
-  const isDark = colors.background === '#000000' || colors.text === '#FFFFFF';
-  // Explicit card fill: Safari / toast-message wrappers sometimes force white and kill contrast.
-  const cardBg = isDark ? '#1C1C1E' : '#FFFFFF';
-  const titleColor = isDark ? '#F2F3F5' : '#000000';
-  const messageColor = isDark ? '#C5C6C8' : '#3C3C43';
+  const isDark = colors.background === '#000000';
 
   return StyleSheet.create({
     outer: {
@@ -46,22 +42,16 @@ function createStyles(colors: ThemeColors) {
       width: '100%',
       maxWidth: Layout.maxContentWidth,
       borderRadius: 16,
-      backgroundColor: cardBg,
+      backgroundColor: colors.surface,
       borderWidth: 1,
-      borderColor: isDark ? 'rgba(255,255,255,0.12)' : colors.border,
+      borderColor: colors.border,
       shadowColor: colors.shadow,
       shadowOffset: { width: 0, height: 10 },
-      shadowOpacity: isDark ? 0.45 : 0.14,
+      shadowOpacity: isDark ? 0.55 : 0.14,
       shadowRadius: 22,
       elevation: 8,
       overflow: 'hidden',
       pointerEvents: 'auto',
-      ...(Platform.OS === 'web'
-        ? ({
-            color: titleColor,
-            backgroundColor: cardBg,
-          } as object)
-        : null),
     },
     cardInner: {
       flexDirection: 'row',
@@ -70,24 +60,15 @@ function createStyles(colors: ThemeColors) {
       paddingVertical: 12,
       paddingHorizontal: Spacing.md,
       backgroundColor: 'transparent',
-      ...(Platform.OS === 'web'
-        ? ({
-            appearance: 'none',
-            WebkitAppearance: 'none',
-            backgroundImage: 'none',
-            backgroundColor: 'transparent',
-            color: titleColor,
-          } as object)
-        : null),
     },
     cardAlert: {
-      borderColor: 'rgba(21, 122, 254, 0.28)',
+      borderColor: isDark ? 'rgba(75, 153, 255, 0.45)' : 'rgba(21, 122, 254, 0.28)',
     },
     cardChat: {
-      borderColor: 'rgba(21, 122, 254, 0.28)',
+      borderColor: isDark ? 'rgba(75, 153, 255, 0.45)' : 'rgba(21, 122, 254, 0.28)',
     },
     cardWarningEmphasis: {
-      borderColor: 'rgba(255, 159, 10, 0.35)',
+      borderColor: isDark ? 'rgba(255, 159, 10, 0.5)' : 'rgba(255, 159, 10, 0.35)',
     },
     cardPressed: {
       opacity: 0.94,
@@ -122,7 +103,7 @@ function createStyles(colors: ThemeColors) {
       justifyContent: 'center',
       backgroundColor: colors.primary,
       borderWidth: 2,
-      borderColor: cardBg,
+      borderColor: colors.surface,
     },
     avatarSealWarning: {
       backgroundColor: '#FF9F0A',
@@ -138,7 +119,7 @@ function createStyles(colors: ThemeColors) {
     title: {
       fontSize: FontSize.label,
       fontWeight: '600',
-      color: titleColor,
+      color: colors.text,
       letterSpacing: -0.1,
     },
     titleEmphasis: {
@@ -146,7 +127,7 @@ function createStyles(colors: ThemeColors) {
     },
     message: {
       fontSize: FontSize.caption,
-      color: messageColor,
+      color: colors.textSecondary,
       lineHeight: 17,
     },
     actionButton: {
@@ -154,12 +135,12 @@ function createStyles(colors: ThemeColors) {
       paddingVertical: 7,
       paddingHorizontal: 12,
       borderRadius: 999,
-      backgroundColor: 'rgba(21, 122, 254, 0.12)',
+      backgroundColor: isDark ? 'rgba(21, 122, 254, 0.22)' : 'rgba(21, 122, 254, 0.12)',
     },
     actionLabel: {
       fontSize: FontSize.caption,
       fontWeight: '700',
-      color: colors.primary,
+      color: isDark ? colors.primaryLight : colors.primary,
     },
   });
 }
@@ -178,16 +159,16 @@ function getAlignmentStyle(
   }
 }
 
-function getIconWellBackground(variant: ToastVariant) {
+function getIconWellBackground(variant: ToastVariant, isDark: boolean) {
   switch (variant) {
     case 'success':
-      return 'rgba(52, 199, 89, 0.14)';
+      return isDark ? 'rgba(52, 199, 89, 0.22)' : 'rgba(52, 199, 89, 0.14)';
     case 'error':
-      return 'rgba(255, 59, 48, 0.14)';
+      return isDark ? 'rgba(255, 69, 58, 0.22)' : 'rgba(255, 59, 48, 0.14)';
     case 'warning':
-      return 'rgba(255, 159, 10, 0.16)';
+      return isDark ? 'rgba(255, 159, 10, 0.24)' : 'rgba(255, 159, 10, 0.16)';
     default:
-      return 'rgba(21, 122, 254, 0.12)';
+      return isDark ? 'rgba(21, 122, 254, 0.22)' : 'rgba(21, 122, 254, 0.12)';
   }
 }
 
@@ -213,6 +194,8 @@ function resolveSealIcon(emphasis: ToastEmphasis, variant: ToastVariant): IconNa
 
 export function ToastBanner({ text1, text2, onPress, variant, props }: ToastBannerProps) {
   const colors = useTheme();
+  const { colorScheme } = useThemePreference();
+  const isDark = colorScheme === 'dark';
   const styles = useThemedStyles(createStyles);
   const spec = getToastSpecs(colors).find((item) => item.variant === variant)!;
   const alignment = (props?.alignment as ToastAlignment | undefined) ?? 'center';
@@ -253,7 +236,7 @@ export function ToastBanner({ text1, text2, onPress, variant, props }: ToastBann
     <View
       style={[
         styles.iconWell,
-        { backgroundColor: getIconWellBackground(variant) },
+        { backgroundColor: getIconWellBackground(variant, isDark) },
       ]}>
       <Ionicons name={iconName} size={22} color={spec.accentColor} />
     </View>
@@ -265,34 +248,64 @@ export function ToastBanner({ text1, text2, onPress, variant, props }: ToastBann
       <View style={styles.content}>
         {text1 ? (
           <Text
-            style={[styles.title, emphasis !== 'default' ? styles.titleEmphasis : null]}
+            {...(Platform.OS === 'web' ? ({ className: 'adventura-toast-title' } as object) : null)}
+            style={[
+              styles.title,
+              { color: colors.text },
+              emphasis !== 'default' ? styles.titleEmphasis : null,
+            ]}
             numberOfLines={2}>
             {text1}
           </Text>
         ) : null}
         {message ? (
-          <Text style={styles.message} numberOfLines={4}>
+          <Text
+            {...(Platform.OS === 'web'
+              ? ({ className: 'adventura-toast-message' } as object)
+              : null)}
+            style={[styles.message, { color: colors.textSecondary }]}
+            numberOfLines={4}>
             {message}
           </Text>
         ) : null}
       </View>
       {actionLabel && onAction ? (
-        <View style={styles.actionButton} pointerEvents="none">
-          <Text style={styles.actionLabel}>{actionLabel}</Text>
+        <View
+          {...(Platform.OS === 'web' ? ({ className: 'adventura-toast-action' } as object) : null)}
+          style={styles.actionButton}
+          pointerEvents="none">
+          <Text
+            {...(Platform.OS === 'web'
+              ? ({ className: 'adventura-toast-action-label' } as object)
+              : null)}
+            style={[
+              styles.actionLabel,
+              { color: isDark ? colors.primaryLight : colors.primary },
+            ]}>
+            {actionLabel}
+          </Text>
         </View>
       ) : null}
     </>
   );
 
-  const isDark = colors.background === '#000000' || colors.text === '#FFFFFF';
-  const cardBg = isDark ? '#1C1C1E' : '#FFFFFF';
+  const webCardReset =
+    Platform.OS === 'web'
+      ? ({
+          backgroundColor: colors.surface,
+          // RN-web maps both; Safari UA stylesheet still wins without CSS class + !important.
+          background: colors.surface,
+          color: colors.text,
+          borderColor: colors.border,
+        } as object)
+      : null;
 
   const cardStyle = [
     styles.card,
+    webCardReset,
     {
-      backgroundColor: cardBg,
-      borderColor: isDark ? 'rgba(255,255,255,0.12)' : colors.border,
-      ...(Platform.OS === 'web' ? ({ color: isDark ? '#F2F3F5' : '#000000' } as object) : null),
+      backgroundColor: colors.surface,
+      borderColor: colors.border,
     },
     alignment !== 'center' ? styles.cardShrink : null,
     emphasis === 'alert' ? styles.cardAlert : null,
@@ -304,8 +317,10 @@ export function ToastBanner({ text1, text2, onPress, variant, props }: ToastBann
 
   return (
     <View pointerEvents="box-none" style={[styles.outer, getAlignmentStyle(alignment, styles)]}>
-      {/* Фон на View: Safari красит <button>/Pressable в белый и убивает контраст на dark. */}
-      <View style={[...cardStyle, { backgroundColor: cardBg }]}>
+      {/* Фон на View + CSS class: Safari красит Pressable/button в белый. */}
+      <View
+        {...(Platform.OS === 'web' ? ({ className: 'adventura-toast' } as object) : null)}
+        style={[...cardStyle, { backgroundColor: colors.surface }]}>
         {isInteractive ? (
           <Pressable
             accessibilityRole="button"
@@ -313,6 +328,9 @@ export function ToastBanner({ text1, text2, onPress, variant, props }: ToastBann
             onPress={onAction ? handleAction : onPress}
             style={({ pressed }) => [
               styles.cardInner,
+              Platform.OS === 'web'
+                ? ({ backgroundColor: 'transparent', background: 'transparent' } as object)
+                : null,
               pressed && styles.cardPressed,
             ]}>
             {body}

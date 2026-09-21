@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
-import { useCallback, useState } from 'react';
-import { useFocusEffect, useLocalSearchParams } from 'expo-router';
+import { useCallback, useEffect, useState } from 'react';
+import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import {
   ActivityIndicator,
   Linking,
@@ -31,6 +31,7 @@ import {
   type ClubScheduleDay,
 } from '@/services/clubs/clubsApi';
 import { localizeErrorMessage } from '@/utils/localizeError';
+import { trackEntityTransition } from '@/services/analytics/analytics';
 
 function getTodaySchedule(schedule: ClubScheduleDay[]) {
   const jsDay = new Date().getDay();
@@ -391,6 +392,7 @@ export default function ClubDetailScreen() {
   const params = useLocalSearchParams<{ id?: string }>();
   const clubId =
     typeof params.id === 'string' ? params.id : Array.isArray(params.id) ? params.id[0] : '';
+  const router = useRouter();
   const colors = useTheme();
   const insets = useSafeAreaInsets();
   const isDesktopWeb = useIsDesktopWeb();
@@ -432,6 +434,12 @@ export default function ClubDetailScreen() {
       void load();
     }, [load]),
   );
+
+  useEffect(() => {
+    if (club?.id) {
+      trackEntityTransition('club', club.id);
+    }
+  }, [club?.id]);
 
   const hours = formatTodayHours(club?.schedule ?? []);
   const jsDay = new Date().getDay();

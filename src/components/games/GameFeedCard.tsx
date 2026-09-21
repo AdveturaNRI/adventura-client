@@ -12,6 +12,7 @@ import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
 
 import { FadeInImage } from '@/components/ui/media/FadeInImage';
+import { AnalyticsImpression } from '@/components/analytics/AnalyticsImpression';
 import { FontSize, Radius, Spacing, type ThemeColors } from '@/constants/theme';
 import { useProfile } from '@/context/ProfileContext';
 import { useTheme } from '@/hooks/use-theme';
@@ -905,22 +906,24 @@ export function GameFeedCard({
             onMouseLeave: () => setHovered(false),
           } as object)
         : null)}>
-      <View style={[styles.card, hovered && !isDetail && styles.cardHovered]}>
-        {coverBlock}
-        <View style={styles.body}>
-          {onPress ? (
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={`Открыть игру ${item.title}`}
-              onPress={onPress}
-              style={StyleSheet.absoluteFillObject}
-            />
-          ) : null}
-          <View pointerEvents="box-none">{bodyContent}</View>
-        </View>
+      <AnalyticsImpression entity="game" id={item.id} enabled={!isDetail}>
+        <View style={[styles.card, hovered && !isDetail && styles.cardHovered]}>
+          {coverBlock}
+          <View style={styles.body}>
+            {onPress ? (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={`Открыть игру ${item.title}`}
+                onPress={onPress}
+                style={StyleSheet.absoluteFillObject}
+              />
+            ) : null}
+            <View pointerEvents="box-none">{bodyContent}</View>
+          </View>
 
-        <View style={styles.actionsWrap}>{actions}</View>
-      </View>
+          <View style={styles.actionsWrap}>{actions}</View>
+        </View>
+      </AnalyticsImpression>
     </View>
   );
 }

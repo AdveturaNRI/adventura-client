@@ -1,154 +1,200 @@
 import { Platform } from 'react-native';
 
 import type { PortalNotification } from '@/services/notifications/notificationsApi';
+import {
+  getEffectiveNotificationSoundUrl,
+  getNotificationSoundSettingsSync,
+} from '@/utils/notification-sound-settings';
 import { getPortalNotificationCopy } from '@/utils/portal-notification-copy';
 
 const SITE_TITLE = 'Adventura';
 const MESSAGE_ALERT_TITLE = 'Новое сообщение';
 const NOTIFICATION_ALERT_TITLE = 'Новое уведомление';
 const BLINK_MS = 900;
-const NOTIFY_SOUND_URL = '/sounds/notify.mp3';
+const SOUND_COOLDOWN_MS = 800;
 
 let blinkTimer: ReturnType<typeof setInterval> | null = null;
 let baseTitle = SITE_TITLE;
 let showingAlertTitle = false;
 let alertTitle = MESSAGE_ALERT_TITLE;
 
-let audioContext: AudioContext | null = null;
-let notifyBuffer: AudioBuffer | null = null;
-let bufferLoad: Promise<AudioBuffer | null> | null = null;
-let unlocked = false;
+let lastSoundAt = 0;
+let lastPreviewAt = 0;
+let focusedConversationId: string | null = null;
+/** Один HTMLAudioElement на вкладку — иначе new Audio(url)+preload даёт 2× GET. */
+let sharedAudio: HTMLAudioElement | null = null;
+const PREVIEW_GUARD_MS = 350;
 
 function canUseWebAlerts() {
   return Platform.OS === 'web' && typeof window !== 'undefined' && typeof document !== 'undefined';
 }
 
-function getAudioContext() {
-  if (!canUseWebAlerts()) {
-    return null;
+function resolveAudioUrl(url: string): string {
+  if (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('blob:')) {
+    return url;
   }
-  const Ctx =
-    window.AudioContext ||
-    (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
-  if (!Ctx) {
-    return null;
-  }
-  if (!audioContext) {
-    audioContext = new Ctx();
-  }
-  return audioContext;
+  return new URL(url, window.location.origin).href;
 }
 
-async function loadNotifyBuffer(context: AudioContext) {
-  if (notifyBuffer) {
-    return notifyBuffer;
+function getSharedAudio(): HTMLAudioElement {
+  if (!sharedAudio) {
+    sharedAudio = new Audio();
+    sharedAudio.preload = 'auto';
+    sharedAudio.volume = 1;
   }
-  if (bufferLoad) {
-    return bufferLoad;
-  }
+  return sharedAudio;
+}
 
-  bufferLoad = (async () => {
-    try {
-      const response = await fetch(NOTIFY_SOUND_URL, { cache: 'force-cache' });
-      if (!response.ok) {
-        return null;
+function stopActiveAudio() {
+  if (!sharedAudio) {
+    return;
+  }
+  try {
+    sharedAudio.pause();
+    sharedAudio.currentTime = 0;
+  } catch {
+    // ignore
+  }
+}
+
+function playHtmlAudio(url: string) {
+  if (!canUseWebAlerts() || !url) {
+    return;
+  }
+  try {
+    const absolute = resolveAudioUrl(url);
+    const audio = getSharedAudio();
+    stopActiveAudio();
+    // Меняем src только если другой файл — иначе повторный клик не качает снова.
+    if (audio.src !== absolute) {
+      audio.src = absolute;
+    } else {
+      try {
+        audio.currentTime = 0;
+      } catch {
+        // ignore
       }
-      const data = await response.arrayBuffer();
-      notifyBuffer = await context.decodeAudioData(data.slice(0));
-      return notifyBuffer;
-    } catch {
-      return null;
-    } finally {
-      bufferLoad = null;
     }
-  })();
-
-  return bufferLoad;
+    const playResult = audio.play();
+    if (playResult && typeof playResult.catch === 'function') {
+      void playResult.catch((error: unknown) => {
+        console.warn('[chat-alerts] play failed', absolute, error);
+      });
+    }
+  } catch (error) {
+    console.warn('[chat-alerts] play error', error);
+  }
 }
 
-function playFallbackBeep(context: AudioContext) {
-  const now = context.currentTime;
-  const gain = context.createGain();
-  gain.gain.setValueAtTime(0.0001, now);
-  gain.gain.exponentialRampToValueAtTime(0.22, now + 0.02);
-  gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.28);
-  gain.connect(context.destination);
-
-  const osc = context.createOscillator();
-  osc.type = 'sine';
-  osc.frequency.setValueAtTime(880, now);
-  osc.frequency.exponentialRampToValueAtTime(660, now + 0.22);
-  osc.connect(gain);
-  osc.start(now);
-  osc.stop(now + 0.3);
+export function setFocusedChatConversation(conversationId: string | null) {
+  focusedConversationId = conversationId;
 }
 
-function playBuffer(context: AudioContext, buffer: AudioBuffer) {
-  const source = context.createBufferSource();
-  source.buffer = buffer;
-  const gain = context.createGain();
-  gain.gain.value = 1;
-  source.connect(gain);
-  gain.connect(context.destination);
-  source.start(0);
+export function isChatConversationFocused(conversationId: string): boolean {
+  if (!conversationId || focusedConversationId !== conversationId) {
+    return false;
+  }
+  if (canUseWebAlerts()) {
+    return document.visibilityState === 'visible';
+  }
+  return true;
 }
+
+/** Silent 1-sample wav — unlocks autoplay without hitting /sounds/*.mp3. */
+const SILENT_WAV =
+  'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=';
+
+let alertsUnlocked = false;
 
 export function unlockChatAlerts() {
+  if (!canUseWebAlerts() || alertsUnlocked) {
+    return;
+  }
+  alertsUnlocked = true;
+
+  try {
+    // Prefer AudioContext — no media file fetch.
+    const AudioCtx =
+      window.AudioContext ||
+      (window as unknown as { webkitAudioContext?: typeof AudioContext })
+        .webkitAudioContext;
+    if (AudioCtx) {
+      const ctx = new AudioCtx();
+      void ctx.resume().catch(() => {
+        alertsUnlocked = false;
+      });
+    }
+
+    // Also warm the shared HTMLAudioElement with a data: URI (still no network).
+    const audio = getSharedAudio();
+    const previousSrc = audio.src;
+    audio.volume = 0.001;
+    audio.src = SILENT_WAV;
+    void audio
+      .play()
+      .then(() => {
+        audio.pause();
+        audio.currentTime = 0;
+        audio.volume = 1;
+        // Drop silent src so the next real play sets notify URL once.
+        if (!previousSrc || previousSrc.startsWith('data:')) {
+          audio.removeAttribute('src');
+          audio.load();
+        } else {
+          audio.src = previousSrc;
+        }
+      })
+      .catch(() => {
+        alertsUnlocked = false;
+        audio.volume = 1;
+      });
+  } catch {
+    alertsUnlocked = false;
+  }
+}
+
+type PlaySoundOptions = {
+  url?: string | null;
+  /** Preview / явный жест — игнор mute и cooldown */
+  force?: boolean;
+};
+
+export function playIncomingMessageSound(options?: PlaySoundOptions) {
   if (!canUseWebAlerts()) {
     return;
   }
 
-  const context = getAudioContext();
-  if (!context) {
+  const settings = getNotificationSoundSettingsSync();
+  if (!options?.force && !settings.enabled) {
     return;
   }
 
-  const resume =
-    context.state === 'suspended'
-      ? context.resume().then(() => {
-          unlocked = true;
-        })
-      : Promise.resolve().then(() => {
-          unlocked = true;
-        });
+  const now = Date.now();
+  if (!options?.force && now - lastSoundAt < SOUND_COOLDOWN_MS) {
+    return;
+  }
+  if (!options?.force) {
+    lastSoundAt = now;
+  }
 
-  void resume
-    .then(() => loadNotifyBuffer(context))
-    .catch(() => {
-      // Keep trying on the next gesture.
-      unlocked = false;
-    });
+  const url = options?.url || getEffectiveNotificationSoundUrl();
+  if (!url) {
+    return;
+  }
+  playHtmlAudio(url);
 }
 
-export function playIncomingMessageSound() {
-  const context = getAudioContext();
-  if (!context) {
+export function previewNotificationSound(url: string) {
+  if (!url) {
     return;
   }
-
-  const run = async () => {
-    if (context.state === 'suspended') {
-      try {
-        await context.resume();
-        unlocked = true;
-      } catch {
-        unlocked = false;
-        return;
-      }
-    }
-
-    const buffer = notifyBuffer ?? (await loadNotifyBuffer(context));
-    if (buffer) {
-      playBuffer(context, buffer);
-      return;
-    }
-
-    playFallbackBeep(context);
-  };
-
-  void run().catch(() => {
-    unlocked = false;
-  });
+  // RN-web Pressable иногда шлёт pressIn/press дважды на один клик.
+  const now = Date.now();
+  if (now - lastPreviewAt < PREVIEW_GUARD_MS) {
+    return;
+  }
+  lastPreviewAt = now;
+  playIncomingMessageSound({ url, force: true });
 }
 
 function startTitleBlink(title: string) {
@@ -193,7 +239,10 @@ export function stopNewMessageTitleBlink() {
   document.title = baseTitle || SITE_TITLE;
 }
 
-export function notifyIncomingChatMessage() {
+export function notifyIncomingChatMessage(conversationId?: string) {
+  if (conversationId && isChatConversationFocused(conversationId)) {
+    return;
+  }
   playIncomingMessageSound();
   startTitleBlink(MESSAGE_ALERT_TITLE);
 }

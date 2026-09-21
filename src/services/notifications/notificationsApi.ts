@@ -10,7 +10,8 @@ export type PortalNotification = {
     | 'game_application_rejected'
     | 'game_player_removed'
     | 'game_deleted'
-    | 'club_deleted';
+    | 'club_deleted'
+    | 'system_announcement';
   actor: {
     id: string;
     nickname: string;
@@ -20,6 +21,8 @@ export type PortalNotification = {
   messageText: string;
   subject: string;
   refId?: string;
+  /** Deep link to related entity (game, club, user…). */
+  href?: string | null;
   canAddBack: boolean;
   readAt: string | null;
   createdAt: string;

@@ -7,6 +7,7 @@ import {
   useState,
   type ReactNode,
 } from 'react';
+import { Platform } from 'react-native';
 
 import { toast } from '@/components/ui/feedback/toast';
 import {
@@ -29,7 +30,27 @@ import {
 } from '@/utils/auth-storage';
 import { localizeErrorMessage } from '@/utils/localizeError';
 import { ensureUploadLimits } from '@/utils/upload-limits';
-import { markOfferPushAfterRegister } from '@/services/push/pushAttention';
+import { trackUserSessionStarted } from '@/services/analytics/analytics';
+import {
+  bootstrapYandexMetrika,
+  reachYandexMetrikaGoal,
+  setYandexMetrikaUserId,
+} from '@/services/analytics/yandex-metrika';
+import { markOfferPushAfterAuth } from '@/services/push/pushAttention';
+
+function resolveAcquisitionSource(): string {
+  if (Platform.OS !== 'web') {
+    return Platform.OS;
+  }
+  try {
+    if (typeof document !== 'undefined' && document.referrer) {
+      return `web:${new URL(document.referrer).hostname}`.slice(0, 64);
+    }
+  } catch {
+    // ignore bad referrer
+  }
+  return 'web';
+}
 
 type AuthContextValue = {
   user: AuthUser | null;
@@ -58,6 +79,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setToken(accessToken);
     });
   }, []);
+
+  useEffect(() => {
+    if (Platform.OS !== 'web') {
+      return;
+    }
+    void bootstrapYandexMetrika().then(() => {
+      setYandexMetrikaUserId(user?.id ?? null);
+    });
+  }, [user?.id]);
 
   useEffect(() => {
     void ensureUploadLimits().catch(() => {});
@@ -101,6 +131,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setToken(accessToken);
         setUser(currentUser);
         await saveAuthSession(accessToken, refreshToken, currentUser);
+        trackUserSessionStarted('restore');
       } catch {
         await clearAuthSession();
         if (!isMounted) return;
@@ -128,8 +159,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         response.refreshToken,
         response.user,
       );
+      if (!response.user.isGuest) {
+        await markOfferPushAfterAuth();
+      }
       setToken(response.accessToken);
       setUser(response.user);
+      trackUserSessionStarted('password');
       toast.success('Добро пожаловать!');
       return true;
     } catch (error) {
@@ -142,17 +177,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const signUp = useCallback(
     async (email: string, nickname: string, password: string) => {
       try {
-        const response = await registerUser({ email, nickname, password });
+        const response = await registerUser({
+          email,
+          nickname,
+          password,
+          acquisitionSource: resolveAcquisitionSource(),
+        });
         await saveAuthSession(
           response.accessToken,
           response.refreshToken,
           response.user,
         );
+        await markOfferPushAfterAuth();
         setToken(response.accessToken);
         setUser(response.user);
         setRedirectToQuestionnaire(true);
-        void markOfferPushAfterRegister();
-        toast.success('Аккаунт создан');
+        trackUserSessionStarted('register');
+        reachYandexMetrikaGoal('register');
+        toast.success('Аккаунт создан — проверьте почту для подтверждения');
         return true;
       } catch (error) {
         const message = localizeErrorMessage(error, 'Не удалось зарегистрироваться');
@@ -174,6 +216,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setToken(response.accessToken);
       setUser(response.user);
       setRedirectToQuestionnaire(true);
+      trackUserSessionStarted('guest');
       toast.success(`Добро пожаловать, ${response.user.nickname}!`);
       return true;
     } catch (error) {
@@ -184,6 +227,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const signOut = useCallback(async () => {
+    try {
+      const { disableWebPush } = await import('@/services/push/webPush');
+      await disableWebPush();
+    } catch {
+      // ignore push unbind errors
+    }
     const refreshToken = await getStoredRefreshToken();
     await logoutUser(refreshToken);
     await clearAuthSession();

@@ -2,7 +2,11 @@ FROM node:22-bookworm-slim AS build
 WORKDIR /app
 
 ARG EXPO_PUBLIC_API_URL=https://api.adventu.ru/api
+# Optional bake-in for Metrika HTML checkers. Runtime still reads admin
+# /api/config/public; set this on image build so ym(ID) appears in index.html.
+ARG EXPO_PUBLIC_YANDEX_METRIKA_ID=112799671
 ENV EXPO_PUBLIC_API_URL=$EXPO_PUBLIC_API_URL
+ENV EXPO_PUBLIC_YANDEX_METRIKA_ID=$EXPO_PUBLIC_YANDEX_METRIKA_ID
 ENV CI=1
 
 COPY package.json package-lock.json ./
@@ -20,6 +24,7 @@ COPY src ./src
 # 404.html is what serve returns with HTTP 404 for unknown paths (see serve.json).
 RUN npx expo export -p web \
   && cp public/dice-stage.html dist/dice-stage.html \
+  && cp public/serve.json dist/serve.json \
   && cp dist/+not-found.html dist/404.html
 
 FROM node:22-bookworm-slim AS runner

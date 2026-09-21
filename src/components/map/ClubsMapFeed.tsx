@@ -16,6 +16,7 @@ import type { ClubsSelectedCity } from '@/components/map/clubs-map-session';
 import { toLatLng } from '@/components/map/map-coords';
 import { useIsDesktopWeb } from '@/components/navigation/DesktopThemeToggle';
 import { FadeInImage } from '@/components/ui/media/FadeInImage';
+import { AnalyticsImpression } from '@/components/analytics/AnalyticsImpression';
 import { FontSize, Radius, Spacing, type ThemeColors } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { useThemedStyles } from '@/hooks/use-themed-styles';
@@ -738,10 +739,10 @@ export function ClubsMapFeed({
               : null;
 
             return (
-              <Pressable
-                key={club.id}
-                onPress={() => onPressClub(club)}
-                style={({ pressed }) => [styles.card, pressed && styles.cardPressed]}>
+              <AnalyticsImpression key={club.id} entity="club" id={club.id}>
+                <Pressable
+                  onPress={() => onPressClub(club)}
+                  style={({ pressed }) => [styles.card, pressed && styles.cardPressed]}>
                 <View style={styles.coverWrap}>
                   {club.coverUrl ? (
                     <FadeInImage
@@ -833,6 +834,7 @@ export function ClubsMapFeed({
                   </View>
                 </View>
               </Pressable>
+              </AnalyticsImpression>
             );
           })
         )}
