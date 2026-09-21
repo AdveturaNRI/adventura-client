@@ -81,6 +81,8 @@ function createStyles(
       width: '100%',
       maxWidth: 480,
       alignSelf: 'center',
+      overflow: 'visible',
+      paddingTop: 122,
     },
     actions: {
       width: '100%',

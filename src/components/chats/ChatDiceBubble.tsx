@@ -1,10 +1,12 @@
 import { Ionicons } from '@expo/vector-icons';
-import { StyleSheet, Text, View } from 'react-native';
+import { Platform, StyleSheet, Text, View } from 'react-native';
 
+import { DICE_SKINS, isDiceSkinId } from '@/data/rewards/catalog';
 import { FontSize, Spacing, type ThemeColors } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { useThemedStyles } from '@/hooks/use-themed-styles';
 import {
+  CHAT_DICE_SKINS_ENABLED,
   DICE_CRIT_FAIL_LABEL,
   DICE_CRIT_SUCCESS_LABEL,
   collectD20Values,
@@ -19,6 +21,24 @@ type ChatDiceBubbleProps = {
   payload: DiceRollPayload;
   mine?: boolean;
 };
+
+function withAlpha(hex: string, alpha: number) {
+  const raw = hex.replace('#', '');
+  if (raw.length !== 6) {
+    return hex;
+  }
+  const r = Number.parseInt(raw.slice(0, 2), 16);
+  const g = Number.parseInt(raw.slice(2, 4), 16);
+  const b = Number.parseInt(raw.slice(4, 6), 16);
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
+
+function exclusiveSkin(payload: DiceRollPayload) {
+  if (!CHAT_DICE_SKINS_ENABLED || !isDiceSkinId(payload.skin) || payload.skin === 'standard') {
+    return null;
+  }
+  return DICE_SKINS[payload.skin];
+}
 
 function createStyles(colors: ThemeColors) {
   return StyleSheet.create({
@@ -76,6 +96,9 @@ function createStyles(colors: ThemeColors) {
     },
     badgeCritSuccessTextMine: {
       color: '#C8F5D2',
+    },
+    badgeSkinTextMine: {
+      color: '#FFFFFF',
     },
     formula: {
       fontSize: FontSize.label,
@@ -220,6 +243,9 @@ function createStyles(colors: ThemeColors) {
 export function ChatDiceBubble({ payload, mine }: ChatDiceBubbleProps) {
   const colors = useTheme();
   const styles = useThemedStyles(createStyles);
+  const skin = exclusiveSkin(payload);
+  const accent = skin?.accent ?? colors.primary;
+  const accentSoft = skin ? withAlpha(skin.accent, mine ? 0.28 : 0.16) : null;
   const redacted = payload.hidden && (payload.redacted || payload.sum == null);
   const keepMode = payload.mode === 'advantage' || payload.mode === 'disadvantage';
   const rollLabel = keepMode
@@ -227,7 +253,7 @@ export function ChatDiceBubble({ payload, mine }: ChatDiceBubbleProps) {
     : mine
       ? 'Ваш бросок'
       : 'Бросок';
-  const badgeIconColor = mine ? colors.onPrimary : colors.primary;
+  const badgeIconColor = skin ? accent : mine ? colors.onPrimary : colors.primary;
   const critLabels = redacted
     ? []
     : diceRollCritLabels(payload.groups, payload.mode, payload.modifier);
@@ -247,14 +273,53 @@ export function ChatDiceBubble({ payload, mine }: ChatDiceBubbleProps) {
       : null;
 
   return (
-    <View style={styles.card}>
+    <View
+      style={[
+        styles.card,
+        skin
+          ? {
+              borderWidth: 1,
+              borderColor: withAlpha(skin.accent, mine ? 0.55 : 0.42),
+              borderRadius: 14,
+              padding: 8,
+              backgroundColor: accentSoft,
+              ...(Platform.OS === 'web'
+                ? ({ boxShadow: `0 0 18px ${withAlpha(skin.accent, 0.28)}` } as object)
+                : null),
+            }
+          : null,
+      ]}>
       <View style={styles.header}>
-        <View style={[styles.badge, mine ? styles.badgeMine : null]}>
+        <View
+          style={[
+            styles.badge,
+            mine && !skin ? styles.badgeMine : null,
+            skin ? { backgroundColor: withAlpha(skin.accent, mine ? 0.32 : 0.18) } : null,
+          ]}>
           <Ionicons name="dice-outline" size={12} color={badgeIconColor} />
-          <Text selectable={false} style={[styles.badgeText, mine ? styles.badgeTextMine : null]}>
+          <Text
+            selectable={false}
+            style={[
+              styles.badgeText,
+              mine && !skin ? styles.badgeTextMine : null,
+              skin ? { color: mine ? skin.secondary : skin.accent } : null,
+            ]}>
             {rollLabel}
           </Text>
         </View>
+        {skin ? (
+          <View
+            style={[
+              styles.badge,
+              { backgroundColor: withAlpha(skin.accent, mine ? 0.32 : 0.18) },
+            ]}>
+            <Text
+              selectable={false}
+              style={[styles.badgeText, { color: mine ? skin.secondary : skin.accent }]}>
+              {skin.label}
+            </Text>
+          </View>
+        ) : null}
         {payload.hidden ? (
           <View style={[styles.badge, mine ? styles.badgeMine : null]}>
             <Ionicons name="eye-off-outline" size={12} color={badgeIconColor} />
@@ -301,7 +366,13 @@ export function ChatDiceBubble({ payload, mine }: ChatDiceBubbleProps) {
         ) : null}
       </View>
 
-      <Text selectable={false} style={[styles.formula, mine ? styles.formulaMine : null]}>
+      <Text
+        selectable={false}
+        style={[
+          styles.formula,
+          mine && !skin ? styles.formulaMine : null,
+          skin ? { color: mine ? skin.secondary : skin.accent } : null,
+        ]}>
         {payload.formula}
       </Text>
 
@@ -318,7 +389,11 @@ export function ChatDiceBubble({ payload, mine }: ChatDiceBubbleProps) {
               <View key={`group-${groupIndex}-${group.sides}`} style={styles.groupRow}>
                 <Text
                   selectable={false}
-                  style={[styles.groupLabel, mine ? styles.groupLabelMine : null]}>
+                  style={[
+                    styles.groupLabel,
+                    mine && !skin ? styles.groupLabelMine : null,
+                    skin ? { color: mine ? skin.secondary : skin.accent } : null,
+                  ]}>
                   d{group.sides}
                 </Text>
                 {group.values.map((value, index) => {
@@ -331,12 +406,14 @@ export function ChatDiceBubble({ payload, mine }: ChatDiceBubbleProps) {
                   const keptHighlight = isKeepGroup && index === keptIndex;
                   const discardedHighlight = isKeepGroup && index !== keptIndex;
                   const showCrit = !isKeepGroup || keptHighlight;
+                  const skinFace = Boolean(skin) && !(mark === 'crit_fail' && showCrit) && !(mark === 'crit_success' && showCrit);
                   return (
                     <View
                       key={`face-${groupIndex}-${index}`}
                       style={[
                         styles.dieFace,
-                        mine ? styles.dieFaceMine : null,
+                        mine && !skinFace ? styles.dieFaceMine : null,
+                        skinFace ? { backgroundColor: withAlpha(skin!.accent, mine ? 0.34 : 0.16) } : null,
                         mark === 'crit_fail' && showCrit
                           ? mine
                             ? styles.dieFaceCritFailMine
@@ -362,7 +439,8 @@ export function ChatDiceBubble({ payload, mine }: ChatDiceBubbleProps) {
                         selectable={false}
                         style={[
                           styles.dieFaceText,
-                          mine ? styles.dieFaceTextMine : null,
+                          mine && !skinFace ? styles.dieFaceTextMine : null,
+                          skinFace ? { color: mine ? skin!.secondary : skin!.accent } : null,
                           mark === 'crit_fail' && showCrit
                             ? mine
                               ? styles.dieFaceTextCritFailMine
@@ -397,7 +475,10 @@ export function ChatDiceBubble({ payload, mine }: ChatDiceBubbleProps) {
               selectable={false}
               style={[
                 styles.totalValue,
-                mine ? styles.totalValueMine : null,
+                mine && !skin ? styles.totalValueMine : null,
+                skin && singleMark !== 'crit_fail' && singleMark !== 'crit_success'
+                  ? { color: mine ? skin.secondary : skin.accent }
+                  : null,
                 singleMark === 'crit_fail'
                   ? mine
                     ? styles.totalValueCritFailMine

@@ -1,7 +1,8 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useEffect, useMemo, useState } from 'react';
+import { createElement, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -13,10 +14,13 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { DieMeshPreview, DieMeshPreviewProvider } from '@/components/dice/DieMeshPreview';
 import { DiceColorPicker } from '@/components/dice/DiceColorPicker';
+import { DiceSkinPicker } from '@/components/rewards/DiceSkinPicker';
+import { useDiceSkin } from '@/hooks/use-dice-skin';
 import { useIsDesktopWeb } from '@/components/navigation/DesktopThemeToggle';
 import { FontSize, Spacing } from '@/constants/theme';
 import { useDiceAccentColor } from '@/hooks/use-dice-accent-color';
 import {
+  CHAT_DICE_SKINS_ENABLED,
   CHAT_DIE_SIDES,
   CHAT_MAX_PER_DIE,
   CHAT_MAX_TOTAL_DICE,
@@ -88,6 +92,7 @@ type ChatDicePopoverProps = {
     modifier: number;
     hidden: boolean;
     color: string;
+    skin?: string;
     mode: DiceRollMode;
   }) => void;
 };
@@ -373,6 +378,8 @@ export function ChatDicePopover({ visible, busy, onClose, onRoll }: ChatDicePopo
   const insets = useSafeAreaInsets();
   const { height: windowHeight } = useWindowDimensions();
   const { accent, setAccent } = useDiceAccentColor();
+  const { skinId, unlockedIds, setSkinId } = useDiceSkin();
+  const chatSkinId = CHAT_DICE_SKINS_ENABLED ? skinId : undefined;
   const [keptAlive, setKeptAlive] = useState(false);
   const [pool, setPool] = useState<Pool>({ ...EMPTY_POOL, 20: 1 });
   const [modifier, setModifier] = useState(0);
@@ -390,8 +397,14 @@ export function ChatDicePopover({ visible, busy, onClose, onRoll }: ChatDicePopo
     if (visible) {
       setKeptAlive(true);
       void loadDiceAnimationSpeed().then(setAnimationSpeed);
+      return;
     }
-  }, [visible]);
+    // На телефоне не держим 7 WebGL — лимит контекстов. На desktop оставляем
+    // тёплые превью, но паркуем шит за экраном (см. hiddenPark ниже).
+    if (!isDesktop) {
+      setKeptAlive(false);
+    }
+  }, [isDesktop, visible]);
 
   const handleAnimationSpeedChange = (next: DiceAnimationSpeed) => {
     setAnimationSpeed(next);
@@ -448,14 +461,14 @@ export function ChatDicePopover({ visible, busy, onClose, onRoll }: ChatDicePopo
             sides,
             qty: pool[sides],
           }));
-    onRoll({ dice, modifier, hidden, color: accent, mode });
+    onRoll({ dice, modifier, hidden, color: accent, ...(chatSkinId ? { skin: chatSkinId } : {}), mode });
   };
 
   if (!visible && !keptAlive) {
     return null;
   }
 
-  return (
+  const tree = (
     <View
       style={[styles.root, !visible ? styles.rootHidden : null]}
       pointerEvents={visible ? 'auto' : 'none'}
@@ -467,6 +480,7 @@ export function ChatDicePopover({ visible, busy, onClose, onRoll }: ChatDicePopo
         disabled={!visible}
         onPress={onClose}
         style={styles.backdropPress}
+        pointerEvents={visible ? 'auto' : 'none'}
       />
       <View
         style={[
@@ -474,7 +488,7 @@ export function ChatDicePopover({ visible, busy, onClose, onRoll }: ChatDicePopo
           sheetMaxHeight != null ? { maxHeight: sheetMaxHeight } : null,
           { paddingBottom: isDesktop ? Spacing.lg : Math.max(insets.bottom, Spacing.md) },
         ]}
-        pointerEvents="box-none">
+        pointerEvents={visible ? 'box-none' : 'none'}>
         <View style={styles.sheetHeader}>
           <View style={styles.sheetHeaderText}>
             <Text style={styles.title}>Быстрый бросок</Text>
@@ -506,6 +520,19 @@ export function ChatDicePopover({ visible, busy, onClose, onRoll }: ChatDicePopo
               }}
             />
           </View>
+          {CHAT_DICE_SKINS_ENABLED ? (
+            <View style={styles.colorRow}>
+              <DiceSkinPicker
+                value={skinId}
+                unlockedIds={unlockedIds}
+                compact
+                disabled={busy}
+                onChange={(id) => {
+                  void setSkinId(id);
+                }}
+              />
+            </View>
+          ) : null}
 
           <View style={styles.toolsRow}>
             <Pressable
@@ -660,4 +687,30 @@ export function ChatDicePopover({ visible, busy, onClose, onRoll }: ChatDicePopo
       </View>
     </View>
   );
+
+  // Pressable на web ставит pointer-events:auto — даже под родителем `none`
+  // невидимые кнопки шита едят клики по чату. `inert` + увод за экран.
+  if (Platform.OS === 'web' && !visible) {
+    return createElement('div', {
+      'aria-hidden': true,
+      ref: (node: HTMLDivElement | null) => {
+        if (node) {
+          node.inert = true;
+        }
+      },
+      style: {
+        position: 'fixed',
+        left: 0,
+        top: '-240vh',
+        width: '100vw',
+        height: '100vh',
+        pointerEvents: 'none',
+        opacity: 0,
+        zIndex: -1,
+        overflow: 'hidden',
+      },
+    }, tree);
+  }
+
+  return tree;
 }

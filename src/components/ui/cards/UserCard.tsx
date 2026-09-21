@@ -7,8 +7,12 @@ import { Gesture, GestureDetector, ScrollView as GestureScrollView } from 'react
 import type { BadgeVariant } from '../feedback/badge.config';
 import { Badge } from '../feedback/Badge';
 import { SwipeBlock, type SwipeAction, type SwipeDismissRequest } from '../swipe/SwipeBlock';
+import { QuestionnaireAura } from '@/components/rewards/QuestionnaireAura';
+import { QuestionnaireHighlight } from '@/components/rewards/QuestionnaireHighlight';
+import { NameWithBadges } from '@/components/rewards/RewardBadge';
 import { UserCardIcon } from '@/components/ui/cards/UserCardIcon';
 import type { UserCardIconKey } from '@/components/ui/cards/user-card-icon-assets';
+import type { QuestionnaireAuraId, RewardBadgeType } from '@/data/rewards/catalog';
 import { FontSize, Radius, Sizes, Spacing, type ThemeColors } from '@/constants/theme';
 import { UNKNOWN_USER_PLACEHOLDER } from '@/constants/image-assets';
 import { useTheme } from '@/hooks/use-theme';
@@ -67,6 +71,8 @@ export type UserCardProps = {
   showVisibility?: boolean;
   blockedByMe?: boolean;
   swipe?: UserCardSwipeConfig;
+  badges?: RewardBadgeType[];
+  auraId?: QuestionnaireAuraId | null;
 };
 
 const USER_CARD_PHOTO_ASPECT_RATIO = 0.9;
@@ -202,6 +208,7 @@ function createStyles(
       flexShrink: 0,
       backgroundColor: colors.placeholder,
       overflow: 'hidden',
+      position: 'relative',
       ...Platform.select({
         web: {
           userSelect: 'none',
@@ -468,6 +475,8 @@ export function UserCard({
   showVisibility = true,
   blockedByMe = false,
   swipe,
+  badges,
+  auraId,
 }: UserCardProps) {
   const colors = useTheme();
   const styles = useThemedStyles((themeColors) =>
@@ -551,10 +560,12 @@ export function UserCard({
   const bodyContent = (
     <>
       <View style={styles.identityBlock}>
-        <Text style={styles.name}>
-          {name}
-          {age != null ? <Text style={styles.age}>, {age}</Text> : null}
-        </Text>
+        <NameWithBadges
+          name={age != null ? `${name}, ${age}` : name}
+          badges={badges}
+          textStyle={styles.name}
+          badgeSize={size === 'compact' ? 12 : 14}
+        />
         {blockedByMe ? (
           <View style={styles.blockedMark}>
             <Text style={styles.blockedMarkLabel}>У вас в чёрном списке</Text>
@@ -628,12 +639,19 @@ export function UserCard({
     />
   );
 
+  const photoAura = <QuestionnaireAura auraId={auraId} badges={badges} />;
   const photo = isDeckStacked ? (
     <View style={styles.photoSectionStacked}>
-      <View style={[styles.photoWrap, styles.photoWrapStacked, deckStackedPhoto]}>{photoImage}</View>
+      <View style={[styles.photoWrap, styles.photoWrapStacked, deckStackedPhoto]}>
+        {photoImage}
+        {photoAura}
+      </View>
     </View>
   ) : (
-    <View style={[styles.photoWrap, deckWidePhoto, deckStackedPhoto]}>{photoImage}</View>
+    <View style={[styles.photoWrap, deckWidePhoto, deckStackedPhoto]}>
+      {photoImage}
+      {photoAura}
+    </View>
   );
 
   const nativeScrollGesture = useMemo(
@@ -713,8 +731,15 @@ export function UserCard({
     </View>
   );
 
+  const cardRadius = isDeckStacked ? 20 : CARD_SIZE_CONFIG[size].borderRadius;
+  const highlighted = (
+    <QuestionnaireHighlight auraId={auraId} badges={badges} radius={cardRadius} overlay={false}>
+      {card}
+    </QuestionnaireHighlight>
+  );
+
   if (!swipe) {
-    return card;
+    return highlighted;
   }
 
   return (
@@ -735,7 +760,7 @@ export function UserCard({
       onSwipeLeft={swipe.onSwipeLeft}
       onSwipeRight={swipe.onSwipeRight}
       dismissRequest={swipe.dismissRequest}>
-      {card}
+      {highlighted}
     </SwipeBlock>
   );
 }

@@ -435,6 +435,9 @@ function formatPreview(item: ConversationListItem) {
     // Уже отформатированное превью с API / старый кэш
     return raw || 'Бросок костей';
   }
+  if (item.lastMessage.kind === 'missed_voice_call') {
+    return 'Пропущенный звонок';
+  }
   if (item.lastMessage.body?.trim()) {
     return item.lastMessage.body.trim();
   }
@@ -499,6 +502,7 @@ export default function ChatsScreen({ variant = 'page' }: ChatsScreenProps) {
     lastConversationUpdate,
     lastConversationDeleted,
     lastMessage,
+    lastPresence,
     publishConversationUpdate,
   } = useRealtime();
   const { user } = useAuth();
@@ -575,6 +579,36 @@ export default function ChatsScreen({ variant = 'page' }: ChatsScreenProps) {
       return sortConversations(next);
     });
   }, [lastConversationUpdate]);
+
+  useEffect(() => {
+    if (!lastPresence) {
+      return;
+    }
+    setItems((prev) => {
+      let changed = false;
+      const next = prev.map((item) => {
+        if (!item.peer || item.peer.id !== lastPresence.userId) {
+          return item;
+        }
+        if (
+          item.peer.online === lastPresence.online &&
+          item.peer.lastSeenAt === lastPresence.lastSeenAt
+        ) {
+          return item;
+        }
+        changed = true;
+        return {
+          ...item,
+          peer: {
+            ...item.peer,
+            online: lastPresence.online,
+            lastSeenAt: lastPresence.lastSeenAt,
+          },
+        };
+      });
+      return changed ? next : prev;
+    });
+  }, [lastPresence]);
 
   useEffect(() => {
     if (!lastMessage) {
@@ -1141,7 +1175,7 @@ export default function ChatsScreen({ variant = 'page' }: ChatsScreenProps) {
                         color={colors.primary}
                         style={menuTarget.isPinned ? { transform: [{ rotate: '-45deg' }] } : undefined}
                       />
-                      <Text style={localStyles.menuItemLabel}>
+                      <Text style={[localStyles.menuItemLabel, { color: colors.primary }]}>
                         {menuTarget.isPinned ? 'Открепить' : 'Закрепить'}
                       </Text>
                     </Pressable>
@@ -1208,7 +1242,7 @@ export default function ChatsScreen({ variant = 'page' }: ChatsScreenProps) {
                             menuTarget.isPinned ? { transform: [{ rotate: '-45deg' }] } : undefined
                           }
                         />
-                        <Text style={localStyles.menuItemLabel}>
+                        <Text style={[localStyles.menuItemLabel, { color: colors.primary }]}>
                           {menuTarget.isPinned ? 'Открепить' : 'Закрепить'}
                         </Text>
                       </Pressable>

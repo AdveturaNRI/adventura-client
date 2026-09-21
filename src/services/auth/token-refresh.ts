@@ -59,6 +59,27 @@ async function refreshSession(refreshToken: string): Promise<AuthResponse> {
 
 let refreshPromise: Promise<AuthResponse | null> | null = null;
 
+type AccessTokenListener = (accessToken: string) => void;
+const accessTokenListeners = new Set<AccessTokenListener>();
+
+/** Keep AuthContext / realtime socket in sync when HTTP refresh rotates the JWT. */
+export function onAccessTokenRefreshed(listener: AccessTokenListener): () => void {
+  accessTokenListeners.add(listener);
+  return () => {
+    accessTokenListeners.delete(listener);
+  };
+}
+
+function notifyAccessTokenRefreshed(accessToken: string) {
+  for (const listener of accessTokenListeners) {
+    try {
+      listener(accessToken);
+    } catch {
+      // listener errors must not break refresh
+    }
+  }
+}
+
 export async function refreshAuthTokens(): Promise<AuthResponse | null> {
   if (refreshPromise) {
     return refreshPromise;
@@ -77,6 +98,7 @@ export async function refreshAuthTokens(): Promise<AuthResponse | null> {
         response.refreshToken,
         response.user,
       );
+      notifyAccessTokenRefreshed(response.accessToken);
       return response;
     } catch {
       await clearAuthSession();

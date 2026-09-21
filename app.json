@@ -9,7 +9,11 @@
     "userInterfaceStyle": "automatic",
     "ios": {
       "icon": "./assets/expo.icon",
-      "bundleIdentifier": "com.anonymous.adventuraclient"
+      "bundleIdentifier": "com.anonymous.adventuraclient",
+      "infoPlist": {
+        "NSCameraUsageDescription": "Камера нужна, чтобы показать вас в видеозвонке.",
+        "NSMicrophoneUsageDescription": "Микрофон нужен для голосового чата."
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -19,7 +23,12 @@
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
       "predictiveBackGestureEnabled": false,
-      "package": "com.anonymous.adventuraclient"
+      "package": "com.anonymous.adventuraclient",
+      "permissions": [
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.MODIFY_AUDIO_SETTINGS"
+      ]
     },
     "web": {
       "output": "static",
@@ -42,7 +51,16 @@
           "photosPermission": "Приложению нужен доступ к фото, чтобы загрузить аватар анкеты."
         }
       ],
-      "expo-audio"
+      "expo-audio",
+      [
+        "@livekit/react-native-expo-plugin",
+        {
+          "android": {
+            "audioType": "communication"
+          }
+        }
+      ],
+      "@config-plugins/react-native-webrtc"
     ],
     "experiments": {
       "typedRoutes": true,

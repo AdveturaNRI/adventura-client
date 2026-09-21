@@ -21,7 +21,11 @@ type ToastBannerProps = ToastConfigParams<Record<string, unknown>> & {
 type IconName = ComponentProps<typeof Ionicons>['name'];
 
 function createStyles(colors: ThemeColors) {
-  const isDark = colors.background === '#000000';
+  const isDark = colors.background === '#000000' || colors.text === '#FFFFFF';
+  // Explicit card fill: Safari / toast-message wrappers sometimes force white and kill contrast.
+  const cardBg = isDark ? '#1C1C1E' : '#FFFFFF';
+  const titleColor = isDark ? '#F2F3F5' : '#000000';
+  const messageColor = isDark ? '#C5C6C8' : '#3C3C43';
 
   return StyleSheet.create({
     outer: {
@@ -42,9 +46,9 @@ function createStyles(colors: ThemeColors) {
       width: '100%',
       maxWidth: Layout.maxContentWidth,
       borderRadius: 16,
-      backgroundColor: colors.surface,
+      backgroundColor: cardBg,
       borderWidth: 1,
-      borderColor: colors.border,
+      borderColor: isDark ? 'rgba(255,255,255,0.12)' : colors.border,
       shadowColor: colors.shadow,
       shadowOffset: { width: 0, height: 10 },
       shadowOpacity: isDark ? 0.45 : 0.14,
@@ -54,7 +58,8 @@ function createStyles(colors: ThemeColors) {
       pointerEvents: 'auto',
       ...(Platform.OS === 'web'
         ? ({
-            color: colors.text,
+            color: titleColor,
+            backgroundColor: cardBg,
           } as object)
         : null),
     },
@@ -70,6 +75,8 @@ function createStyles(colors: ThemeColors) {
             appearance: 'none',
             WebkitAppearance: 'none',
             backgroundImage: 'none',
+            backgroundColor: 'transparent',
+            color: titleColor,
           } as object)
         : null),
     },
@@ -115,7 +122,7 @@ function createStyles(colors: ThemeColors) {
       justifyContent: 'center',
       backgroundColor: colors.primary,
       borderWidth: 2,
-      borderColor: colors.surface,
+      borderColor: cardBg,
     },
     avatarSealWarning: {
       backgroundColor: '#FF9F0A',
@@ -131,7 +138,7 @@ function createStyles(colors: ThemeColors) {
     title: {
       fontSize: FontSize.label,
       fontWeight: '600',
-      color: colors.text,
+      color: titleColor,
       letterSpacing: -0.1,
     },
     titleEmphasis: {
@@ -139,7 +146,7 @@ function createStyles(colors: ThemeColors) {
     },
     message: {
       fontSize: FontSize.caption,
-      color: colors.textSecondary,
+      color: messageColor,
       lineHeight: 17,
     },
     actionButton: {
@@ -258,35 +265,34 @@ export function ToastBanner({ text1, text2, onPress, variant, props }: ToastBann
       <View style={styles.content}>
         {text1 ? (
           <Text
-            style={[
-              styles.title,
-              { color: colors.text },
-              emphasis !== 'default' ? styles.titleEmphasis : null,
-            ]}
+            style={[styles.title, emphasis !== 'default' ? styles.titleEmphasis : null]}
             numberOfLines={2}>
             {text1}
           </Text>
         ) : null}
         {message ? (
-          <Text style={[styles.message, { color: colors.textSecondary }]} numberOfLines={2}>
+          <Text style={styles.message} numberOfLines={4}>
             {message}
           </Text>
         ) : null}
       </View>
       {actionLabel && onAction ? (
         <View style={styles.actionButton} pointerEvents="none">
-          <Text style={[styles.actionLabel, { color: colors.primary }]}>{actionLabel}</Text>
+          <Text style={styles.actionLabel}>{actionLabel}</Text>
         </View>
       ) : null}
     </>
   );
 
+  const isDark = colors.background === '#000000' || colors.text === '#FFFFFF';
+  const cardBg = isDark ? '#1C1C1E' : '#FFFFFF';
+
   const cardStyle = [
     styles.card,
     {
-      backgroundColor: colors.surface,
-      borderColor: colors.border,
-      ...(Platform.OS === 'web' ? ({ color: colors.text } as object) : null),
+      backgroundColor: cardBg,
+      borderColor: isDark ? 'rgba(255,255,255,0.12)' : colors.border,
+      ...(Platform.OS === 'web' ? ({ color: isDark ? '#F2F3F5' : '#000000' } as object) : null),
     },
     alignment !== 'center' ? styles.cardShrink : null,
     emphasis === 'alert' ? styles.cardAlert : null,
@@ -299,7 +305,7 @@ export function ToastBanner({ text1, text2, onPress, variant, props }: ToastBann
   return (
     <View pointerEvents="box-none" style={[styles.outer, getAlignmentStyle(alignment, styles)]}>
       {/* Фон на View: Safari красит <button>/Pressable в белый и убивает контраст на dark. */}
-      <View style={[...cardStyle, { backgroundColor: colors.surface }]}>
+      <View style={[...cardStyle, { backgroundColor: cardBg }]}>
         {isInteractive ? (
           <Pressable
             accessibilityRole="button"

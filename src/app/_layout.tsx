@@ -14,7 +14,11 @@ import { AuthProvider } from '@/context/AuthContext';
 import { ProfileProvider } from '@/context/ProfileContext';
 import { PushPromptProvider } from '@/context/PushPromptContext';
 import { RealtimeProvider } from '@/context/RealtimeContext';
+import { VoiceCallProvider } from '@/context/VoiceCallContext';
 import { useTheme, useThemePreference } from '@/hooks/use-theme';
+import { registerLivekitGlobals } from '@/services/livekit/platform';
+
+registerLivekitGlobals();
 
 function RootNavigator() {
   const colors = useTheme();
@@ -44,15 +48,17 @@ export default function RootLayout() {
         <ThemeProvider>
           <AuthProvider>
             <RealtimeProvider>
-              <ProfileProvider>
-                <PushPromptProvider>
-                  <View style={rootStyles.container}>
-                    <RootNavigator />
-                    <AppToast />
-                    <GlobalLoadingOverlay />
-                  </View>
-                </PushPromptProvider>
-              </ProfileProvider>
+              <VoiceCallProvider>
+                <ProfileProvider>
+                  <PushPromptProvider>
+                    <View style={rootStyles.container}>
+                      <RootNavigator />
+                      <AppToast />
+                      <GlobalLoadingOverlay />
+                    </View>
+                  </PushPromptProvider>
+                </ProfileProvider>
+              </VoiceCallProvider>
             </RealtimeProvider>
           </AuthProvider>
         </ThemeProvider>

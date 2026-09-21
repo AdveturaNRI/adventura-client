@@ -1,5 +1,6 @@
 export type MenuIconKey =
   | 'profile'
+  | 'appearance'
   | 'dragon'
   | 'notifications'
   | 'settings'
@@ -41,6 +42,12 @@ export const MENU_SPECS: MenuItemSpec[] = [
     label: 'Анкета игрока',
     subtitle: 'Здесь вы можете настроить вашу анкету',
     icon: 'profile',
+  },
+  {
+    key: 'appearance',
+    label: 'Оформление профиля',
+    subtitle: 'Рамки аватара и выделение анкеты',
+    icon: 'appearance',
   },
   {
     key: 'games',

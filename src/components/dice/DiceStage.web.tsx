@@ -28,7 +28,16 @@ export type { DiceRollOutcome, DiceStageHandle };
  * (that leaks WebGL contexts and crashes the tab after many rolls).
  */
 export const DiceStage = forwardRef<DiceStageHandle, DiceStageProps>(function DiceStage(
-  { onReady, onDone, transparent = false, accent, animationSpeed = 'normal' },
+  {
+    onReady,
+    onDone,
+    transparent = false,
+    accent,
+    skin,
+    animationSpeed = 'normal',
+    scale,
+    centerSpawn = false,
+  },
   ref,
 ) {
   const colors = useTheme();
@@ -36,6 +45,10 @@ export const DiceStage = forwardRef<DiceStageHandle, DiceStageProps>(function Di
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
   const accentRef = useRef(themeAccent);
   accentRef.current = themeAccent;
+  const skinRef = useRef(skin ?? 'standard');
+  skinRef.current = skin ?? 'standard';
+  const centerRef = useRef(centerSpawn);
+  centerRef.current = centerSpawn;
   const speedRef = useRef(animationSpeed);
   speedRef.current = animationSpeed;
   const onDoneRef = useRef(onDone);
@@ -71,7 +84,9 @@ export const DiceStage = forwardRef<DiceStageHandle, DiceStageProps>(function Di
             type: 'roll',
             notation,
             themeColor: accentRef.current,
+            skin: skinRef.current,
             speed: speedRef.current,
+            center: centerRef.current,
           });
         }),
       preview: (notation) => {
@@ -82,6 +97,7 @@ export const DiceStage = forwardRef<DiceStageHandle, DiceStageProps>(function Di
           type: 'preview',
           notation: notation ?? [],
           themeColor: accentRef.current,
+          skin: skinRef.current,
           speed: speedRef.current,
         });
       },
@@ -105,6 +121,10 @@ export const DiceStage = forwardRef<DiceStageHandle, DiceStageProps>(function Di
 
   useEffect(() => {
     const onWindowMessage = (event: MessageEvent) => {
+      const iframeWindow = iframeRef.current?.contentWindow;
+      if (iframeWindow && event.source !== iframeWindow) {
+        return;
+      }
       try {
         const raw = event.data;
         let data: {
@@ -163,7 +183,9 @@ export const DiceStage = forwardRef<DiceStageHandle, DiceStageProps>(function Di
 
   // Chat and DiceScreen share Babylon @3d-dice/dice-box (threejs chat fork is broken on mobile).
   // Remote face sync: overlay clears die on mismatch and shows the result card.
-  const src = `/dice-stage.html?transparent=${transparent ? 1 : 0}&v=dicemin1`;
+  const scaleParam = scale && scale > 0 ? `&scale=${encodeURIComponent(String(scale))}` : '';
+  const centerParam = centerSpawn ? '&center=1' : '';
+  const src = `/dice-stage.html?transparent=${transparent ? 1 : 0}&v=dicemin2${scaleParam}${centerParam}`;
 
   useEffect(() => {
     setReady(false);

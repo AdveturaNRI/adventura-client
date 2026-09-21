@@ -1,14 +1,18 @@
 import { Image } from 'expo-image';
 import { StyleSheet, Text, View } from 'react-native';
 
+import { AvatarFrame } from '@/components/rewards/AvatarFrame';
 import { FontSize, type ThemeColors } from '@/constants/theme';
 import { useThemedStyles } from '@/hooks/use-themed-styles';
 import { isGifImage } from '@/utils/image-format';
+import { sanitizeBadges, type AvatarFrameId, type RewardBadgeType } from '@/data/rewards/catalog';
 
 type UserAvatarProps = {
   nickname: string;
   avatarUrl?: string | null;
   size?: number;
+  badges?: RewardBadgeType[] | null;
+  frameId?: AvatarFrameId | string | null;
 };
 
 function createStyles(colors: ThemeColors, size: number) {
@@ -36,12 +40,13 @@ function createStyles(colors: ThemeColors, size: number) {
   });
 }
 
-export function UserAvatar({ nickname, avatarUrl, size = 36 }: UserAvatarProps) {
+export function UserAvatar({ nickname, avatarUrl, size = 36, badges, frameId }: UserAvatarProps) {
   const initial = [...nickname.trim()][0]?.toUpperCase() ?? '?';
   const styles = useThemedStyles((colors) => createStyles(colors, size));
   const isRemote = Boolean(avatarUrl?.startsWith('http'));
+  const resolvedBadges = sanitizeBadges(badges);
 
-  return (
+  const inner = (
     <View style={styles.avatar} accessibilityElementsHidden importantForAccessibility="no">
       {avatarUrl ? (
         <Image
@@ -57,5 +62,11 @@ export function UserAvatar({ nickname, avatarUrl, size = 36 }: UserAvatarProps) 
         <Text style={styles.initial}>{initial}</Text>
       )}
     </View>
+  );
+
+  return (
+    <AvatarFrame size={size} badges={resolvedBadges} frameId={frameId as AvatarFrameId | null | undefined}>
+      {inner}
+    </AvatarFrame>
   );
 }

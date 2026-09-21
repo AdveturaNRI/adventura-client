@@ -9,6 +9,10 @@ type DeleteChatDialogProps = {
   visible: boolean;
   nickname: string;
   isDeleting?: boolean;
+  /** Overrides default «Удалить чат» copy. */
+  title?: string;
+  message?: string;
+  confirmLabel?: string;
   onDeleteForMe: () => void;
   onDeleteForEveryone?: () => void;
   onCancel: () => void;
@@ -112,6 +116,9 @@ export function DeleteChatDialog({
   visible,
   nickname,
   isDeleting = false,
+  title,
+  message,
+  confirmLabel,
   onDeleteForMe,
   onDeleteForEveryone,
   onCancel,
@@ -128,11 +135,12 @@ export function DeleteChatDialog({
               <Ionicons name="trash-outline" size={20} color={colors.destructive} />
             </View>
             <View style={styles.headerText}>
-              <Text style={styles.title}>Удалить чат</Text>
+              <Text style={styles.title}>{title ?? 'Удалить чат'}</Text>
               <Text style={styles.message}>
-                {onDeleteForEveryone
-                  ? `Переписка с ${nickname}. Можно убрать только у себя или удалить у обоих.`
-                  : `Чат «${nickname}». Скроется только у вас.`}
+                {message ??
+                  (onDeleteForEveryone
+                    ? `Переписка с ${nickname}. Можно убрать только у себя или удалить у обоих.`
+                    : `Чат «${nickname}». Скроется только у вас.`)}
               </Text>
             </View>
           </View>
@@ -149,7 +157,10 @@ export function DeleteChatDialog({
               ]}>
               <Text
                 style={onDeleteForEveryone ? styles.secondaryLabel : styles.confirmLabel}>
-                {isDeleting ? 'Удаляем...' : onDeleteForEveryone ? 'Только у меня' : 'Скрыть у меня'}
+                {isDeleting
+                  ? 'Удаляем...'
+                  : confirmLabel ??
+                    (onDeleteForEveryone ? 'Только у меня' : 'Скрыть у меня')}
               </Text>
             </Pressable>
             {onDeleteForEveryone ? (

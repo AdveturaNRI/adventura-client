@@ -12,6 +12,10 @@ export const REALTIME_EVENTS = {
   NOTIFICATION_NEW: 'notification:new',
   UNREAD_SYNC: 'unread:sync',
   PRESENCE_UPDATE: 'presence:update',
+  CALL_INVITE: 'call:invite',
+  CALL_ACCEPTED: 'call:accepted',
+  CALL_DECLINED: 'call:declined',
+  CALL_ENDED: 'call:ended',
 } as const;
 
 export type UnreadSyncPayload = {
@@ -35,6 +39,28 @@ export type ConversationDeletedPayload = {
   conversationId: string;
 };
 
+export type CallInvitePayload = {
+  callId: string;
+  conversationId: string;
+  fromUserId: string;
+  fromNickname: string;
+  fromAvatarUrl: string | null;
+  conversationTitle?: string | null;
+  isGroup?: boolean;
+};
+
+export type CallSignalPayload = {
+  callId: string;
+  conversationId: string;
+  byUserId: string;
+};
+
+export type CallRealtimeEvent =
+  | { type: 'invite'; payload: CallInvitePayload }
+  | { type: 'accepted'; payload: CallSignalPayload }
+  | { type: 'declined'; payload: CallSignalPayload }
+  | { type: 'ended'; payload: CallSignalPayload };
+
 export type RealtimeHandlers = {
   onMessageNew?: (message: ChatMessage) => void;
   onConversationUpdated?: (conversation: ConversationListItem) => void;
@@ -43,6 +69,7 @@ export type RealtimeHandlers = {
   onNotificationNew?: (notification: PortalNotification) => void;
   onUnreadSync?: (payload: UnreadSyncPayload) => void;
   onPresenceUpdate?: (payload: PresenceUpdatePayload) => void;
+  onCallEvent?: (event: CallRealtimeEvent) => void;
 };
 
 let socket: Socket | null = null;
@@ -76,6 +103,18 @@ function ensureListeners(current: Socket) {
   current.on(REALTIME_EVENTS.PRESENCE_UPDATE, (payload: PresenceUpdatePayload) => {
     handlers.onPresenceUpdate?.(payload);
   });
+  current.on(REALTIME_EVENTS.CALL_INVITE, (payload: CallInvitePayload) => {
+    handlers.onCallEvent?.({ type: 'invite', payload });
+  });
+  current.on(REALTIME_EVENTS.CALL_ACCEPTED, (payload: CallSignalPayload) => {
+    handlers.onCallEvent?.({ type: 'accepted', payload });
+  });
+  current.on(REALTIME_EVENTS.CALL_DECLINED, (payload: CallSignalPayload) => {
+    handlers.onCallEvent?.({ type: 'declined', payload });
+  });
+  current.on(REALTIME_EVENTS.CALL_ENDED, (payload: CallSignalPayload) => {
+    handlers.onCallEvent?.({ type: 'ended', payload });
+  });
 }
 
 export function getRealtimeSocket() {
@@ -103,6 +142,25 @@ export function connectRealtime(token: string) {
   });
   ensureListeners(socket);
   return socket;
+}
+
+/** Update JWT on an existing socket (e.g. after silent HTTP refresh). */
+export function updateRealtimeAuthToken(token: string) {
+  if (!socket || !token.trim()) {
+    return;
+  }
+  socket.auth = { token: token.trim() };
+}
+
+/** Re-auth + connect if the socket dropped while the user is still in the app. */
+export function ensureRealtimeConnected(token: string) {
+  if (!token.trim()) {
+    return;
+  }
+  const current = connectRealtime(token.trim());
+  if (!current.connected) {
+    current.connect();
+  }
 }
 
 export function disconnectRealtime() {

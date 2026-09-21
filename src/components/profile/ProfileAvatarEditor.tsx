@@ -4,6 +4,7 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { PhotoCropEditor } from '@/components/questionnaire/PhotoCropEditor';
 import { UserAvatar } from '@/components/navigation/UserAvatar';
+import type { AvatarFrameId, RewardBadgeType } from '@/data/rewards/catalog';
 import { toast } from '@/components/ui';
 import { FontSize, Spacing, type ThemeColors } from '@/constants/theme';
 import { useProfile } from '@/context/ProfileContext';
@@ -17,6 +18,8 @@ type ProfileAvatarEditorProps = {
   nickname: string;
   avatarUrl: string | null;
   size?: number;
+  badges?: RewardBadgeType[];
+  frameId?: AvatarFrameId | string | null;
 };
 
 type PendingCrop = {
@@ -50,6 +53,8 @@ export function ProfileAvatarEditor({
   nickname,
   avatarUrl,
   size = 96,
+  badges,
+  frameId,
 }: ProfileAvatarEditorProps) {
   const styles = useThemedStyles(createStyles);
   const { applyProfile } = useProfile();
@@ -122,7 +127,7 @@ export function ProfileAvatarEditor({
   return (
     <>
       <View style={styles.container}>
-        <UserAvatar nickname={nickname} avatarUrl={avatarUrl} size={size} />
+        <UserAvatar nickname={nickname} avatarUrl={avatarUrl} size={size} badges={badges} frameId={frameId} />
         <Pressable
           accessibilityRole="button"
           onPress={pickPhoto}

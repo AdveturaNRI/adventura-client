@@ -4,13 +4,16 @@ import { createPortal } from 'react-dom';
 import { AppState, Platform, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { DiceCritBurst } from '@/components/rewards/DiceCritBurst';
 import { DiceStage, type DiceStageHandle } from '@/components/dice/DiceStage';
+import { isDiceSkinId, skinAccent, type DiceSkinId } from '@/data/rewards/catalog';
 import type { DiceRollOutcome } from '@/components/dice/dice-stage.types';
 import { FontSize, Spacing, type ThemeColors } from '@/constants/theme';
 import { useDiceAccentColor } from '@/hooks/use-dice-accent-color';
 import { useThemedStyles } from '@/hooks/use-themed-styles';
 import {
   applyDiceKeepMode,
+  CHAT_DICE_SKINS_ENABLED,
   DICE_CRIT_FAIL_LABEL,
   DICE_CRIT_SUCCESS_LABEL,
   diceFaceMark,
@@ -43,6 +46,7 @@ export type ChatDiceLocalRollRequest = {
   color: string;
   senderNickname: string;
   mode?: DiceRollMode;
+  skin?: string;
 };
 
 type ChatDiceOverlayProps = {
@@ -54,6 +58,8 @@ type ChatDiceOverlayProps = {
   /** Запустить следующий бросок из очереди. */
   onAdvance: () => void;
   warm?: boolean;
+  /** Call overlay sits outside the focused route — still play 3D. */
+  forceActive?: boolean;
 };
 
 type ResultSnapshot = {
@@ -70,11 +76,11 @@ function createStyles(colors: ThemeColors) {
   return StyleSheet.create({
     root: {
       ...StyleSheet.absoluteFillObject,
-      // Вне ScreenTransition (portal): fixed, иначе iOS не рисует WebGL в iframe
-      // под предком с transform/opacity.
+      // Portal уже `position:fixed` на body. Здесь absolute — иначе при
+      // keepStageHot сцена остаётся на вьюпорте, хотя портал уехал за экран.
       ...(Platform.OS === 'web'
         ? ({
-            position: 'fixed',
+            position: 'absolute',
             top: 0,
             right: 0,
             bottom: 0,
@@ -306,10 +312,12 @@ export function ChatDiceOverlay({
   onReveal,
   onAdvance,
   warm = false,
+  forceActive = false,
 }: ChatDiceOverlayProps) {
   const styles = useThemedStyles(createStyles);
   const insets = useSafeAreaInsets();
-  const isFocused = useIsFocused();
+  const routeFocused = useIsFocused();
+  const isFocused = forceActive || routeFocused;
   const stageRef = useRef<DiceStageHandle>(null);
   const onRevealRef = useRef(onReveal);
   const onAdvanceRef = useRef(onAdvance);
@@ -319,8 +327,15 @@ export function ChatDiceOverlay({
   onLocalCompleteRef.current = onLocalRollComplete;
   const { accent: localAccent } = useDiceAccentColor();
 
+  const activeSkin: DiceSkinId =
+    CHAT_DICE_SKINS_ENABLED && isDiceSkinId(localRoll?.skin ?? request?.payload.skin)
+      ? ((localRoll?.skin ?? request?.payload.skin) as DiceSkinId)
+      : 'standard';
+
   const activeAccent = coerceDiceAccent(
-    localRoll?.color ?? request?.payload.color ?? localAccent,
+    activeSkin !== 'standard'
+      ? skinAccent(activeSkin)
+      : localRoll?.color ?? request?.payload.color ?? localAccent,
   );
 
   const [stageReady, setStageReady] = useState(false);
@@ -551,9 +566,7 @@ export function ChatDiceOverlay({
     const active = request;
     // Актуальная скорость — вдруг только что сменили в поповере.
     const liveSpeed = getDiceAnimationSpeedSync();
-    if (liveSpeed !== animationSpeed) {
-      setAnimationSpeed(liveSpeed);
-    }
+    animationSpeedRef.current = liveSpeed;
     const resultHoldMs = liveSpeed === 'fast' ? 500 : 1100;
     const notationParts = payloadToStageNotation(active.payload).map(
       (part) => `${part.qty}d${part.sides}`,
@@ -626,7 +639,7 @@ export function ChatDiceOverlay({
     return () => {
       cancelled = true;
     };
-  }, [animationSpeed, isFocused, localRoll, request, stageReady]);
+  }, [isFocused, localRoll, request, stageReady]);
 
   const visible =
     Boolean(localRoll) ||
@@ -665,11 +678,16 @@ export function ChatDiceOverlay({
           <DiceStage
             ref={stageRef}
             accent={activeAccent}
+            skin={activeSkin}
             transparent
             animationSpeed={animationSpeed === 'off' ? 'normal' : animationSpeed}
             onReady={handleStageReady}
           />
         ) : null}
+        <DiceCritBurst
+          visible={Boolean(result?.critLabels.includes(DICE_CRIT_SUCCESS_LABEL))}
+          skinId={activeSkin}
+        />
       </View>
       {visible && throwerNickname && !result ? (
         <View

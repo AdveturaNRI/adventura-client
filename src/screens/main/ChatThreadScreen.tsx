@@ -27,6 +27,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { MobileBackButton } from '@/components/navigation/MobileBackButton';
 import { resolveChatReturnHref } from '@/components/navigation/navigate-back';
+import { NameWithBadges } from '@/components/rewards/RewardBadge';
 import { UserAvatar } from '@/components/navigation/UserAvatar';
 import { useIsDesktopSidebarVisible, useIsDesktopWeb } from '@/components/navigation/DesktopThemeToggle';
 import { ScreenTransition } from '@/components/navigation/ScreenTransition';
@@ -51,7 +52,10 @@ import { ChatAudioPlayer } from '@/components/chats/ChatAudioPlayer';
 import { ChatVoiceComposer } from '@/components/chats/ChatVoiceComposer';
 import { CrownOffIcon } from '@/components/chats/CrownOffIcon';
 import { DeleteChatDialog } from '@/components/chats/DeleteChatDialog';
+import { AddGroupMembersDialog } from '@/components/chats/AddGroupMembersDialog';
+import { contactsFromConversations } from '@/components/chats/CreateGroupDialog';
 import { GroupMembersSheet } from '@/components/chats/GroupMembersSheet';
+import { RenameGroupDialog } from '@/components/chats/RenameGroupDialog';
 import { toast } from '@/components/ui';
 import { FontSize, Radius, Spacing } from '@/constants/theme';
 import type { ThemeColors } from '@/constants/theme';
@@ -59,6 +63,7 @@ import { MAX_UPLOAD_SIZE_MB, MAX_UPLOAD_SIZE_MESSAGE } from '@/constants/upload.
 import { useAuth } from '@/context/AuthContext';
 import { usePushPrompt } from '@/context/PushPromptContext';
 import { useRealtime } from '@/context/RealtimeContext';
+import { useVoiceCall } from '@/context/VoiceCallContext';
 import { useVoicePlayback, type ChatVoiceQueueItem } from '@/context/VoicePlaybackContext';
 import { useTheme, useThemePreference } from '@/hooks/use-theme';
 import { useThemedStyles } from '@/hooks/use-themed-styles';
@@ -68,6 +73,12 @@ import {
   listMessages,
   listChatMembers,
   leaveGroup,
+  renameGroupChat,
+  addGroupMembers,
+  removeGroupMember,
+  setGroupMemberRole,
+  transferGroupOwnership,
+  deleteGroupChat,
   markConversationRead,
   sendChatMessage,
   sendChatDiceRoll,
@@ -77,8 +88,10 @@ import {
   deleteConversation,
   MAX_CHAT_ATTACHMENTS,
   normalizeMessageAttachments,
+  getActiveChatVoiceCall,
 } from '@/services/chats/chatsApi';
 import type {
+  ActiveChatVoiceCall,
   ChatAttachment,
   ChatAttachmentKind,
   ChatMember,
@@ -355,7 +368,8 @@ function isSystemChatMessage(message: ChatMessage) {
     kind === 'favorite_removed' ||
     kind === 'user_blocked' ||
     kind === 'user_unblocked' ||
-    kind === 'game_deleted'
+    kind === 'game_deleted' ||
+    kind === 'missed_voice_call'
   );
 }
 
@@ -592,6 +606,73 @@ function createStyles(colors: ThemeColors, bottomPad: number, isDark: boolean) {
       justifyContent: 'center',
       flexShrink: 0,
     },
+    headerCallButton: {
+      width: 36,
+      height: 36,
+      borderRadius: 18,
+      alignItems: 'center',
+      justifyContent: 'center',
+      flexShrink: 0,
+    },
+    headerCallButtonActive: {
+      backgroundColor: 'rgba(21, 122, 254, 0.14)',
+    },
+    voiceJoinBanner: {
+      marginHorizontal: Spacing.md,
+      marginTop: Spacing.sm,
+      marginBottom: 2,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 12,
+      paddingVertical: 10,
+      paddingHorizontal: 12,
+      borderRadius: 14,
+      borderWidth: 1,
+      borderColor: 'rgba(21, 122, 254, 0.28)',
+      backgroundColor: 'rgba(21, 122, 254, 0.1)',
+    },
+    voiceJoinIcon: {
+      width: 36,
+      height: 36,
+      borderRadius: 18,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: 'rgba(21, 122, 254, 0.16)',
+      flexShrink: 0,
+    },
+    voiceJoinCopy: {
+      flex: 1,
+      minWidth: 0,
+      gap: 2,
+    },
+    voiceJoinTitle: {
+      fontSize: FontSize.label,
+      fontWeight: '700',
+      color: colors.primary,
+    },
+    voiceJoinHint: {
+      fontSize: FontSize.caption,
+      color: colors.primary,
+      opacity: 0.85,
+      lineHeight: FontSize.caption * 1.35,
+    },
+    voiceJoinButton: {
+      minHeight: 34,
+      paddingHorizontal: 14,
+      borderRadius: Radius.pill,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: colors.primary,
+      flexShrink: 0,
+    },
+    voiceJoinButtonPressed: {
+      opacity: 0.88,
+    },
+    voiceJoinButtonLabel: {
+      fontSize: 12,
+      fontWeight: '700',
+      color: '#FFFFFF',
+    },
     favoriteInvite: {
       marginHorizontal: Spacing.md,
       marginTop: Spacing.sm,
@@ -678,6 +759,39 @@ function createStyles(colors: ThemeColors, bottomPad: number, isDark: boolean) {
       alignItems: 'center',
       paddingVertical: 6,
       paddingHorizontal: 8,
+    },
+    missedCallNotice: {
+      maxWidth: '100%',
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+      paddingVertical: 8,
+      paddingHorizontal: 12,
+      borderRadius: 14,
+      borderWidth: 1,
+      borderColor: 'rgba(21, 122, 254, 0.22)',
+      backgroundColor: 'rgba(21, 122, 254, 0.1)',
+    },
+    missedCallIconWrap: {
+      width: 26,
+      height: 26,
+      borderRadius: 13,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: 'rgba(21, 122, 254, 0.16)',
+    },
+    missedCallIcon: {
+      transform: [{ rotate: '135deg' }],
+    },
+    missedCallText: {
+      fontSize: FontSize.caption,
+      fontWeight: '700',
+    },
+    missedCallTime: {
+      fontSize: 11,
+      fontWeight: '600',
+      opacity: 0.85,
+      marginLeft: 2,
     },
     dateDividerRow: {
       width: '100%',
@@ -1189,7 +1303,7 @@ export default function ChatThreadScreen() {
   const hasDesktopSidebar = useIsDesktopSidebarVisible();
   const { user } = useAuth();
   const { requestAfterFirstMessage } = usePushPrompt();
-  const { lastConversationUpdate, lastConversationRead, lastConversationDeleted, lastPresence, subscribeMessages, publishConversationUpdate } =
+  const { lastConversationUpdate, lastConversationRead, lastConversationDeleted, lastPresence, subscribeMessages, subscribeCallEvents, publishConversationUpdate } =
     useRealtime();
   const bottomSafe = hasDesktopSidebar ? Spacing.md : Math.max(insets.bottom, Spacing.sm);
   const keyboardInset = useWebKeyboardBottomInset();
@@ -1211,6 +1325,58 @@ export default function ChatThreadScreen() {
     syncQueue: syncVoiceQueue,
     visible: voicePlayerVisible,
   } = useVoicePlayback();
+  const {
+    phase: voicePhase,
+    conversationId: voiceConversationId,
+    startCall,
+    joinOngoingCall,
+    hangup: hangupLiveVoice,
+    minimized: voiceMinimized,
+  } = useVoiceCall();
+  const voiceActiveHere =
+    Boolean(conversationId) &&
+    voiceConversationId === conversationId &&
+    voicePhase !== 'idle' &&
+    voicePhase !== 'incoming';
+  const [ongoingVoiceCall, setOngoingVoiceCall] = useState<ActiveChatVoiceCall | null>(null);
+  const [joiningOngoingVoice, setJoiningOngoingVoice] = useState(false);
+
+  useEffect(() => {
+    if (!conversationId || voiceActiveHere) {
+      setOngoingVoiceCall(null);
+      return;
+    }
+    let cancelled = false;
+    const refresh = async () => {
+      try {
+        const active = await getActiveChatVoiceCall(conversationId);
+        if (cancelled) {
+          return;
+        }
+        // Show for anyone not already in this call UI — including rejoin after drop.
+        setOngoingVoiceCall(active ?? null);
+      } catch {
+        if (!cancelled) {
+          setOngoingVoiceCall(null);
+        }
+      }
+    };
+    void refresh();
+    const timer = setInterval(() => {
+      void refresh();
+    }, 2500);
+    const unsubscribe = subscribeCallEvents((event) => {
+      if (event.payload.conversationId !== conversationId) {
+        return;
+      }
+      void refresh();
+    });
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+      unsubscribe();
+    };
+  }, [conversationId, subscribeCallEvents, voiceActiveHere]);
   const [draft, setDraft] = useState('');
   const [pendingAttachments, setPendingAttachments] = useState<PendingAttachment[]>([]);
   const [lightbox, setLightbox] = useState<{ uris: string[]; index: number } | null>(null);
@@ -1227,6 +1393,13 @@ export default function ChatThreadScreen() {
   const [membersOpen, setMembersOpen] = useState(false);
   const [members, setMembers] = useState<ChatMember[]>([]);
   const [membersLoading, setMembersLoading] = useState(false);
+  const [membersBusy, setMembersBusy] = useState(false);
+  const [renameOpen, setRenameOpen] = useState(false);
+  const [addMembersOpen, setAddMembersOpen] = useState(false);
+  const [addMemberContacts, setAddMemberContacts] = useState<
+    { id: string; nickname: string; avatarUrl: string | null }[]
+  >([]);
+  const [pendingDeleteGroup, setPendingDeleteGroup] = useState(false);
   const [replyTo, setReplyTo] = useState<ChatReplyPreviewData | null>(null);
   const [actionMessage, setActionMessage] = useState<ChatMessage | null>(null);
   const [selectionMode, setSelectionMode] = useState(false);
@@ -1341,6 +1514,12 @@ export default function ChatThreadScreen() {
         return;
       }
 
+      // Звонок уже крутит 3D поверх чата — второй оверлей зацикливал тот же бросок.
+      if (voiceActiveHere) {
+        appendMessage(message);
+        return;
+      }
+
       const skipAnim =
         skipDiceAnimIdsRef.current.has(message.id) ||
         (Boolean(myId) &&
@@ -1393,7 +1572,7 @@ export default function ChatThreadScreen() {
         return request;
       });
     },
-    [appendMessage, myId],
+    [appendMessage, myId, voiceActiveHere],
   );
 
   const clearPendingAttachments = useCallback(() => {
@@ -1714,6 +1893,27 @@ export default function ChatThreadScreen() {
         },
       };
     });
+    setMembers((prev) => {
+      let changed = false;
+      const next = prev.map((member) => {
+        if (member.id !== lastPresence.userId) {
+          return member;
+        }
+        if (
+          member.online === lastPresence.online &&
+          member.lastSeenAt === lastPresence.lastSeenAt
+        ) {
+          return member;
+        }
+        changed = true;
+        return {
+          ...member,
+          online: lastPresence.online,
+          lastSeenAt: lastPresence.lastSeenAt,
+        };
+      });
+      return changed ? next : prev;
+    });
   }, [lastPresence]);
 
   useEffect(() => {
@@ -1968,6 +2168,7 @@ export default function ChatThreadScreen() {
       modifier: number;
       hidden: boolean;
       color: string;
+      skin?: string;
       mode: DiceRollMode;
     }) => {
       if (!conversationId || diceRollBusy || conversation?.blockedMe || localDiceRoll) {
@@ -1991,6 +2192,7 @@ export default function ChatThreadScreen() {
           dice: input.dice,
           modifier: input.modifier,
           color: input.color,
+          skin: input.skin,
           senderNickname: user?.nickname ?? 'Вы',
           mode: input.mode,
         });
@@ -2011,10 +2213,14 @@ export default function ChatThreadScreen() {
           ...(input.mode !== 'normal' ? { mode: input.mode } : {}),
         });
         const rolled = parseDiceRollPayload(message.body);
-        if (rolled && !rolled.color && input.color) {
+        if (rolled && ((!rolled.color && input.color) || (!rolled.skin && input.skin))) {
           message = {
             ...message,
-            body: JSON.stringify({ ...rolled, color: input.color }),
+            body: JSON.stringify({
+              ...rolled,
+              color: rolled.color ?? input.color,
+              ...(input.skin ? { skin: rolled.skin ?? input.skin } : {}),
+            }),
           };
         }
         // Уже показали анимацию со своими цифрами — в ленту без повтора.
@@ -2284,6 +2490,176 @@ export default function ChatThreadScreen() {
     }
   }, [conversation, conversationId]);
 
+  const myGroupRole =
+    conversation?.myRole ??
+    members.find((member) => member.id === myId)?.role ??
+    null;
+  const canManageGroup =
+    isGroup &&
+    !conversation?.gameId &&
+    (myGroupRole === 'owner' || myGroupRole === 'admin');
+  const isGroupOwner = isGroup && !conversation?.gameId && myGroupRole === 'owner';
+
+  const handleRenameGroup = useCallback(
+    async (nextTitle: string) => {
+      if (!conversationId) {
+        return;
+      }
+      setMembersBusy(true);
+      try {
+        const summary = await renameGroupChat(conversationId, nextTitle);
+        setConversation(summary);
+        setRenameOpen(false);
+        toast.success('Название обновлено');
+      } catch (error) {
+        toast.error(localizeErrorMessage(error, 'Не удалось переименовать'));
+      } finally {
+        setMembersBusy(false);
+      }
+    },
+    [conversationId],
+  );
+
+  const handleOpenAddMembers = useCallback(async () => {
+    setAddMembersOpen(true);
+    try {
+      const [list, currentMembers] = await Promise.all([
+        listConversations(),
+        conversationId ? listChatMembers(conversationId) : Promise.resolve(members),
+      ]);
+      setAddMemberContacts(contactsFromConversations(list));
+      if (currentMembers.length > 0) {
+        setMembers(currentMembers);
+      }
+    } catch {
+      setAddMemberContacts([]);
+    }
+  }, [conversationId, members]);
+
+  const handleAddMembers = useCallback(
+    async (memberIds: string[]) => {
+      if (!conversationId || memberIds.length === 0) {
+        return;
+      }
+      setMembersBusy(true);
+      try {
+        const next = await addGroupMembers(conversationId, memberIds);
+        setMembers(next);
+        setConversation((prev) =>
+          prev
+            ? {
+                ...prev,
+                memberCount: next.length,
+              }
+            : prev,
+        );
+        setAddMembersOpen(false);
+        toast.success(memberIds.length === 1 ? 'Участник добавлен' : 'Участники добавлены');
+      } catch (error) {
+        toast.error(localizeErrorMessage(error, 'Не удалось добавить'));
+      } finally {
+        setMembersBusy(false);
+      }
+    },
+    [conversationId],
+  );
+
+  const handlePromoteMember = useCallback(
+    async (userId: string) => {
+      if (!conversationId) {
+        return;
+      }
+      setMembersBusy(true);
+      try {
+        setMembers(await setGroupMemberRole(conversationId, userId, 'admin'));
+        toast.success('Назначен администратором');
+      } catch (error) {
+        toast.error(localizeErrorMessage(error, 'Не удалось назначить'));
+      } finally {
+        setMembersBusy(false);
+      }
+    },
+    [conversationId],
+  );
+
+  const handleDemoteMember = useCallback(
+    async (userId: string) => {
+      if (!conversationId) {
+        return;
+      }
+      setMembersBusy(true);
+      try {
+        setMembers(await setGroupMemberRole(conversationId, userId, 'member'));
+        toast.success('Права администратора сняты');
+      } catch (error) {
+        toast.error(localizeErrorMessage(error, 'Не удалось снять права'));
+      } finally {
+        setMembersBusy(false);
+      }
+    },
+    [conversationId],
+  );
+
+  const handleTransferOwnership = useCallback(
+    async (userId: string) => {
+      if (!conversationId) {
+        return;
+      }
+      setMembersBusy(true);
+      try {
+        const next = await transferGroupOwnership(conversationId, userId);
+        setMembers(next);
+        setConversation((prev) => (prev ? { ...prev, myRole: 'admin' } : prev));
+        toast.success('Права создателя переданы');
+      } catch (error) {
+        toast.error(localizeErrorMessage(error, 'Не удалось передать права'));
+      } finally {
+        setMembersBusy(false);
+      }
+    },
+    [conversationId],
+  );
+
+  const handleRemoveMember = useCallback(
+    async (userId: string) => {
+      if (!conversationId) {
+        return;
+      }
+      setMembersBusy(true);
+      try {
+        const next = await removeGroupMember(conversationId, userId);
+        setMembers(next);
+        setConversation((prev) =>
+          prev ? { ...prev, memberCount: next.length } : prev,
+        );
+        toast.success('Участник исключён');
+      } catch (error) {
+        toast.error(localizeErrorMessage(error, 'Не удалось исключить'));
+      } finally {
+        setMembersBusy(false);
+      }
+    },
+    [conversationId],
+  );
+
+  const handleDeleteGroup = useCallback(async () => {
+    if (!conversationId) {
+      return;
+    }
+    setIsMenuBusy(true);
+    setPendingDeleteGroup(false);
+    setMenuOpen(false);
+    router.replace('/chats');
+    try {
+      await deleteGroupChat(conversationId);
+      toast.success('Группа удалена');
+    } catch (error) {
+      toast.error(localizeErrorMessage(error, 'Не удалось удалить группу'));
+    } finally {
+      setIsMenuBusy(false);
+    }
+  }, [conversationId, router]);
+
   const handleUnblock = useCallback(async () => {
     if (!conversationId || !conversation || unblocking) {
       return;
@@ -2387,9 +2763,11 @@ export default function ChatThreadScreen() {
 
   const headerPadTop = isDesktopWeb
     ? Spacing.md
-    : voicePlayerVisible
+    : voiceActiveHere && voiceMinimized
       ? Spacing.sm
-      : insets.top + Spacing.sm;
+      : voicePlayerVisible
+        ? Spacing.sm
+        : insets.top + Spacing.sm;
   const peerReadMs =
     !isGroup && peerLastReadAt ? new Date(peerLastReadAt).getTime() : 0;
   const renderedMessages = useMemo(() => {
@@ -2564,6 +2942,83 @@ export default function ChatThreadScreen() {
           </Pressable>
           <Pressable
             accessibilityRole="button"
+            accessibilityLabel={
+              voiceActiveHere ? 'Завершить звонок' : 'Позвонить'
+            }
+            hitSlop={8}
+            onPress={() => {
+              if (!conversationId) {
+                return;
+              }
+              if (voiceActiveHere) {
+                void hangupLiveVoice();
+                return;
+              }
+              if (ongoingVoiceCall) {
+                setJoiningOngoingVoice(true);
+                void joinOngoingCall(
+                  conversationId,
+                  ongoingVoiceCall.callId,
+                  ongoingVoiceCall.isGroup
+                    ? ongoingVoiceCall.conversationTitle || title
+                    : ongoingVoiceCall.fromNickname,
+                  ongoingVoiceCall.fromAvatarUrl,
+                  { isGroup: ongoingVoiceCall.isGroup },
+                ).finally(() => setJoiningOngoingVoice(false));
+                return;
+              }
+              void (async () => {
+                let ringingPeers =
+                  isGroup
+                    ? members
+                        .filter((member) => member.id !== user?.id)
+                        .map((member) => ({
+                          userId: member.id,
+                          nickname: member.nickname,
+                          avatarUrl: member.avatarUrl,
+                        }))
+                    : conversation?.peer
+                      ? [
+                          {
+                            userId: conversation.peer.id,
+                            nickname: conversation.peer.nickname,
+                            avatarUrl: conversation.peer.avatarUrl,
+                          },
+                        ]
+                      : [];
+                if (isGroup && ringingPeers.length === 0) {
+                  try {
+                    const loaded = await listChatMembers(conversationId);
+                    setMembers(loaded);
+                    ringingPeers = loaded
+                      .filter((member) => member.id !== user?.id)
+                      .map((member) => ({
+                        userId: member.id,
+                        nickname: member.nickname,
+                        avatarUrl: member.avatarUrl,
+                      }));
+                  } catch {
+                    // invite response still carries ringing peers
+                  }
+                }
+                await startCall(conversationId, title, conversation?.peer?.avatarUrl ?? null, {
+                  isGroup,
+                  ringingPeers,
+                });
+              })();
+            }}
+            style={[
+              styles.headerCallButton,
+              voiceActiveHere || ongoingVoiceCall ? styles.headerCallButtonActive : null,
+            ]}>
+              <Ionicons
+              name={voiceActiveHere || ongoingVoiceCall ? 'call' : 'call-outline'}
+              size={18}
+              color={voiceActiveHere || ongoingVoiceCall ? colors.primary : colors.textSubtle}
+            />
+          </Pressable>
+          <Pressable
+            accessibilityRole="button"
             accessibilityLabel="Ещё"
             hitSlop={8}
             onPress={handleOpenMenu}
@@ -2571,6 +3026,57 @@ export default function ChatThreadScreen() {
             <Ionicons name="ellipsis-vertical" size={18} color={colors.textSubtle} />
           </Pressable>
         </View>
+
+        {ongoingVoiceCall && !voiceActiveHere ? (
+          <View style={styles.voiceJoinBanner}>
+            <View style={styles.voiceJoinIcon}>
+              <Ionicons name="call" size={18} color={colors.primary} />
+            </View>
+            <View style={styles.voiceJoinCopy}>
+              <Text style={styles.voiceJoinTitle} numberOfLines={1}>
+                Идёт звонок
+              </Text>
+              <Text style={styles.voiceJoinHint} numberOfLines={1}>
+                {ongoingVoiceCall.joinedCount > 1
+                  ? `${ongoingVoiceCall.joinedCount} в эфире`
+                  : ongoingVoiceCall.fromNickname
+                    ? `${ongoingVoiceCall.fromNickname} в эфире`
+                    : 'Можно войти'}
+              </Text>
+            </View>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Войти в звонок"
+              disabled={joiningOngoingVoice}
+              onPress={() => {
+                if (!conversationId || !ongoingVoiceCall) {
+                  return;
+                }
+                setJoiningOngoingVoice(true);
+                void joinOngoingCall(
+                  conversationId,
+                  ongoingVoiceCall.callId,
+                  ongoingVoiceCall.isGroup
+                    ? ongoingVoiceCall.conversationTitle || title
+                    : ongoingVoiceCall.fromNickname,
+                  ongoingVoiceCall.fromAvatarUrl,
+                  { isGroup: ongoingVoiceCall.isGroup },
+                ).finally(() => setJoiningOngoingVoice(false));
+              }}
+              style={({ pressed }) => [
+                styles.voiceJoinButton,
+                pressed && styles.voiceJoinButtonPressed,
+              ]}>
+              {joiningOngoingVoice ? (
+                <ActivityIndicator size="small" color="#FFFFFF" />
+              ) : (
+                <Text style={styles.voiceJoinButtonLabel}>
+                  {ongoingVoiceCall.isJoined ? 'Вернуться' : 'Войти'}
+                </Text>
+              )}
+            </Pressable>
+          </View>
+        ) : null}
 
         {showFavoriteBack || showFavoriteMine || showRemoveBack ? (
           <View
@@ -2725,6 +3231,7 @@ export default function ChatThreadScreen() {
               const isFavoriteRemovedNotice = item.kind === 'favorite_removed';
               const isBlockNotice = item.kind === 'user_blocked';
               const isUnblockNotice = item.kind === 'user_unblocked';
+              const isMissedCallNotice = item.kind === 'missed_voice_call';
               const noticeText = isFavoriteNotice
                 ? mine
                   ? 'Вы добавили этого пользователя в избранные'
@@ -2741,7 +3248,11 @@ export default function ChatThreadScreen() {
                       ? mine
                         ? 'Вы разблокировали этого пользователя'
                         : 'разблокировал вас.'
-                      : null;
+                      : isMissedCallNotice
+                        ? mine
+                          ? 'Пропущенный звонок'
+                          : 'Пропущенный звонок'
+                        : null;
               const bodyText = noticeText ?? item.body;
               const attachments = normalizeMessageAttachments(item);
               const imageAttachments = attachments.filter((entry) => entry.kind === 'image');
@@ -2763,6 +3274,26 @@ export default function ChatThreadScreen() {
                     ...(Platform.OS === 'web' ? ({ title: fullDateTimeLabel } as object) : null),
                   } as object)
                 : null;
+
+              if (isMissedCallNotice) {
+                return (
+                  <View style={styles.systemNoticeRow}>
+                    <View style={styles.missedCallNotice}>
+                      <View style={styles.missedCallIconWrap}>
+                        <Ionicons name="call" size={14} color={colors.primary} style={styles.missedCallIcon} />
+                      </View>
+                      <Text style={[styles.missedCallText, { color: colors.primary }]}>
+                        {mine ? 'Звонок без ответа' : 'Пропущенный звонок'}
+                      </Text>
+                      {timeLabel ? (
+                        <Text style={[styles.missedCallTime, { color: colors.primary }]} {...timeAccessibilityProps}>
+                          {timeLabel}
+                        </Text>
+                      ) : null}
+                    </View>
+                  </View>
+                );
+              }
 
               if (isFavoriteNotice || isFavoriteRemovedNotice) {
                 const peerName = conversation?.peer?.nickname ?? 'пользователя';
@@ -2871,6 +3402,14 @@ export default function ChatThreadScreen() {
                               null
                             }
                             size={30}
+                            badges={
+                              item.sender?.badges ??
+                              members.find((member) => member.id === item.senderId)?.badges
+                            }
+                            frameId={
+                              item.sender?.avatarFrameId ??
+                              members.find((member) => member.id === item.senderId)?.avatarFrameId
+                            }
                           />
                         </Pressable>
                       ) : (
@@ -2880,9 +3419,15 @@ export default function ChatThreadScreen() {
                   ) : null}
                   <View style={[styles.bubbleShell, mine && styles.bubbleShellMine]}>
                     {isGroup && !mine && timelineItem.showAuthorMeta ? (
-                      <Text selectable={false} style={styles.senderName} numberOfLines={1}>
-                        {item.sender?.nickname ?? 'Игрок'}
-                      </Text>
+                      <NameWithBadges
+                        name={item.sender?.nickname ?? 'Игрок'}
+                        badges={
+                          item.sender?.badges ??
+                          members.find((member) => member.id === item.senderId)?.badges
+                        }
+                        textStyle={styles.senderName}
+                        badgeSize={11}
+                      />
                     ) : null}
                     <View
                       style={[
@@ -3246,6 +3791,34 @@ export default function ChatThreadScreen() {
                       Участники
                     </Text>
                   </Pressable>
+                  {canManageGroup ? (
+                    <Pressable
+                      accessibilityRole="button"
+                      onPress={() => {
+                        handleCloseMenu();
+                        setRenameOpen(true);
+                      }}
+                      style={({ pressed }) => [styles.menuItem, pressed && styles.menuItemPressed]}>
+                      <Ionicons name="pencil-outline" size={18} color={colors.primary} />
+                      <Text style={[styles.menuItemLabel, { color: colors.primary }]}>
+                        Переименовать
+                      </Text>
+                    </Pressable>
+                  ) : null}
+                  {canManageGroup ? (
+                    <Pressable
+                      accessibilityRole="button"
+                      onPress={() => {
+                        handleCloseMenu();
+                        void handleOpenAddMembers();
+                      }}
+                      style={({ pressed }) => [styles.menuItem, pressed && styles.menuItemPressed]}>
+                      <Ionicons name="person-add-outline" size={18} color={colors.primary} />
+                      <Text style={[styles.menuItemLabel, { color: colors.primary }]}>
+                        Добавить участников
+                      </Text>
+                    </Pressable>
+                  ) : null}
                   <Pressable
                     accessibilityRole="button"
                     disabled={isMenuBusy}
@@ -3256,16 +3829,29 @@ export default function ChatThreadScreen() {
                       {conversation?.gameId ? 'Скрыть чат' : 'Выйти из группы'}
                     </Text>
                   </Pressable>
-                  <Pressable
-                    accessibilityRole="button"
-                    onPress={() => {
-                      handleCloseMenu();
-                      setPendingDelete(true);
-                    }}
-                    style={({ pressed }) => [styles.menuItem, pressed && styles.menuItemPressed]}>
-                    <Ionicons name="trash-outline" size={18} color={colors.destructive} />
-                    <Text style={styles.menuItemLabel}>Скрыть у себя</Text>
-                  </Pressable>
+                  {isGroupOwner ? (
+                    <Pressable
+                      accessibilityRole="button"
+                      onPress={() => {
+                        handleCloseMenu();
+                        setPendingDeleteGroup(true);
+                      }}
+                      style={({ pressed }) => [styles.menuItem, pressed && styles.menuItemPressed]}>
+                      <Ionicons name="trash-outline" size={18} color={colors.destructive} />
+                      <Text style={styles.menuItemLabel}>Удалить группу</Text>
+                    </Pressable>
+                  ) : (
+                    <Pressable
+                      accessibilityRole="button"
+                      onPress={() => {
+                        handleCloseMenu();
+                        setPendingDelete(true);
+                      }}
+                      style={({ pressed }) => [styles.menuItem, pressed && styles.menuItemPressed]}>
+                      <Ionicons name="eye-off-outline" size={18} color={colors.destructive} />
+                      <Text style={styles.menuItemLabel}>Скрыть у себя</Text>
+                    </Pressable>
+                  )}
                 </>
               ) : (
                 <>
@@ -3352,11 +3938,50 @@ export default function ChatThreadScreen() {
           title={title}
           members={members}
           loading={membersLoading}
+          busy={membersBusy}
+          myUserId={myId}
+          myRole={myGroupRole}
+          readOnly={Boolean(conversation?.gameId)}
           onClose={() => setMembersOpen(false)}
           onOpenProfile={(userId) => {
             setMembersOpen(false);
             router.push(`/users/${userId}`);
           }}
+          onAddMembers={() => {
+            void handleOpenAddMembers();
+          }}
+          onPromote={(userId) => void handlePromoteMember(userId)}
+          onDemote={(userId) => void handleDemoteMember(userId)}
+          onTransfer={(userId) => void handleTransferOwnership(userId)}
+          onRemove={(userId) => void handleRemoveMember(userId)}
+        />
+
+        <RenameGroupDialog
+          visible={renameOpen}
+          initialTitle={conversation?.title?.trim() || title}
+          isBusy={membersBusy}
+          onCancel={() => setRenameOpen(false)}
+          onSubmit={(nextTitle) => void handleRenameGroup(nextTitle)}
+        />
+
+        <AddGroupMembersDialog
+          visible={addMembersOpen}
+          contacts={addMemberContacts}
+          excludeIds={members.map((member) => member.id)}
+          isBusy={membersBusy}
+          onCancel={() => setAddMembersOpen(false)}
+          onSubmit={(ids) => void handleAddMembers(ids)}
+        />
+
+        <DeleteChatDialog
+          visible={pendingDeleteGroup}
+          nickname={title}
+          isDeleting={isMenuBusy}
+          title="Удалить группу"
+          message={`Группа «${title}» исчезнет у всех участников. Это нельзя отменить.`}
+          confirmLabel="Удалить для всех"
+          onDeleteForMe={() => void handleDeleteGroup()}
+          onCancel={() => setPendingDeleteGroup(false)}
         />
 
         <DeleteChatDialog

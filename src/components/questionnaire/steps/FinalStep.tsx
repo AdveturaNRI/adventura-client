@@ -8,6 +8,7 @@ import { QuestionnaireVisibilityNotice } from '@/components/questionnaire/Questi
 import { UserCard } from '@/components/ui';
 import type { UserCardDeckSize } from '@/components/ui/cards/UserCard';
 import { FontSize, Spacing, type ThemeColors } from '@/constants/theme';
+import { useProfile } from '@/context/ProfileContext';
 import { useThemedStyles } from '@/hooks/use-themed-styles';
 import {
   FINAL_STEP,
@@ -87,10 +88,13 @@ function createStyles(colors: ThemeColors, isDesktopWeb: boolean) {
     previewWrap: {
       alignItems: 'center',
       width: '100%',
+      overflow: 'visible',
+      paddingTop: 122,
     },
     previewCard: {
       width: '100%',
       maxWidth: isDesktopWeb ? DESKTOP_CONTENT_MAX_WIDTH : undefined,
+      overflow: 'visible',
     },
     previewCaption: {
       marginTop: Spacing.sm,
@@ -112,9 +116,17 @@ export function FinalStep({
 }: FinalStepProps) {
   const isDesktopWeb = useIsDesktopWeb();
   const { width: windowWidth } = useWindowDimensions();
+  const { profile } = useProfile();
   const screenStyles = useQuestionnaireScreenStyles();
   const styles = useThemedStyles((colors) => createStyles(colors, isDesktopWeb));
-  const cardProps = useMemo(() => questionnaireDraftToUserCardProps(draft), [draft]);
+  const cardProps = useMemo(
+    () =>
+      questionnaireDraftToUserCardProps(draft, {
+        auraId: profile?.perks?.questionnaireAuraId,
+        badges: profile?.perks?.visibleBadges ?? profile?.perks?.badges,
+      }),
+    [draft, profile?.perks],
+  );
   const completion = useMemo(() => getQuestionnaireCompletionFromDraft(draft), [draft]);
   const showEdit = completion.isComplete;
 

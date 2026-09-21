@@ -3,6 +3,7 @@ import {
   ActivityIndicator,
   Platform,
   Pressable,
+  ScrollView,
   StyleSheet,
   Switch,
   Text,
@@ -10,9 +11,12 @@ import {
 } from 'react-native';
 import { useFocusEffect } from 'expo-router';
 
+import { Ionicons } from '@expo/vector-icons';
+
 import { ThemeToggle, useIsDesktopSidebarVisible } from '@/components/navigation/DesktopThemeToggle';
 import { MobileScreenHeader } from '@/components/navigation/MobileScreenHeader';
 import { ScreenTransition } from '@/components/navigation/ScreenTransition';
+import { VoiceDevicesSettingsSection } from '@/components/settings/VoiceDevicesSettingsSection';
 import { toast } from '@/components/ui';
 import { FontSize, Spacing, type ThemeColors } from '@/constants/theme';
 import { usePushPrompt } from '@/context/PushPromptContext';
@@ -33,6 +37,11 @@ import { useMainScreenStyles } from './main-screen.styles';
 
 function createSettingsStyles(colors: ThemeColors) {
   return StyleSheet.create({
+    scrollContent: {
+      paddingBottom: Spacing.xl,
+      gap: Spacing.md,
+      flexGrow: 1,
+    },
     section: {
       borderRadius: 16,
       borderWidth: 1,
@@ -41,7 +50,7 @@ function createSettingsStyles(colors: ThemeColors) {
       overflow: 'hidden',
     },
     sectionGap: {
-      marginTop: Spacing.md,
+      marginTop: 0,
     },
     alertCard: {
       borderRadius: 16,
@@ -99,10 +108,23 @@ function createSettingsStyles(colors: ThemeColors) {
       fontWeight: '600',
       color: colors.text,
     },
+    rowTitleWithIcon: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+    },
     rowSubtitle: {
       fontSize: FontSize.caption,
       color: colors.textMuted,
       lineHeight: FontSize.caption * 1.45,
+    },
+    sectionIconWell: {
+      width: 28,
+      height: 28,
+      borderRadius: 8,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: 'rgba(21, 122, 254, 0.12)',
     },
     hint: {
       marginTop: Spacing.sm,
@@ -247,70 +269,97 @@ export default function SettingsScreen() {
           <Text style={mainStyles.title}>Настройки</Text>
         )}
 
-        {WEB_PUSH_OPT_IN_ENABLED && Platform.OS === 'web' && showSettingsAlert ? (
-          <View style={styles.alertCard}>
-            <Text style={styles.alertTitle}>Уведомления выключены</Text>
-            <Text style={styles.alertBody}>
-              Без пушей можно пропустить заявки на игры и сообщения в чатах, пока сайт закрыт.
-            </Text>
-            <Pressable
-              style={({ pressed }) => [
-                styles.alertButton,
-                pressed ? styles.alertButtonPressed : null,
-              ]}
-              onPress={handleKeepDisabled}
-              accessibilityRole="button">
-              <Text style={styles.alertButtonLabel}>Оставить выключенными</Text>
-            </Pressable>
-          </View>
-        ) : null}
-
-        <View style={styles.section}>
-          <View style={styles.row}>
-            <View style={styles.rowText}>
-              <Text style={styles.rowTitle}>Тема оформления</Text>
-              <Text style={styles.rowSubtitle}>Светлая или тёмная тема приложения</Text>
+        <ScrollView
+          style={mainStyles.scroll}
+          contentContainerStyle={styles.scrollContent}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}>
+          {WEB_PUSH_OPT_IN_ENABLED && Platform.OS === 'web' && showSettingsAlert ? (
+            <View style={styles.alertCard}>
+              <Text style={styles.alertTitle}>Уведомления выключены</Text>
+              <Text style={styles.alertBody}>
+                Без пушей можно пропустить заявки на игры и сообщения в чатах, пока сайт закрыт.
+              </Text>
+              <Pressable
+                style={({ pressed }) => [
+                  styles.alertButton,
+                  pressed ? styles.alertButtonPressed : null,
+                ]}
+                onPress={handleKeepDisabled}
+                accessibilityRole="button">
+                <Text style={styles.alertButtonLabel}>Оставить выключенными</Text>
+              </Pressable>
             </View>
-            <ThemeToggle />
-          </View>
-        </View>
+          ) : null}
 
-        {WEB_PUSH_OPT_IN_ENABLED && Platform.OS === 'web' ? (
+          <View style={styles.section}>
+            <View style={styles.row}>
+              <View style={styles.rowText}>
+                <Text style={styles.rowTitle}>Тема оформления</Text>
+                <Text style={styles.rowSubtitle}>Светлая или тёмная тема приложения</Text>
+              </View>
+              <ThemeToggle />
+            </View>
+          </View>
+
+          {WEB_PUSH_OPT_IN_ENABLED && Platform.OS === 'web' ? (
+            <View style={[styles.section, styles.sectionGap]}>
+              <View style={styles.row}>
+                <View style={styles.rowText}>
+                  <Text style={styles.rowTitle}>Браузерные уведомления на этом устройстве</Text>
+                  <Text style={styles.rowSubtitle}>
+                    Заявки на игры и новые сообщения, даже когда вкладка закрыта
+                  </Text>
+                </View>
+                {pushLoading ? (
+                  <ActivityIndicator color={colors.primary} />
+                ) : (
+                  <Switch
+                    value={pushEnabled}
+                    onValueChange={handleTogglePush}
+                    disabled={pushBusy || iosHint || !webPushAvailable}
+                    trackColor={{ false: colors.border, true: colors.primary }}
+                    thumbColor="#FFFFFF"
+                    // @ts-expect-error RN-web: on-state uses activeThumbColor (defaults to Material teal)
+                    activeThumbColor="#FFFFFF"
+                    ios_backgroundColor={colors.border}
+                  />
+                )}
+              </View>
+              {iosHint ? (
+                <Text style={styles.hintAccent}>
+                  На iPhone пуши работают, если сайт добавлен на домашний экран.
+                </Text>
+              ) : null}
+              {!iosHint && permission === 'denied' ? (
+                <Text style={styles.hint}>
+                  Разрешение заблокировано. Включите уведомления в настройках браузера для этого
+                  сайта.
+                </Text>
+              ) : null}
+              {!webPushAvailable && !iosHint ? (
+                <Text style={styles.hint}>Этот браузер не поддерживает веб-пуши.</Text>
+              ) : null}
+            </View>
+          ) : null}
+
           <View style={[styles.section, styles.sectionGap]}>
             <View style={styles.row}>
               <View style={styles.rowText}>
-                <Text style={styles.rowTitle}>Браузерные уведомления на этом устройстве</Text>
+                <View style={styles.rowTitleWithIcon}>
+                  <View style={styles.sectionIconWell}>
+                    <Ionicons name="volume-high" size={16} color={colors.primary} />
+                  </View>
+                  <Text style={styles.rowTitle}>Звук и микрофон</Text>
+                </View>
                 <Text style={styles.rowSubtitle}>
-                  Заявки на игры и новые сообщения, даже когда вкладка закрыта
+                  Микрофон и динамики для звонков, плюс проверка перед входом в голос
                 </Text>
               </View>
-              {pushLoading ? (
-                <ActivityIndicator color={colors.primary} />
-              ) : (
-                <Switch
-                  value={pushEnabled}
-                  onValueChange={handleTogglePush}
-                  disabled={pushBusy || iosHint || !webPushAvailable}
-                  trackColor={{ false: colors.border, true: colors.primaryLight }}
-                  thumbColor={pushEnabled ? colors.primary : colors.surface}
-                />
-              )}
             </View>
-            {iosHint ? (
-              <Text style={styles.hintAccent}>
-                На iPhone пуши работают, если сайт добавлен на домашний экран.
-              </Text>
-            ) : null}
-            {!iosHint && permission === 'denied' ? (
-              <Text style={styles.hint}>
-                Разрешение заблокировано. Включите уведомления в настройках браузера для этого сайта.
-              </Text>
-            ) : null}
-            {!webPushAvailable && !iosHint ? (
-              <Text style={styles.hint}>Этот браузер не поддерживает веб-пуши.</Text>
-            ) : null}
+            <VoiceDevicesSettingsSection />
           </View>
-        ) : null}
+        </ScrollView>
       </View>
     </ScreenTransition>
   );

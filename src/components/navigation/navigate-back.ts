@@ -62,7 +62,8 @@ function fallbackForPath(pathname: string | null | undefined): Href {
     pathname === '/my-games' ||
     pathname === '/my-clubs' ||
     pathname === '/settings' ||
-    pathname === '/questionnaire'
+    pathname === '/questionnaire' ||
+    pathname === '/profile-appearance'
   ) {
     return '/profile';
   }

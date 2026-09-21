@@ -14,6 +14,11 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import type { DieGlyphSides } from '@/components/dice/DieGlyph';
 import { DiceColorPicker } from '@/components/dice/DiceColorPicker';
+import { DiceCritBurst } from '@/components/rewards/DiceCritBurst';
+import { DiceSkinPicker } from '@/components/rewards/DiceSkinPicker';
+import { useDiceAccentColor } from '@/hooks/use-dice-accent-color';
+import { useDiceSkin } from '@/hooks/use-dice-skin';
+import { skinAccent } from '@/data/rewards/catalog';
 import { DieMeshPreview, DieMeshPreviewProvider } from '@/components/dice/DieMeshPreview';
 import { DiceStage, type DiceStageHandle } from '@/components/dice/DiceStage';
 import type { DiceRollOutcome } from '@/components/dice/dice-stage.types';
@@ -21,13 +26,14 @@ import { MobileScreenHeader } from '@/components/navigation/MobileScreenHeader';
 import { useIsDesktopSidebarVisible } from '@/components/navigation/DesktopThemeToggle';
 import { ScreenTransition } from '@/components/navigation/ScreenTransition';
 import { FontSize, Spacing, type ThemeColors } from '@/constants/theme';
-import { useDiceAccentColor } from '@/hooks/use-dice-accent-color';
 import { useTheme } from '@/hooks/use-theme';
 import { useThemedStyles } from '@/hooks/use-themed-styles';
 import { useMainScreenStyles } from '@/screens/main/main-screen.styles';
 import {
   applyDiceKeepMode,
   DICE_CRIT_FAIL_LABEL,
+  DICE_CRIT_SUCCESS_LABEL,
+  DICE_SCREEN_SKINS_ENABLED,
   diceFaceMark,
   diceRollCritLabels,
   diceRollModeLabel,
@@ -891,6 +897,11 @@ export default function DiceScreen() {
   const { width, height } = useWindowDimensions();
   const stageRef = useRef<DiceStageHandle>(null);
   const { accent, setAccent } = useDiceAccentColor();
+  const { skinId, unlockedIds, setSkinId } = useDiceSkin();
+  const [critFlash, setCritFlash] = useState(false);
+  const activeSkinId = DICE_SCREEN_SKINS_ENABLED ? skinId : 'standard';
+  const stageAccent =
+    activeSkinId === 'standard' ? accent : skinAccent(activeSkinId);
 
   const compact = width < 760;
   const medium = width >= 760 && width < 1100;
@@ -1100,6 +1111,11 @@ export default function DiceScreen() {
       setRolling(false);
       setShowLast(true);
       pushHistory(enriched);
+      const crits = diceRollCritLabels(enriched.groups, rollMode, mod);
+      if (crits.includes(DICE_CRIT_SUCCESS_LABEL)) {
+        setCritFlash(true);
+        setTimeout(() => setCritFlash(false), 1200);
+      }
     },
     [pushHistory],
   );
@@ -1625,6 +1641,17 @@ export default function DiceScreen() {
           void setAccent(hex);
         }}
       />
+      {DICE_SCREEN_SKINS_ENABLED ? (
+        <DiceSkinPicker
+          value={skinId}
+          unlockedIds={unlockedIds}
+          compact={compact}
+          disabled={rolling}
+          onChange={(id) => {
+            void setSkinId(id);
+          }}
+        />
+      ) : null}
       {compact ? (
         <View style={styles.controlsStrip}>
           <View style={styles.controlsStripGroup}>{modControls}</View>
@@ -1684,13 +1711,17 @@ export default function DiceScreen() {
         <View style={styles.trayInnerRing} />
         <View style={styles.stageFill}>
           {isFocused ? (
-            <DiceStage
-              ref={stageRef}
-              accent={accent}
-              animationSpeed={animationSpeed === 'off' ? 'normal' : animationSpeed}
-              onReady={() => setStageReady(true)}
-              onDone={handleDone}
-            />
+            <>
+              <DiceStage
+                ref={stageRef}
+                accent={stageAccent}
+                skin={activeSkinId}
+                animationSpeed={animationSpeed === 'off' ? 'normal' : animationSpeed}
+                onReady={() => setStageReady(true)}
+                onDone={handleDone}
+              />
+              <DiceCritBurst visible={critFlash} skinId={activeSkinId} />
+            </>
           ) : null}
         </View>
 

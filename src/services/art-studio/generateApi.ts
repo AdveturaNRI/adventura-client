@@ -67,6 +67,7 @@ export async function generateArtViaApi(
     body: {
       prompt,
       orientation,
+      entityId: input.entityId,
     },
     skipLoading: true,
   });

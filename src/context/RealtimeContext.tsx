@@ -7,6 +7,7 @@ import {
   useState,
   type ReactNode,
 } from 'react';
+import { AppState, Platform } from 'react-native';
 
 import { useAuth } from '@/context/AuthContext';
 import type { ChatMessage, ConversationListItem } from '@/services/chats/chatsApi';
@@ -18,6 +19,9 @@ import {
   bindRealtimeHandlers,
   connectRealtime,
   disconnectRealtime,
+  ensureRealtimeConnected,
+  updateRealtimeAuthToken,
+  type CallRealtimeEvent,
   type ConversationDeletedPayload,
   type ConversationReadPayload,
   type PresenceUpdatePayload,
@@ -43,12 +47,13 @@ type RealtimeContextValue = {
   setUnreadNotifications: (value: number) => void;
   publishConversationUpdate: (conversation: ConversationListItem) => void;
   subscribeMessages: (listener: (message: ChatMessage) => void) => () => void;
+  subscribeCallEvents: (listener: (event: CallRealtimeEvent) => void) => () => void;
 };
 
 const RealtimeContext = createContext<RealtimeContextValue | null>(null);
 
 export function RealtimeProvider({ children }: { children: ReactNode }) {
-  const { token, isAuthenticated, user } = useAuth();
+  const { token, isAuthenticated, isLoading, user } = useAuth();
   const [unreadChats, setUnreadChats] = useState(0);
   const [unreadNotifications, setUnreadNotifications] = useState(0);
   const [lastMessage, setLastMessage] = useState<ChatMessage | null>(null);
@@ -61,6 +66,7 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
   const [lastPresence, setLastPresence] = useState<PresenceUpdatePayload | null>(null);
   const [lastNotification, setLastNotification] = useState<PortalNotification | null>(null);
   const messageListenersRef = useRef(new Set<(message: ChatMessage) => void>());
+  const callListenersRef = useRef(new Set<(event: CallRealtimeEvent) => void>());
   const userIdRef = useRef(user?.id);
 
   userIdRef.current = user?.id;
@@ -70,6 +76,16 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
       messageListenersRef.current.add(listener);
       return () => {
         messageListenersRef.current.delete(listener);
+      };
+    },
+    [],
+  );
+
+  const subscribeCallEvents = useMemo(
+    () => (listener: (event: CallRealtimeEvent) => void) => {
+      callListenersRef.current.add(listener);
+      return () => {
+        callListenersRef.current.delete(listener);
       };
     },
     [],
@@ -86,6 +102,11 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
   );
 
   useEffect(() => {
+    // Don't tear down the socket while Auth is still restoring the session.
+    if (isLoading) {
+      return;
+    }
+
     if (!isAuthenticated || !token) {
       disconnectRealtime();
       setUnreadChats(0);
@@ -100,6 +121,7 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
     }
 
     connectRealtime(token);
+    updateRealtimeAuthToken(token);
     let cancelled = false;
     let hasUnreadSynced = false;
 
@@ -114,7 +136,8 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
           message.senderId !== userIdRef.current &&
           message.kind !== 'favorite_received' &&
           message.kind !== 'favorite_removed' &&
-          message.kind !== 'user_blocked'
+          message.kind !== 'user_blocked' &&
+          message.kind !== 'missed_voice_call'
         ) {
           notifyIncomingChatMessage();
         }
@@ -151,6 +174,9 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
         setUnreadChats(payload.chats);
         setUnreadNotifications(payload.notifications);
       },
+      onCallEvent: (event) => {
+        callListenersRef.current.forEach((listener) => listener(event));
+      },
     });
 
     void getNotificationsUnreadCount()
@@ -167,7 +193,50 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
       cancelled = true;
       unbind();
     };
-  }, [isAuthenticated, token]);
+  }, [isAuthenticated, isLoading, token]);
+
+  // Keep presence alive on any app section — reconnect when the app/tab is focused again.
+  useEffect(() => {
+    if (isLoading || !isAuthenticated || !token) {
+      return;
+    }
+
+    const keepAlive = () => {
+      ensureRealtimeConnected(token);
+    };
+
+    keepAlive();
+
+    const appSub = AppState.addEventListener('change', (state) => {
+      if (state === 'active') {
+        keepAlive();
+      }
+    });
+
+    let visibilityHandler: (() => void) | null = null;
+    if (Platform.OS === 'web' && typeof document !== 'undefined') {
+      visibilityHandler = () => {
+        if (document.visibilityState === 'visible') {
+          keepAlive();
+        }
+      };
+      document.addEventListener('visibilitychange', visibilityHandler);
+      window.addEventListener('focus', keepAlive);
+    }
+
+    const interval = setInterval(keepAlive, 30_000);
+
+    return () => {
+      appSub.remove();
+      clearInterval(interval);
+      if (Platform.OS === 'web' && typeof document !== 'undefined') {
+        if (visibilityHandler) {
+          document.removeEventListener('visibilitychange', visibilityHandler);
+        }
+        window.removeEventListener('focus', keepAlive);
+      }
+    };
+  }, [isAuthenticated, isLoading, token]);
 
   useEffect(() => {
     if (typeof window === 'undefined') {
@@ -216,6 +285,7 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
       setUnreadNotifications,
       publishConversationUpdate,
       subscribeMessages,
+      subscribeCallEvents,
     }),
     [
       unreadChats,
@@ -228,6 +298,7 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
       lastNotification,
       publishConversationUpdate,
       subscribeMessages,
+      subscribeCallEvents,
     ],
   );
 
