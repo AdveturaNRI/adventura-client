@@ -43,11 +43,10 @@ export type ChatLiveVoiceParticipant = {
 };
 
 const URGENT_TOPIC = 'adventura.urgent';
-const URGENT_TTL_MS = 8_000;
-const URGENT_COOLDOWN_MS = 4_000;
+const URGENT_COOLDOWN_MS = 800;
 
 type UrgentPayload = {
-  type: 'urgent_request';
+  type: 'urgent_request' | 'urgent_clear';
   identity: string;
   at: number;
 };
@@ -59,8 +58,8 @@ type UseChatLiveVoiceResult = {
   deafened: boolean;
   cameraOn: boolean;
   participants: ChatLiveVoiceParticipant[];
-  /** identity → expiresAt ms */
-  urgentUntilById: Record<string, number>;
+  /** identity → urgent flag (cleared only by sender toggle / leave) */
+  urgentById: Record<string, boolean>;
   join: (conversationIdOverride?: string) => Promise<void>;
   leave: () => Promise<void>;
   toggleMute: () => Promise<void>;
@@ -248,40 +247,31 @@ export function useChatLiveVoice(conversationId: string | null): UseChatLiveVoic
   const [cameraOn, setCameraOn] = useState(false);
   const deafenedRef = useRef(false);
   const [participants, setParticipants] = useState<ChatLiveVoiceParticipant[]>([]);
-  const [urgentUntilById, setUrgentUntilById] = useState<Record<string, number>>({});
+  const [urgentById, setUrgentById] = useState<Record<string, boolean>>({});
+  const urgentByIdRef = useRef<Record<string, boolean>>({});
+  urgentByIdRef.current = urgentById;
   const lastUrgentSentAtRef = useRef(0);
-  const urgentTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
 
-  const clearUrgentTimers = useCallback(() => {
-    for (const timer of urgentTimersRef.current.values()) {
-      clearTimeout(timer);
-    }
-    urgentTimersRef.current.clear();
-  }, []);
-
-  const applyUrgent = useCallback((identity: string, playSound: boolean) => {
+  const setUrgent = useCallback((identity: string, active: boolean, playSound: boolean) => {
     if (!identity) {
       return;
     }
-    const expiresAt = Date.now() + URGENT_TTL_MS;
-    setUrgentUntilById((prev) => ({ ...prev, [identity]: expiresAt }));
-    const existing = urgentTimersRef.current.get(identity);
-    if (existing) {
-      clearTimeout(existing);
-    }
-    const timer = setTimeout(() => {
-      urgentTimersRef.current.delete(identity);
-      setUrgentUntilById((prev) => {
-        if (!prev[identity]) {
+    setUrgentById((prev) => {
+      const was = Boolean(prev[identity]);
+      if (active === was) {
+        return prev;
+      }
+      if (!active) {
+        if (!was) {
           return prev;
         }
         const next = { ...prev };
         delete next[identity];
         return next;
-      });
-    }, URGENT_TTL_MS);
-    urgentTimersRef.current.set(identity, timer);
-    if (playSound) {
+      }
+      return { ...prev, [identity]: true };
+    });
+    if (active && playSound) {
       playUrgentRequestAlert();
     }
   }, []);
@@ -300,8 +290,7 @@ export function useChatLiveVoice(conversationId: string | null): UseChatLiveVoic
 
   const teardownRoom = useCallback(async (room: Room | null) => {
     clearRemoteAudioElements();
-    clearUrgentTimers();
-    setUrgentUntilById({});
+    setUrgentById({});
     if (!room) {
       await stopLivekitAudioSession().catch(() => undefined);
       return;
@@ -313,7 +302,7 @@ export function useChatLiveVoice(conversationId: string | null): UseChatLiveVoic
       // already gone
     }
     await stopLivekitAudioSession().catch(() => undefined);
-  }, [clearUrgentTimers]);
+  }, []);
 
   const leave = useCallback(async () => {
     intentionalLeaveRef.current = true;
@@ -376,7 +365,13 @@ export function useChatLiveVoice(conversationId: string | null): UseChatLiveVoic
       const sync = () => refreshParticipants();
       room
         .on(RoomEvent.ParticipantConnected, sync)
-        .on(RoomEvent.ParticipantDisconnected, sync)
+        .on(RoomEvent.ParticipantDisconnected, (participant: RemoteParticipant) => {
+          const id = participant.identity;
+          if (id) {
+            setUrgent(id, false, false);
+          }
+          sync();
+        })
         .on(RoomEvent.ActiveSpeakersChanged, sync)
         .on(RoomEvent.TrackMuted, sync)
         .on(RoomEvent.TrackUnmuted, sync)
@@ -418,7 +413,7 @@ export function useChatLiveVoice(conversationId: string | null): UseChatLiveVoic
             try {
               const raw = new TextDecoder().decode(payload);
               const parsed = JSON.parse(raw) as UrgentPayload;
-              if (parsed?.type !== 'urgent_request') {
+              if (parsed?.type !== 'urgent_request' && parsed?.type !== 'urgent_clear') {
                 return;
               }
               const identity =
@@ -428,7 +423,7 @@ export function useChatLiveVoice(conversationId: string | null): UseChatLiveVoic
               if (!identity) {
                 return;
               }
-              applyUrgent(identity, true);
+              setUrgent(identity, parsed.type === 'urgent_request', true);
             } catch {
               // ignore malformed packets
             }
@@ -449,8 +444,7 @@ export function useChatLiveVoice(conversationId: string | null): UseChatLiveVoic
           clearRemoteAudioElements();
           void stopLivekitAudioSession().catch(() => undefined);
           setParticipants([]);
-          setUrgentUntilById({});
-          clearUrgentTimers();
+          setUrgentById({});
           setMuted(false);
           setDeafened(false);
           setCameraOn(false);
@@ -561,7 +555,7 @@ export function useChatLiveVoice(conversationId: string | null): UseChatLiveVoic
     } finally {
       joiningRef.current = false;
     }
-  }, [applyUrgent, clearUrgentTimers, conversationId, refreshParticipants, teardownRoom]);
+  }, [conversationId, refreshParticipants, setUrgent, teardownRoom]);
 
   const toggleMute = useCallback(async () => {
     const room = roomRef.current;
@@ -655,8 +649,9 @@ export function useChatLiveVoice(conversationId: string | null): UseChatLiveVoic
     }
     lastUrgentSentAtRef.current = now;
     const identity = room.localParticipant.identity;
+    const nextActive = !urgentByIdRef.current[identity];
     const payload: UrgentPayload = {
-      type: 'urgent_request',
+      type: nextActive ? 'urgent_request' : 'urgent_clear',
       identity,
       at: now,
     };
@@ -669,8 +664,8 @@ export function useChatLiveVoice(conversationId: string | null): UseChatLiveVoic
     } catch (error) {
       console.warn('[voice] urgent publish failed', error);
     }
-    applyUrgent(identity, true);
-  }, [applyUrgent, status]);
+    setUrgent(identity, nextActive, nextActive);
+  }, [setUrgent, status]);
 
   useEffect(() => {
     return () => {
@@ -701,7 +696,7 @@ export function useChatLiveVoice(conversationId: string | null): UseChatLiveVoic
     deafened,
     cameraOn,
     participants,
-    urgentUntilById,
+    urgentById,
     join,
     leave,
     toggleMute,

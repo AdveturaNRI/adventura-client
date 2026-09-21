@@ -1,6 +1,7 @@
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  ActivityIndicator,
   Animated,
   Easing,
   Modal,
@@ -36,6 +37,8 @@ type OverlayTile = {
   videoTrack: VideoTrack | null;
   isLocal: boolean;
   waiting?: boolean;
+  /** Accepted, still joining LiveKit. */
+  connecting?: boolean;
   urgent?: boolean;
   badges?: RewardBadgeType[];
   frameId?: string | null;
@@ -45,6 +48,7 @@ export type VoiceCallWaitingPeer = {
   id: string;
   name: string;
   avatarUrl: string | null;
+  connecting?: boolean;
 };
 
 type Props = {
@@ -61,8 +65,8 @@ type Props = {
   participants: ChatLiveVoiceParticipant[];
   /** Members still being rung / not yet in LiveKit. */
   waitingPeers?: VoiceCallWaitingPeer[];
-  /** identity → urgent until timestamp */
-  urgentUntilById?: Record<string, number>;
+  /** identity → urgent flag (sticky until sender clears) */
+  urgentById?: Record<string, boolean>;
   /** Chat to post dice rolls into (same conversation as the call). */
   conversationId?: string | null;
   diceSenderNickname?: string;
@@ -281,7 +285,9 @@ function ParticipantTile({
       ) : (
         <View style={[styles.avatarWrap, { width: ringBox + 28, height: ringBox + 28 }]}>
           {tile.urgent ? <UrgentPulseRings size={ringBox} /> : null}
-          {!tile.urgent && tile.waiting ? <WaitingPulseRings size={ringBox} /> : null}
+          {!tile.urgent && tile.waiting && !tile.connecting ? (
+            <WaitingPulseRings size={ringBox} />
+          ) : null}
           <View
             style={[
               styles.avatarRing,
@@ -307,6 +313,11 @@ function ParticipantTile({
                 frameId={tile.frameId}
               />
             </View>
+            {tile.connecting ? (
+              <View style={styles.connectingOverlay} pointerEvents="none">
+                <ActivityIndicator size="small" color="#FFFFFF" />
+              </View>
+            ) : null}
             {tile.muted && !tile.waiting ? (
               <View style={styles.muteBadge}>
                 <Ionicons name="mic-off" size={12} color="#FFFFFF" />
@@ -328,7 +339,11 @@ function ParticipantTile({
         layout="stack"
         align="center"
       />
-      {tile.waiting && !tile.urgent ? <Text style={styles.tileHint}>ожидание</Text> : null}
+      {tile.connecting ? (
+        <Text style={styles.tileHint}>подключение…</Text>
+      ) : tile.waiting && !tile.urgent ? (
+        <Text style={styles.tileHint}>ожидание</Text>
+      ) : null}
     </View>
   );
 }
@@ -438,7 +453,7 @@ export function VoiceCallOverlay({
   cameraOn = false,
   participants,
   waitingPeers = [],
-  urgentUntilById = {},
+  urgentById = {},
   conversationId = null,
   diceSenderNickname = 'Вы',
   onToggleMute,
@@ -588,7 +603,7 @@ export function VoiceCallOverlay({
       isLocal: p.isLocal,
       badges: p.badges,
       frameId: p.avatarFrameId,
-      urgent: (urgentUntilById[p.identity] ?? 0) > nowTick,
+      urgent: Boolean(urgentById[p.identity]),
     }));
     const liveIds = new Set(live.map((p) => p.key));
     for (const peer of waitingPeers) {
@@ -605,7 +620,8 @@ export function VoiceCallOverlay({
         videoTrack: null,
         isLocal: false,
         waiting: true,
-        urgent: (urgentUntilById[peer.id] ?? 0) > nowTick,
+        connecting: Boolean(peer.connecting),
+        urgent: Boolean(urgentById[peer.id]),
       });
       liveIds.add(peer.id);
     }
@@ -619,9 +635,10 @@ export function VoiceCallOverlay({
       }
       return a.name.localeCompare(b.name, 'ru');
     });
-  }, [nowTick, participants, profileAvatarUrl, urgentUntilById, waitingPeers]);
+  }, [participants, profileAvatarUrl, urgentById, waitingPeers]);
 
   const liveCount = participants.length;
+  const localUrgent = participants.some((p) => p.isLocal && Boolean(urgentById[p.identity]));
   const waitingCount = waitingPeers.filter(
     (peer) => peer.id && !participants.some((p) => p.identity === peer.id),
   ).length;
@@ -1065,12 +1082,13 @@ export function VoiceCallOverlay({
             {onUrgentRequest ? (
               <Pressable
                 accessibilityRole="button"
-                accessibilityLabel="Срочная заявка"
+                accessibilityLabel={localUrgent ? 'Снять срочную заявку' : 'Срочная заявка'}
+                accessibilityState={{ selected: localUrgent }}
                 disabled={!mediaReady}
                 onPress={onUrgentRequest}
                 style={({ pressed }) => [
                   styles.controlBtn,
-                  styles.controlBtnUrgent,
+                  localUrgent ? styles.controlBtnUrgent : styles.controlBtnSecondary,
                   pressed && styles.pressed,
                   !mediaReady && styles.controlDisabled,
                 ]}>
@@ -1454,6 +1472,7 @@ const styles = StyleSheet.create({
     letterSpacing: 0.2,
   },
   avatarRing: {
+    position: 'relative',
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 3,
@@ -1470,6 +1489,13 @@ const styles = StyleSheet.create({
     backgroundColor: '#ED4245',
     borderWidth: 2,
     borderColor: '#2B2D31',
+  },
+  connectingOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 999,
+    backgroundColor: 'rgba(0, 0, 0, 0.45)',
   },
   tileName: {
     color: '#F2F3F5',

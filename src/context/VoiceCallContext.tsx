@@ -42,6 +42,8 @@ export type VoiceCallRingingPeer = {
   userId: string;
   nickname: string;
   avatarUrl: string | null;
+  /** Accepted / joining LiveKit — keep the tile with a loader. */
+  connecting?: boolean;
 };
 
 type VoiceCallContextValue = {
@@ -146,7 +148,6 @@ export function VoiceCallProvider({ children }: { children: ReactNode }) {
   pendingInviteRef.current = pendingInvite;
   const [minimized, setMinimized] = useState(false);
   const ringingStartedAtRef = useRef<number | null>(null);
-  const hadRemoteRef = useRef(false);
   const switchingCallRef = useRef(false);
 
   const liveConversationId =
@@ -161,7 +162,7 @@ export function VoiceCallProvider({ children }: { children: ReactNode }) {
     deafened,
     cameraOn,
     participants,
-    urgentUntilById,
+    urgentById,
     join,
     leave,
     toggleMute,
@@ -183,7 +184,6 @@ export function VoiceCallProvider({ children }: { children: ReactNode }) {
       stopCallRingtone();
     }
     ringingStartedAtRef.current = null;
-    hadRemoteRef.current = false;
     setMinimized(false);
 
     const parked = !switchingCallRef.current ? pendingInviteRef.current : null;
@@ -245,7 +245,6 @@ export function VoiceCallProvider({ children }: { children: ReactNode }) {
       sessionRef.current = next;
       setSession(next);
       setMinimized(false);
-      hadRemoteRef.current = false;
       ringingStartedAtRef.current = null;
       try {
         await acceptChatVoiceCall(invite.conversationId, invite.callId);
@@ -289,7 +288,6 @@ export function VoiceCallProvider({ children }: { children: ReactNode }) {
         sessionRef.current = next;
         setSession(next);
         setMinimized(false);
-        hadRemoteRef.current = false;
         ringingStartedAtRef.current = ringingPeers.length > 0 ? Date.now() : null;
         startCallRingback();
         await join(conversationId);
@@ -332,7 +330,6 @@ export function VoiceCallProvider({ children }: { children: ReactNode }) {
         sessionRef.current = next;
         setSession(next);
         setMinimized(false);
-        hadRemoteRef.current = false;
         ringingStartedAtRef.current = null;
         await join(conversationId);
       } catch (error) {
@@ -503,7 +500,22 @@ export function VoiceCallProvider({ children }: { children: ReactNode }) {
 
       if (event.type === 'accepted') {
         const byUserId = event.payload.byUserId;
-        const ringingPeers = dropRingingPeer(current.ringingPeers, byUserId);
+        let found = false;
+        const ringingPeers = current.ringingPeers.map((peer) => {
+          if (peer.userId !== byUserId) {
+            return peer;
+          }
+          found = true;
+          return { ...peer, connecting: true };
+        });
+        if (!found && byUserId !== user?.id) {
+          ringingPeers.push({
+            userId: byUserId,
+            nickname: 'Участник',
+            avatarUrl: null,
+            connecting: true,
+          });
+        }
         if (current.role === 'caller' && current.phase === 'outgoing') {
           stopCallRingtone();
           const next: Session = { ...current, phase: 'active', ringingPeers };
@@ -511,7 +523,11 @@ export function VoiceCallProvider({ children }: { children: ReactNode }) {
           setSession(next);
           return;
         }
-        if (ringingPeers.length !== current.ringingPeers.length) {
+        if (
+          found ||
+          ringingPeers.length !== current.ringingPeers.length ||
+          ringingPeers.some((peer, i) => peer.connecting !== current.ringingPeers[i]?.connecting)
+        ) {
           const next: Session = { ...current, ringingPeers };
           sessionRef.current = next;
           setSession(next);
@@ -594,7 +610,13 @@ export function VoiceCallProvider({ children }: { children: ReactNode }) {
     const ringingPeers = current.ringingPeers.filter((peer) => !liveIds.has(peer.userId));
     const hasRemote = participants.some((p) => !p.isLocal);
     const phaseChanged = current.phase === 'outgoing' && hasRemote;
-    const ringingChanged = ringingPeers.length !== current.ringingPeers.length;
+    const ringingChanged =
+      ringingPeers.length !== current.ringingPeers.length ||
+      ringingPeers.some(
+        (peer, i) =>
+          peer.userId !== current.ringingPeers[i]?.userId ||
+          peer.connecting !== current.ringingPeers[i]?.connecting,
+      );
     if (!phaseChanged && !ringingChanged) {
       return;
     }
@@ -613,37 +635,17 @@ export function VoiceCallProvider({ children }: { children: ReactNode }) {
     setSession(next);
   }, [participants]);
 
-  // Last remote left the LiveKit room — hang up so the server call actually ends.
-  useEffect(() => {
-    const current = sessionRef.current;
-    if (!current || current.phase !== 'active' || liveStatus !== 'connected') {
-      return;
-    }
-    const hasRemote = participants.some((p) => !p.isLocal);
-    if (hasRemote) {
-      hadRemoteRef.current = true;
-      return;
-    }
-    if (!hadRemoteRef.current) {
-      return;
-    }
-    const timer = setTimeout(() => {
-      const latest = sessionRef.current;
-      if (!latest || latest.callId !== current.callId || latest.phase !== 'active') {
-        return;
-      }
-      void hangup();
-    }, 1800);
-    return () => clearTimeout(timer);
-  }, [hangup, liveStatus, participants]);
+  // Solo lobby stays up — server ends the call after the wait/abandon timer (5 min).
 
   // Discord-like: after 30s unanswered invitees leave the overlay (pulse stops with them).
+  // Connecting peers (accepted, joining LiveKit) stay until they appear in the room.
   useEffect(() => {
     const current = session;
+    const unanswered = (current?.ringingPeers ?? []).filter((peer) => !peer.connecting);
     if (
       !current ||
       (current.phase !== 'outgoing' && current.phase !== 'active') ||
-      current.ringingPeers.length === 0
+      unanswered.length === 0
     ) {
       return;
     }
@@ -654,21 +656,27 @@ export function VoiceCallProvider({ children }: { children: ReactNode }) {
     const remaining = Math.max(0, RINGING_PEER_TIMEOUT_MS - (Date.now() - startedAt));
     const timer = setTimeout(() => {
       const latest = sessionRef.current;
-      if (!latest || latest.ringingPeers.length === 0) {
+      if (!latest) {
+        return;
+      }
+      const nextPeers = latest.ringingPeers.filter((peer) => peer.connecting);
+      if (nextPeers.length === latest.ringingPeers.length) {
         return;
       }
       stopCallRingtone();
-      ringingStartedAtRef.current = null;
+      if (nextPeers.length === 0) {
+        ringingStartedAtRef.current = null;
+      }
       const next: Session = {
         ...latest,
-        ringingPeers: [],
+        ringingPeers: nextPeers,
         phase: latest.phase === 'outgoing' ? 'active' : latest.phase,
       };
       sessionRef.current = next;
       setSession(next);
     }, remaining);
     return () => clearTimeout(timer);
-  }, [session?.callId, session?.phase, session?.ringingPeers.length]);
+  }, [session?.callId, session?.phase, session?.ringingPeers]);
 
   const minimize = useCallback(() => {
     if (!sessionRef.current) {
@@ -750,6 +758,7 @@ export function VoiceCallProvider({ children }: { children: ReactNode }) {
         id: peer.userId,
         name: peer.nickname,
         avatarUrl: peer.avatarUrl,
+        connecting: Boolean(peer.connecting),
       })),
     [session?.ringingPeers],
   );
@@ -841,7 +850,7 @@ export function VoiceCallProvider({ children }: { children: ReactNode }) {
           cameraOn={cameraOn}
           participants={participants}
           waitingPeers={waitingPeers}
-          urgentUntilById={urgentUntilById}
+          urgentById={urgentById}
           onToggleMute={() => void toggleMute()}
           onToggleDeafen={() => void toggleDeafen()}
           onToggleCamera={() => void handleToggleCamera()}
