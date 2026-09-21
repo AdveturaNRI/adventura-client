@@ -193,11 +193,11 @@ function createStyles(
     },
     cardDeckWide: {
       flexDirection: 'row',
+      flex: 1,
       minHeight: 0,
-      // Height comes from deckFrame when deckSize is set. Avoid flex:1 here —
-      // inside QuestionnaireHighlight (unbounded parent) it grows with content
-      // and paints over siblings under the preview.
-      alignSelf: 'stretch',
+      width: '100%',
+      height: '100%',
+      maxHeight: '100%',
     },
     photoWrap: {
       width: isDeckWide ? undefined : '100%',
@@ -516,6 +516,7 @@ export function UserCard({
             width: '100%',
             height: deckSize.height,
             maxHeight: deckSize.height,
+            minHeight: deckSize.height,
             flex: 0,
           }
       : undefined;
@@ -751,7 +752,12 @@ export function UserCard({
 
   const cardRadius = isDeckStacked ? 20 : CARD_SIZE_CONFIG[size].borderRadius;
   const highlighted = (
-    <QuestionnaireHighlight auraId={auraId} badges={badges} radius={cardRadius} overlay={false}>
+    <QuestionnaireHighlight
+      auraId={auraId}
+      badges={badges}
+      radius={cardRadius}
+      overlay={false}
+      style={deckFrame}>
       {card}
     </QuestionnaireHighlight>
   );

@@ -175,6 +175,7 @@ export function FinalStep({
             {
               width: deckSize.width,
               height: deckSize.height,
+              minHeight: deckSize.height,
               maxWidth: deckSize.width,
             },
           ]}>

@@ -37,6 +37,7 @@ type Props = {
   radius?: number;
   /** Cover children with particles. Off for анкеты — только кайма, фото само рисует ауру. */
   overlay?: boolean;
+  style?: object;
   children: ReactNode;
 };
 
@@ -45,23 +46,24 @@ export function QuestionnaireHighlight({
   badges,
   radius = 16,
   overlay = true,
+  style,
   children,
 }: Props) {
   const resolved = displayedAuraId(badges ?? [], auraId);
   if (resolved === 'none') {
-    return <>{children}</>;
+    return style ? <View style={style}>{children}</View> : <>{children}</>;
   }
 
   if (Platform.OS === 'web') {
     return (
-      <WebCardFx key={resolved} id={resolved} radius={radius} overlay={overlay}>
+      <WebCardFx key={resolved} id={resolved} radius={radius} overlay={overlay} style={style}>
         {children}
       </WebCardFx>
     );
   }
 
   return (
-    <NativeCardFx id={resolved} radius={radius}>
+    <NativeCardFx id={resolved} radius={radius} style={style}>
       {children}
     </NativeCardFx>
   );
@@ -71,11 +73,13 @@ function WebCardFx({
   id,
   radius,
   overlay,
+  style,
   children,
 }: {
   id: Exclude<QuestionnaireAuraId, 'none'>;
   radius: number;
   overlay: boolean;
+  style?: object;
   children: ReactNode;
 }) {
   ensureRewardsFxStyles();
@@ -87,7 +91,7 @@ function WebCardFx({
 
   return (
     <View
-      style={{ position: 'relative', borderRadius: radius, overflow: 'visible' }}
+      style={[{ position: 'relative', borderRadius: radius, overflow: 'visible' }, style]}
       {...webFxClass(`adv-card-fx adv-card-fx--${id}${wide ? ' is-wide' : ''}`)}>
       {id === 'void_runes' ? <FoundingDragonPeek wide={wide} /> : null}
       <View pointerEvents="none" {...webFxClass('adv-card-fx-glow')} style={styles.fxLayer} />
@@ -102,7 +106,14 @@ function WebCardFx({
       </View>
       <View
         {...webFxClass('adv-card-fx-body')}
-        style={{ position: 'relative', borderRadius: radius, overflow: 'hidden', zIndex: 1 }}>
+        style={{
+          position: 'relative',
+          borderRadius: radius,
+          overflow: 'hidden',
+          zIndex: 1,
+          height: '100%',
+          width: '100%',
+        }}>
         {children}
         {overlay ? <QuestionnaireAura auraId={id} /> : null}
       </View>
@@ -166,10 +177,12 @@ const styles = StyleSheet.create({
 function NativeCardFx({
   id,
   radius,
+  style,
   children,
 }: {
   id: Exclude<QuestionnaireAuraId, 'none'>;
   radius: number;
+  style?: object;
   children: ReactNode;
 }) {
   const pulse = useSharedValue(0.5);
@@ -182,7 +195,7 @@ function NativeCardFx({
   const color = QUESTIONNAIRE_AURAS[id].accent;
 
   return (
-    <View style={{ position: 'relative', borderRadius: radius }}>
+    <View style={[{ position: 'relative', borderRadius: radius }, style]}>
       <Animated.View
         pointerEvents="none"
         style={[
