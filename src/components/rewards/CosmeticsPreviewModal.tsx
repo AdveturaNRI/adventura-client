@@ -175,6 +175,8 @@ function createStyles(colors: ThemeColors, isDesktopWeb: boolean, bottomInset: n
     cardStage: {
       overflow: 'visible',
       padding: 10,
+      paddingBottom: 36,
+      paddingTop: 14,
     },
   });
 }

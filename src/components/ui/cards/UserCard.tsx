@@ -13,6 +13,7 @@ import { NameWithBadges } from '@/components/rewards/RewardBadge';
 import { UserCardIcon } from '@/components/ui/cards/UserCardIcon';
 import type { UserCardIconKey } from '@/components/ui/cards/user-card-icon-assets';
 import type { QuestionnaireAuraId, RewardBadgeType } from '@/data/rewards/catalog';
+import { displayedAuraId } from '@/data/rewards/catalog';
 import { FontSize, Radius, Sizes, Spacing, type ThemeColors } from '@/constants/theme';
 import { UNKNOWN_USER_PLACEHOLDER } from '@/constants/image-assets';
 import { useTheme } from '@/hooks/use-theme';
@@ -192,9 +193,11 @@ function createStyles(
     },
     cardDeckWide: {
       flexDirection: 'row',
-      flex: 1,
       minHeight: 0,
-      height: '100%',
+      // Height comes from deckFrame when deckSize is set. Avoid flex:1 here —
+      // inside QuestionnaireHighlight (unbounded parent) it grows with content
+      // and paints over siblings under the preview.
+      alignSelf: 'stretch',
     },
     photoWrap: {
       width: isDeckWide ? undefined : '100%',
@@ -437,6 +440,13 @@ function createStyles(
       flexDirection: 'row',
       alignItems: 'center',
       justifyContent: 'flex-end',
+      // Keep «Публичная» clear of oak rivets / mug corners.
+      paddingRight: 2,
+      paddingBottom: 2,
+    },
+    footerOak: {
+      paddingRight: 10,
+      paddingBottom: 6,
     },
   });
 }
@@ -491,8 +501,12 @@ export function UserCard({
       ? layout === 'deck'
         ? fillsDeck
           ? {
+              // Explicit height — don't rely on flex:1 through QuestionnaireHighlight
+              // (unbounded parent lets the card grow with bio and cover siblings).
               width: '100%',
-              flex: 1,
+              height: deckSize.height,
+              maxHeight: deckSize.height,
+              flex: 0,
               minHeight: 0,
             }
           : {
@@ -501,6 +515,8 @@ export function UserCard({
         : {
             width: '100%',
             height: deckSize.height,
+            maxHeight: deckSize.height,
+            flex: 0,
           }
       : undefined;
   const deckWidePhoto =
@@ -519,6 +535,8 @@ export function UserCard({
   const isDeckLayout = layout === 'deck' || layout === 'deckWide';
   const isDeckStacked = layout === 'deck';
   const showBio = bio !== '—' && bio.trim() !== tagline.trim();
+  const resolvedAura = displayedAuraId(badges ?? [], auraId);
+  const isOakCard = resolvedAura === 'oak_shield';
 
   const infoRows = useMemo<InfoRowSpec[]>(() => {
     const timezoneLabel = playInfo.timezone
@@ -615,7 +633,7 @@ export function UserCard({
         <>
           <View style={styles.sectionDivider} />
 
-          <View style={styles.footer}>
+          <View style={[styles.footer, isOakCard ? styles.footerOak : null]}>
             <Badge label={visibility} variant={visibilityVariant} style={styles.visibilityBadge} />
           </View>
         </>

@@ -257,7 +257,7 @@ export const REWARD_BADGES: Record<RewardBadgeType, RewardBadgeSpec> = {
     id: 'tavern_keeper',
     label: 'Хозяин таверны',
     shortLabel: 'Таверна',
-    tooltip: 'Создал собственный клуб и открыл двери для новых приключений.',
+    tooltip: 'Владелец клуба. Выдаётся вручную из админки.',
     emoji: '🍺',
     icon: 'beer',
     accent: '#C47A3A',
@@ -840,26 +840,20 @@ export function hasProfileCosmetics(badges: RewardBadgeType[]): boolean {
 }
 
 export function displayedFrameId(
-  badges: RewardBadgeType[],
+  _badges: RewardBadgeType[],
   equipped?: AvatarFrameId | string | null,
 ): AvatarFrameId {
-  if (equipped === undefined) {
-    return frameIdForBadges(badges);
-  }
-  if (equipped === null || equipped === 'none') {
+  if (equipped == null || equipped === 'none') {
     return 'none';
   }
   return isAvatarFrameId(equipped) ? equipped : 'none';
 }
 
 export function displayedAuraId(
-  badges: RewardBadgeType[],
+  _badges: RewardBadgeType[],
   equipped?: QuestionnaireAuraId | string | null,
 ): QuestionnaireAuraId {
-  if (equipped === undefined) {
-    return auraIdForBadges(badges);
-  }
-  if (equipped === null || equipped === 'none') {
+  if (equipped == null || equipped === 'none') {
     return 'none';
   }
   return isQuestionnaireAuraId(equipped) ? equipped : 'none';

@@ -10,6 +10,10 @@ import Animated, {
 } from 'react-native-reanimated';
 
 import { AleMugs } from '@/components/rewards/AleMugs';
+import {
+  CARD_FX_MUG_SIZE_NARROW,
+  CARD_FX_MUG_SIZE_WIDE,
+} from '@/components/rewards/card-fx-layout';
 import { QuestionnaireAura } from '@/components/rewards/QuestionnaireAura';
 import { ensureRewardsFxStyles, webFxClass } from '@/components/rewards/rewards-fx';
 import {
@@ -19,6 +23,14 @@ import {
   type RewardBadgeType,
 } from '@/data/rewards/catalog';
 
+export {
+  CARD_FX_MUG_SIZE_NARROW,
+  CARD_FX_MUG_SIZE_WIDE,
+  cardMugHang,
+  getCardFxOverhang,
+  type CardFxOverhang,
+} from '@/components/rewards/card-fx-layout';
+
 type Props = {
   auraId?: QuestionnaireAuraId | null;
   badges?: RewardBadgeType[] | null;
@@ -27,7 +39,6 @@ type Props = {
   overlay?: boolean;
   children: ReactNode;
 };
-
 
 export function QuestionnaireHighlight({
   auraId,
@@ -72,11 +83,13 @@ function WebCardFx({
     ensureRewardsFxStyles();
   }, []);
 
+  const wide = !overlay;
+
   return (
     <View
       style={{ position: 'relative', borderRadius: radius, overflow: 'visible' }}
-      {...webFxClass(`adv-card-fx adv-card-fx--${id}${overlay ? '' : ' is-wide'}`)}>
-      {id === 'void_runes' ? <FoundingDragonPeek wide={!overlay} /> : null}
+      {...webFxClass(`adv-card-fx adv-card-fx--${id}${wide ? ' is-wide' : ''}`)}>
+      {id === 'void_runes' ? <FoundingDragonPeek wide={wide} /> : null}
       <View pointerEvents="none" {...webFxClass('adv-card-fx-glow')} style={styles.fxLayer} />
       <View
         pointerEvents="none"
@@ -93,7 +106,7 @@ function WebCardFx({
         {children}
         {overlay ? <QuestionnaireAura auraId={id} /> : null}
       </View>
-      {id === 'oak_shield' ? <OakCardExtras wide={!overlay} /> : null}
+      {id === 'oak_shield' ? <OakCardExtras wide={wide} /> : null}
     </View>
   );
 }
@@ -139,7 +152,7 @@ function OakCardExtras({ wide }: { wide: boolean }) {
           style={{ position: 'absolute', ...pos }}
         />
       ))}
-      <AleMugs variant="card" size={wide ? 64 : 40} />
+      <AleMugs variant="card" size={wide ? CARD_FX_MUG_SIZE_WIDE : CARD_FX_MUG_SIZE_NARROW} />
     </>
   );
 }

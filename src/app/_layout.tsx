@@ -49,8 +49,8 @@ export default function RootLayout() {
         <ThemeProvider>
           <AuthProvider>
             <RealtimeProvider>
-              <VoiceCallProvider>
-                <ProfileProvider>
+              <ProfileProvider>
+                <VoiceCallProvider>
                   <PushPromptProvider>
                     <View style={rootStyles.container}>
                       <YandexMetrikaTracker />
@@ -59,8 +59,8 @@ export default function RootLayout() {
                       <GlobalLoadingOverlay />
                     </View>
                   </PushPromptProvider>
-                </ProfileProvider>
-              </VoiceCallProvider>
+                </VoiceCallProvider>
+              </ProfileProvider>
             </RealtimeProvider>
           </AuthProvider>
         </ThemeProvider>

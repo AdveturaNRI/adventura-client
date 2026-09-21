@@ -28,7 +28,6 @@ import { CitySearchField } from '@/components/questionnaire/CitySearchField';
 import { PhotoCropEditor } from '@/components/questionnaire/PhotoCropEditor';
 import { Button, Input, TextArea, toast } from '@/components/ui';
 import { FontSize, Radius, Spacing, type ThemeColors } from '@/constants/theme';
-import { useProfile } from '@/context/ProfileContext';
 import { useTheme } from '@/hooks/use-theme';
 import { useThemedStyles } from '@/hooks/use-themed-styles';
 import {
@@ -331,7 +330,6 @@ export default function CreateClubScreen() {
   const clubId = typeof rawClubId === 'string' ? rawClubId : null;
   const isEditing = Boolean(clubId);
   const colors = useTheme();
-  const { profile, refreshProfile } = useProfile();
   const insets = useSafeAreaInsets();
   const isDesktopWeb = useIsDesktopWeb();
   const hideBack = useIsDesktopSidebarVisible();
@@ -691,16 +689,7 @@ export default function CreateClubScreen() {
         await saveClubGallery(club.id, galleryUris, originalGalleryUrls);
       }
 
-      toast.success(
-        isEditing
-          ? 'Изменения сохранены'
-          : profile?.perks?.badges?.includes('tavern_keeper')
-            ? 'Клуб создан'
-            : 'Клуб создан — открыта награда «Хозяин таверны»',
-      );
-      if (!isEditing) {
-        void refreshProfile();
-      }
+      toast.success(isEditing ? 'Изменения сохранены' : 'Клуб создан');
       router.replace(isEditing ? `/clubs/${club.id}` : '/my-clubs');
     } catch (error) {
       toast.error(localizeErrorMessage(error, 'Не удалось сохранить клуб'));

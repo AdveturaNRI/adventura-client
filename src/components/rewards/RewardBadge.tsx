@@ -298,11 +298,14 @@ export function NameWithBadges({
     );
   }
 
+  const hasBadges = (badges?.length ?? 0) > 0;
+
   return (
     <View style={[styles.nameRow, align === 'center' && styles.nameRowCenter]}>
       <Text style={[textStyle, styles.inlineName]} numberOfLines={1}>
         {name}
       </Text>
+      {hasBadges ? <View style={styles.nameBadgeDivider} /> : null}
       {row}
       {suffix}
     </View>
@@ -338,13 +341,20 @@ const styles = StyleSheet.create({
   nameRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    gap: 10,
     minWidth: 0,
     flexShrink: 1,
     maxWidth: '100%',
   },
   nameRowCenter: {
     justifyContent: 'center',
+  },
+  nameBadgeDivider: {
+    width: StyleSheet.hairlineWidth,
+    alignSelf: 'stretch',
+    minHeight: 14,
+    marginVertical: 2,
+    backgroundColor: 'rgba(128, 128, 128, 0.45)',
   },
   inlineName: {
     flexShrink: 1,

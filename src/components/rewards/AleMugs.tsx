@@ -1,6 +1,7 @@
 import { Image } from 'expo-image';
 import { Platform, StyleSheet, View, type ViewStyle } from 'react-native';
 
+import { cardMugHang } from '@/components/rewards/card-fx-layout';
 import { webFxClass } from '@/components/rewards/rewards-fx';
 
 const ALE_MUG = require('../../../assets/rewards/ale-mug.png');
@@ -29,10 +30,12 @@ function mugBox(size: number, variant: Variant) {
 
 function mugPositions(variant: Variant, mug: { width: number; height: number }): { left: ViewStyle; right: ViewStyle } {
   if (variant === 'card') {
-    const hang = Math.round(mug.height * 0.28);
+    // Hang mostly below the wood rim so footer badges stay readable.
+    const hang = cardMugHang(mug.height);
+    const side = -Math.round(mug.width * 0.12);
     return {
-      left: { left: '3%', bottom: -hang },
-      right: { right: '3%', bottom: -hang },
+      left: { left: side, bottom: -hang },
+      right: { right: side, bottom: -hang },
     };
   }
   if (variant === 'crit') {

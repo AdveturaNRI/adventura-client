@@ -13,7 +13,9 @@ import { useIsDesktopSidebarVisible } from '@/components/navigation/DesktopTheme
 import { MobileBackButton } from '@/components/navigation/MobileBackButton';
 import { ScreenTransition } from '@/components/navigation/ScreenTransition';
 import { Button, UserCard, toast } from '@/components/ui';
+import { getCardFxOverhang } from '@/components/rewards/card-fx-layout';
 import { FontSize, Spacing, type ThemeColors } from '@/constants/theme';
+import { displayedAuraId } from '@/data/rewards/catalog';
 import { useAuth } from '@/context/AuthContext';
 import { useTheme } from '@/hooks/use-theme';
 import { useThemedStyles } from '@/hooks/use-themed-styles';
@@ -34,7 +36,9 @@ function createStyles(
   topPadding: number,
   bottomPadding: number,
   isDesktopWeb: boolean,
+  cardOverhang: { top: number; bottom: number; left: number; right: number },
 ) {
+  const sidePad = Math.max(cardOverhang.left, cardOverhang.right);
   return StyleSheet.create({
     root: {
       flex: 1,
@@ -83,7 +87,9 @@ function createStyles(
       maxWidth: 480,
       alignSelf: 'center',
       overflow: 'visible',
-      paddingTop: 122,
+      paddingTop: cardOverhang.top,
+      paddingBottom: cardOverhang.bottom,
+      paddingHorizontal: sidePad,
     },
     actions: {
       width: '100%',
@@ -123,14 +129,19 @@ export default function UserProfileScreen() {
   const { user } = useAuth();
   const topPadding = isDesktopWebSidebar ? Spacing.xl : insets.top + Spacing.md;
   const bottomPadding = isDesktopWebSidebar ? Spacing.lg : insets.bottom;
-  const styles = useThemedStyles((themeColors) =>
-    createStyles(themeColors, topPadding, bottomPadding, isDesktopWebSidebar),
-  );
-
   const [item, setItem] = useState<WandererCardItem | null>(null);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
   const [isBusy, setIsBusy] = useState(false);
+
+  const cardAura = displayedAuraId(
+    item?.badges ?? [],
+    item?.questionnaireAuraId,
+  );
+  const cardOverhang = getCardFxOverhang(cardAura, true);
+  const styles = useThemedStyles((themeColors) =>
+    createStyles(themeColors, topPadding, bottomPadding, isDesktopWebSidebar, cardOverhang),
+  );
 
   const loadCard = useCallback(async () => {
     if (!userId) {
