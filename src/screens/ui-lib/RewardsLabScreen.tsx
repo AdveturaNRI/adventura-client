@@ -33,6 +33,7 @@ import {
   skinAccent,
   type DiceSkinId,
   type QuestionnaireAuraId,
+  type RewardBadgeType,
 } from '@/data/rewards/catalog';
 import type { UserCardDeckSize } from '@/components/ui/cards/UserCard';
 import { useTheme } from '@/hooks/use-theme';
@@ -113,6 +114,32 @@ function createStyles(colors: ThemeColors, isDesktopWeb: boolean) {
       color: colors.textMuted,
       lineHeight: FontSize.label * 1.5,
       maxWidth: 640,
+    },
+    filterRow: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: 8,
+    },
+    filterChip: {
+      minHeight: 34,
+      paddingHorizontal: 12,
+      borderRadius: Radius.pill,
+      borderWidth: 1,
+      borderColor: colors.primary,
+      backgroundColor: `${colors.primary}14`,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    filterChipActive: {
+      backgroundColor: colors.primary,
+    },
+    filterChipLabel: {
+      fontSize: FontSize.caption,
+      fontWeight: '700',
+      color: colors.primary,
+    },
+    filterChipLabelActive: {
+      color: colors.onPrimary,
     },
     section: {
       gap: Spacing.md,
@@ -310,6 +337,12 @@ function createStyles(colors: ThemeColors, isDesktopWeb: boolean) {
 }
 
 const LAB_DICE_SKINS: DiceSkinId[] = [...SHOWCASE_DICE_SKIN_IDS];
+type LabFilter = 'all' | RewardBadgeType;
+
+const LAB_FILTERS: { id: LabFilter; label: string }[] = [
+  { id: 'all', label: 'Все' },
+  ...REWARD_BADGE_TYPES.map((id) => ({ id, label: REWARD_BADGES[id].shortLabel })),
+];
 
 function LabAuraCard({
   auraId,
@@ -363,11 +396,27 @@ export default function RewardsLabScreen() {
   const photo = avatarUrl ?? DEMO_AVATAR;
   const nickname = user?.nickname ?? 'Пионер';
   const stageRef = useRef<DiceStageHandle>(null);
+  const [filter, setFilter] = useState<LabFilter>('all');
   const [activeSkin, setActiveSkin] = useState<DiceSkinId>('alpha_pioneer');
   const [stageReady, setStageReady] = useState(false);
   const [rolling, setRolling] = useState(false);
   const [critFlash, setCritFlash] = useState(false);
   const [lastRoll, setLastRoll] = useState<number | null>(null);
+
+  const badges =
+    filter === 'all' ? [...REWARD_BADGE_TYPES] : ([filter] as RewardBadgeType[]);
+  const frames =
+    filter === 'all'
+      ? SHOWCASE_AVATAR_FRAME_IDS
+      : ([REWARD_BADGES[filter].frameId].filter((id) => id !== 'none') as typeof SHOWCASE_AVATAR_FRAME_IDS);
+  const auras =
+    filter === 'all'
+      ? SHOWCASE_AURA_IDS
+      : ([REWARD_BADGES[filter].auraId].filter((id) => id !== 'none') as typeof SHOWCASE_AURA_IDS);
+  const skins =
+    filter === 'all'
+      ? LAB_DICE_SKINS
+      : ([REWARD_BADGES[filter].diceSkinId] as DiceSkinId[]);
 
   useEffect(() => {
     if (!stageReady) {
@@ -412,15 +461,35 @@ export default function RewardsLabScreen() {
           <Text style={styles.kicker}>Витрина</Text>
           <Text style={styles.title}>Награды первопроходцев</Text>
           <Text style={styles.lead}>
-            Статусы с рамкой, свечением анкеты и скинами кубиков. Награды выдаются вручную.
+            Статусы с рамкой, свечением анкеты и скинами кубиков.
           </Text>
+          <View style={styles.filterRow}>
+            {LAB_FILTERS.map((item) => {
+              const active = filter === item.id;
+              return (
+                <Pressable
+                  key={item.id}
+                  onPress={() => {
+                    setFilter(item.id);
+                    if (item.id !== 'all') {
+                      setActiveSkin(REWARD_BADGES[item.id].diceSkinId);
+                    }
+                  }}
+                  style={[styles.filterChip, active && styles.filterChipActive]}>
+                  <Text style={[styles.filterChipLabel, active && styles.filterChipLabelActive]}>
+                    {item.label}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
         </View>
 
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Бейджи</Text>
-          <RewardBadgeRow badges={[...REWARD_BADGE_TYPES]} size={18} />
+          <RewardBadgeRow badges={badges} size={18} />
           <View style={styles.chatPreview}>
-            {REWARD_BADGE_TYPES.map((badge) => (
+            {badges.map((badge) => (
               <View key={badge} style={styles.chatLine}>
                 <AvatarFrame size={30} badges={[badge]}>
                   <UserAvatar nickname="Mira" avatarUrl={DEMO_AVATAR} size={30} />
@@ -448,14 +517,16 @@ export default function RewardsLabScreen() {
                     nickname={nickname}
                     avatarUrl={photo}
                     size={CALL_AVATAR_SIZE}
-                    badges={[...REWARD_BADGE_TYPES]}
-                    frameId="alpha_runes"
+                    badges={badges}
+                    frameId={
+                      filter === 'all' ? 'alpha_runes' : REWARD_BADGES[filter].frameId
+                    }
                   />
                 </View>
               </View>
               <NameWithBadges
                 name={`${nickname} (вы)`}
-                badges={[...REWARD_BADGE_TYPES]}
+                badges={badges}
                 textStyle={styles.callName}
                 badgeSize={12}
                 layout="stack"
@@ -475,15 +546,19 @@ export default function RewardsLabScreen() {
 
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Рамки аватара</Text>
-          <Text style={styles.sectionHint}>
-            First Wave — голубой блик по кольцу, без фейерверков. Остальные рамки уже со своими штуками: лепестки, молнии, шестерни.
-          </Text>
+          {filter === 'all' ? (
+            <Text style={styles.sectionHint}>
+              First Wave — голубой блик по кольцу, без фейерверков. Остальные рамки уже со своими штуками: лепестки, молнии, шестерни.
+            </Text>
+          ) : null}
           <View style={styles.row}>
-            <View style={styles.cell}>
-              <UserAvatar nickname={nickname} avatarUrl={photo} size={96} />
-              <Text style={styles.frameCaption}>Без рамки</Text>
-            </View>
-            {SHOWCASE_AVATAR_FRAME_IDS.map((frameId) => {
+            {filter === 'all' ? (
+              <View style={styles.cell}>
+                <UserAvatar nickname={nickname} avatarUrl={photo} size={96} />
+                <Text style={styles.frameCaption}>Без рамки</Text>
+              </View>
+            ) : null}
+            {frames.map((frameId) => {
               const spec = AVATAR_FRAMES[frameId];
               return (
                 <View key={frameId} style={styles.cell}>
@@ -497,48 +572,58 @@ export default function RewardsLabScreen() {
           </View>
         </View>
 
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Выделение анкеты</Text>
-          <Text style={styles.sectionHint}>
-            У каждой ауры свой приём: сетка, лепестки, дождь, голограмма, магма.
-          </Text>
-          <View style={styles.cardGrid}>
-            {SHOWCASE_AURA_IDS.map((auraId) => (
-              <LabAuraCard
-                key={auraId}
-                auraId={auraId}
-                nickname={nickname}
-                photo={photo}
-                style={styles.cardStage}
-              />
-            ))}
+        {auras.length > 0 ? (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Выделение анкеты</Text>
+            {filter === 'all' ? (
+              <Text style={styles.sectionHint}>
+                У каждой ауры свой приём: сетка, лепестки, дождь, голограмма, магма.
+              </Text>
+            ) : null}
+            <View style={styles.cardGrid}>
+              {auras.map((auraId) => (
+                <LabAuraCard
+                  key={auraId}
+                  auraId={auraId}
+                  nickname={nickname}
+                  photo={photo}
+                  style={styles.cardStage}
+                />
+              ))}
+            </View>
+            {filter === 'all' ? (
+              <>
+                <Text style={styles.sectionHint}>
+                  Горизонтально — так карточка лежит в колоде на компьютере.
+                </Text>
+                <View style={styles.wideList}>
+                  {auras.map((auraId) => (
+                    <LabAuraCard
+                      key={`wide-${auraId}`}
+                      auraId={auraId}
+                      nickname={nickname}
+                      photo={photo}
+                      layout="deckWide"
+                      deckSize={wideDeckSize}
+                      style={[styles.wideStage, { width: wideDeckSize.width, height: wideDeckSize.height }]}
+                    />
+                  ))}
+                </View>
+              </>
+            ) : null}
           </View>
-          <Text style={styles.sectionHint}>
-            Горизонтально — так карточка лежит в колоде на компьютере.
-          </Text>
-          <View style={styles.wideList}>
-            {SHOWCASE_AURA_IDS.map((auraId) => (
-              <LabAuraCard
-                key={`wide-${auraId}`}
-                auraId={auraId}
-                nickname={nickname}
-                photo={photo}
-                layout="deckWide"
-                deckSize={wideDeckSize}
-                style={[styles.wideStage, { width: wideDeckSize.width, height: wideDeckSize.height }]}
-              />
-            ))}
-          </View>
-        </View>
+        ) : null}
 
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Скины кубиков</Text>
-          <Text style={styles.sectionHint}>
-            Не просто цвет: у Первопроходца золотой ореол, у Истребителя багов сканлайны, у Первого мастера — фиолетовое пламя,
-            у Хозяина таверны — дуб и эль.
-          </Text>
+          {filter === 'all' ? (
+            <Text style={styles.sectionHint}>
+              Не просто цвет: у Первопроходца золотой ореол, у Истребителя багов сканлайны, у Первого мастера — фиолетовое пламя,
+              у Хозяина таверны — дуб и эль.
+            </Text>
+          ) : null}
           <View style={styles.skinGrid}>
-            {LAB_DICE_SKINS.map((id) => {
+            {skins.map((id) => {
               const spec = DICE_SKINS[id];
               const active = activeSkin === id;
               return (

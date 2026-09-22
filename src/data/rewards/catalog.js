@@ -518,11 +518,12 @@ export function wildcardAuraIds() {
 export function wildcardDiceSkinIds() {
     return DICE_SKIN_IDS.filter((id) => id !== 'standard' && !DICE_SKINS[id].exclusive);
 }
+/** Highest → lowest. Хозяин таверны > Первый мастер > Первопроходец > Истребитель багов > Первая волна */
 const FRAME_PRIORITY = [
+    'tavern_keeper',
     'founding_dm',
     'alpha_tester',
     'bug_hunter',
-    'tavern_keeper',
     'early_arrival',
 ];
 export function lockedRewardToast(badge) {
