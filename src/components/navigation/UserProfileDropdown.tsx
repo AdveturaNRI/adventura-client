@@ -13,7 +13,7 @@ import {
 import { UserAvatar } from '@/components/navigation/UserAvatar';
 import { FontSize, Spacing, type ThemeColors } from '@/constants/theme';
 import { useAuth } from '@/context/AuthContext';
-import { useMyAvatarUrl } from '@/context/ProfileContext';
+import { useMyAvatarUrl, useProfile } from '@/context/ProfileContext';
 import { useTheme } from '@/hooks/use-theme';
 import { useThemedStyles } from '@/hooks/use-themed-styles';
 
@@ -92,6 +92,7 @@ function createStyles(colors: ThemeColors) {
 export function UserProfileDropdown() {
   const router = useRouter();
   const { user, signOut } = useAuth();
+  const { profile } = useProfile();
   const avatarUrl = useMyAvatarUrl();
   const colors = useTheme();
   const styles = useThemedStyles(createStyles);
@@ -154,7 +155,13 @@ export function UserProfileDropdown() {
           accessibilityState={{ expanded: isOpen }}
           onPress={isOpen ? closeMenu : openMenu}
           style={({ pressed }) => [styles.trigger, pressed && styles.triggerPressed]}>
-          <UserAvatar nickname={user.nickname} avatarUrl={avatarUrl} size={36} />
+          <UserAvatar
+            nickname={user.nickname}
+            avatarUrl={avatarUrl}
+            size={36}
+            badges={profile?.perks?.visibleBadges ?? profile?.perks?.badges}
+            frameId={profile?.perks ? profile.perks.avatarFrameId : undefined}
+          />
           <Text style={styles.nickname} numberOfLines={1}>
             {user.nickname}
           </Text>

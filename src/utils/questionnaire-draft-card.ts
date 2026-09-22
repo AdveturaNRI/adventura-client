@@ -1,9 +1,15 @@
 import type { UserCardProps } from '@/components/ui/cards/UserCard';
+import { sanitizeBadges, type QuestionnaireAuraId, type RewardBadgeType } from '@/data/rewards/catalog';
 import { formatAvailability } from '@/screens/questionnaire/availability';
 import type { QuestionnaireDraft } from '@/screens/questionnaire/types';
 import { roleChoiceToRoles } from '@/screens/questionnaire/types';
 import { DEFAULT_TIMEZONE } from '@/utils/timezones';
 import { formatUserCardVisibility } from '@/utils/user-card-format';
+
+type QuestionnaireCardCosmetics = {
+  auraId?: QuestionnaireAuraId | string | null;
+  badges?: RewardBadgeType[] | null;
+};
 
 function parseAge(age: string): number | null {
   const trimmed = age.trim();
@@ -17,7 +23,10 @@ function parseAge(age: string): number | null {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
-export function questionnaireDraftToUserCardProps(draft: QuestionnaireDraft): UserCardProps {
+export function questionnaireDraftToUserCardProps(
+  draft: QuestionnaireDraft,
+  cosmetics?: QuestionnaireCardCosmetics,
+): UserCardProps {
   const parsedAge = parseAge(draft.age);
   const visibility = formatUserCardVisibility(draft.isPublic);
   const roles = draft.role ? roleChoiceToRoles(draft.role) : ['Игрок'];
@@ -46,5 +55,10 @@ export function questionnaireDraftToUserCardProps(draft: QuestionnaireDraft): Us
     bio,
     visibility: visibility.label,
     visibilityVariant: visibility.variant,
+    badges: sanitizeBadges(cosmetics?.badges),
+    auraId:
+      cosmetics?.auraId === undefined
+        ? undefined
+        : ((cosmetics.auraId as UserCardProps['auraId']) ?? 'none'),
   };
 }

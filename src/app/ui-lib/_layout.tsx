@@ -10,6 +10,7 @@ export default function UiLibLayout() {
         ...stackScreenOptions,
       }}>
       <Stack.Screen name="components" />
+      <Stack.Screen name="rewards" />
     </Stack>
   );
 }

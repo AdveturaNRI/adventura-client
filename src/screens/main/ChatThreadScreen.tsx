@@ -31,6 +31,8 @@ import { resolveChatReturnHref } from '@/components/navigation/navigate-back';
 import { UserAvatar } from '@/components/navigation/UserAvatar';
 import { useIsDesktopSidebarVisible, useIsDesktopWeb } from '@/components/navigation/DesktopThemeToggle';
 import { ScreenTransition } from '@/components/navigation/ScreenTransition';
+import { avatarFrameOuterSize } from '@/components/rewards/AvatarFrame';
+import { NameWithBadges } from '@/components/rewards/RewardBadge';
 import { BlockUserDialog } from '@/components/chats/BlockUserDialog';
 import { ChatAlbumGrid } from '@/components/chats/ChatAlbumGrid';
 import { ChatBackgroundLayer } from '@/components/chats/ChatBackgroundLayer';
@@ -55,7 +57,11 @@ import { ChatAudioPlayer } from '@/components/chats/ChatAudioPlayer';
 import { ChatVoiceComposer } from '@/components/chats/ChatVoiceComposer';
 import { CrownOffIcon } from '@/components/chats/CrownOffIcon';
 import { DeleteChatDialog } from '@/components/chats/DeleteChatDialog';
+import { AddGroupMembersDialog } from '@/components/chats/AddGroupMembersDialog';
+import { contactsFromConversations } from '@/components/chats/CreateGroupDialog';
 import { GroupMembersSheet } from '@/components/chats/GroupMembersSheet';
+import { RenameGroupDialog } from '@/components/chats/RenameGroupDialog';
+import { copyTextToClipboard } from '@/components/gm-toolkit/copyText';
 import { toast } from '@/components/ui';
 import { FontSize, Radius, Spacing } from '@/constants/theme';
 import type { ThemeColors } from '@/constants/theme';
@@ -63,6 +69,7 @@ import { MAX_UPLOAD_SIZE_MB, MAX_UPLOAD_SIZE_MESSAGE } from '@/constants/upload.
 import { useAuth } from '@/context/AuthContext';
 import { usePushPrompt } from '@/context/PushPromptContext';
 import { useRealtime } from '@/context/RealtimeContext';
+import { useVoiceCall } from '@/context/VoiceCallContext';
 import { useVoicePlayback, type ChatVoiceQueueItem } from '@/context/VoicePlaybackContext';
 import { useTheme, useThemePreference } from '@/hooks/use-theme';
 import { useThemedStyles } from '@/hooks/use-themed-styles';
@@ -72,6 +79,12 @@ import {
   listMessages,
   listChatMembers,
   leaveGroup,
+  renameGroupChat,
+  addGroupMembers,
+  removeGroupMember,
+  setGroupMemberRole,
+  transferGroupOwnership,
+  deleteGroupChat,
   markConversationRead,
   sendChatMessage,
   sendChatDiceRoll,
@@ -81,8 +94,10 @@ import {
   deleteConversation,
   MAX_CHAT_ATTACHMENTS,
   normalizeMessageAttachments,
+  getActiveChatVoiceCall,
 } from '@/services/chats/chatsApi';
 import type {
+  ActiveChatVoiceCall,
   ChatAttachment,
   ChatAttachmentKind,
   ChatMember,
@@ -104,6 +119,7 @@ import {
 import { setFocusedChatConversation } from '@/utils/chat-alerts';
 import { localizeErrorMessage } from '@/utils/localizeError';
 import { shouldSendChatOnEnter } from '@/utils/chat-enter-key';
+import { beginMicrophonePrimeFromGesture } from '@/utils/voice-media-devices';
 import {
   getCachedFileTooLargeMessage,
   getCachedUploadLimits,
@@ -360,7 +376,8 @@ function isSystemChatMessage(message: ChatMessage) {
     kind === 'favorite_removed' ||
     kind === 'user_blocked' ||
     kind === 'user_unblocked' ||
-    kind === 'game_deleted'
+    kind === 'game_deleted' ||
+    kind === 'missed_voice_call'
   );
 }
 
@@ -414,6 +431,24 @@ function buildChatTimeline(
   }
 
   return items;
+}
+
+/** Одинаковый путь (игнор query) — оставляем старый url, чтобы Image не перезагружался. */
+function stableAvatarUrl(prevUrl?: string | null, nextUrl?: string | null) {
+  const prev = prevUrl?.trim() || null;
+  const next = nextUrl?.trim() || null;
+  if (!prev) {
+    return next;
+  }
+  if (!next) {
+    return prev;
+  }
+  if (prev === next) {
+    return prev;
+  }
+  const prevPath = prev.split('?')[0];
+  const nextPath = next.split('?')[0];
+  return prevPath === nextPath ? prev : next;
 }
 
 function formatLastSeen(online: boolean, lastSeenAt: string | null) {
@@ -510,9 +545,12 @@ function createStyles(colors: ThemeColors, bottomPad: number, isDark: boolean) {
       zIndex: 2,
     },
     headerAvatarWrap: {
-      width: 40,
-      height: 40,
+      width: avatarFrameOuterSize(36),
+      height: avatarFrameOuterSize(36),
       flexShrink: 0,
+      alignItems: 'center',
+      justifyContent: 'center',
+      overflow: 'visible',
     },
     headerAvatar: {
       width: 40,
@@ -576,19 +614,20 @@ function createStyles(colors: ThemeColors, bottomPad: number, isDark: boolean) {
       maxWidth: '100%',
     },
     authorAvatarCol: {
-      width: 30,
+      width: avatarFrameOuterSize(30),
       marginRight: 8,
       alignItems: 'center',
       justifyContent: 'flex-end',
       alignSelf: 'flex-end',
       paddingBottom: 2,
+      overflow: 'visible',
     },
     authorAvatarButton: {
-      borderRadius: 15,
+      overflow: 'visible',
     },
     authorAvatarSpacer: {
-      width: 30,
-      height: 30,
+      width: avatarFrameOuterSize(30),
+      height: avatarFrameOuterSize(30),
     },
     headerMenuButton: {
       width: 36,
@@ -597,6 +636,73 @@ function createStyles(colors: ThemeColors, bottomPad: number, isDark: boolean) {
       alignItems: 'center',
       justifyContent: 'center',
       flexShrink: 0,
+    },
+    headerCallButton: {
+      width: 36,
+      height: 36,
+      borderRadius: 18,
+      alignItems: 'center',
+      justifyContent: 'center',
+      flexShrink: 0,
+    },
+    headerCallButtonActive: {
+      backgroundColor: 'rgba(21, 122, 254, 0.14)',
+    },
+    voiceJoinBanner: {
+      marginHorizontal: Spacing.md,
+      marginTop: Spacing.sm,
+      marginBottom: 2,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 12,
+      paddingVertical: 10,
+      paddingHorizontal: 12,
+      borderRadius: 14,
+      borderWidth: 1,
+      borderColor: 'rgba(21, 122, 254, 0.28)',
+      backgroundColor: 'rgba(21, 122, 254, 0.1)',
+    },
+    voiceJoinIcon: {
+      width: 36,
+      height: 36,
+      borderRadius: 18,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: 'rgba(21, 122, 254, 0.16)',
+      flexShrink: 0,
+    },
+    voiceJoinCopy: {
+      flex: 1,
+      minWidth: 0,
+      gap: 2,
+    },
+    voiceJoinTitle: {
+      fontSize: FontSize.label,
+      fontWeight: '700',
+      color: colors.primary,
+    },
+    voiceJoinHint: {
+      fontSize: FontSize.caption,
+      color: colors.primary,
+      opacity: 0.85,
+      lineHeight: FontSize.caption * 1.35,
+    },
+    voiceJoinButton: {
+      minHeight: 34,
+      paddingHorizontal: 14,
+      borderRadius: Radius.pill,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: colors.primary,
+      flexShrink: 0,
+    },
+    voiceJoinButtonPressed: {
+      opacity: 0.88,
+    },
+    voiceJoinButtonLabel: {
+      fontSize: 12,
+      fontWeight: '700',
+      color: '#FFFFFF',
     },
     favoriteInvite: {
       marginHorizontal: Spacing.md,
@@ -684,6 +790,39 @@ function createStyles(colors: ThemeColors, bottomPad: number, isDark: boolean) {
       alignItems: 'center',
       paddingVertical: 6,
       paddingHorizontal: 8,
+    },
+    missedCallNotice: {
+      maxWidth: '100%',
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+      paddingVertical: 8,
+      paddingHorizontal: 12,
+      borderRadius: 14,
+      borderWidth: 1,
+      borderColor: 'rgba(21, 122, 254, 0.22)',
+      backgroundColor: 'rgba(21, 122, 254, 0.1)',
+    },
+    missedCallIconWrap: {
+      width: 26,
+      height: 26,
+      borderRadius: 13,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: 'rgba(21, 122, 254, 0.16)',
+    },
+    missedCallIcon: {
+      transform: [{ rotate: '135deg' }],
+    },
+    missedCallText: {
+      fontSize: FontSize.caption,
+      fontWeight: '700',
+    },
+    missedCallTime: {
+      fontSize: 11,
+      fontWeight: '600',
+      opacity: 0.85,
+      marginLeft: 2,
     },
     dateDividerRow: {
       width: '100%',
@@ -996,6 +1135,7 @@ function createStyles(colors: ThemeColors, bottomPad: number, isDark: boolean) {
       flexDirection: 'row',
       alignItems: 'center',
       gap: 3,
+      minHeight: 14,
       paddingBottom: 1,
     },
     metaTime: {
@@ -1198,7 +1338,7 @@ export default function ChatThreadScreen() {
   const hasDesktopSidebar = useIsDesktopSidebarVisible();
   const { user } = useAuth();
   const { requestAfterFirstMessage } = usePushPrompt();
-  const { lastConversationUpdate, lastConversationRead, lastConversationDeleted, lastPresence, subscribeMessages, publishConversationUpdate } =
+  const { lastConversationUpdate, lastConversationRead, lastConversationDeleted, lastPresence, subscribeMessages, subscribeCallEvents, publishConversationUpdate } =
     useRealtime();
   const bottomSafe = hasDesktopSidebar ? Spacing.md : Math.max(insets.bottom, Spacing.sm);
   const keyboardInset = useWebKeyboardBottomInset();
@@ -1219,6 +1359,8 @@ export default function ChatThreadScreen() {
 
   const [conversation, setConversation] = useState<ConversationListItem | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const messagesRef = useRef<ChatMessage[]>([]);
+  messagesRef.current = messages;
   const [peerLastReadAt, setPeerLastReadAt] = useState<string | null>(null);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -1231,6 +1373,58 @@ export default function ChatThreadScreen() {
     syncQueue: syncVoiceQueue,
     visible: voicePlayerVisible,
   } = useVoicePlayback();
+  const {
+    phase: voicePhase,
+    conversationId: voiceConversationId,
+    startCall,
+    joinOngoingCall,
+    hangup: hangupLiveVoice,
+    minimized: voiceMinimized,
+  } = useVoiceCall();
+  const voiceActiveHere =
+    Boolean(conversationId) &&
+    voiceConversationId === conversationId &&
+    voicePhase !== 'idle' &&
+    voicePhase !== 'incoming';
+  const [ongoingVoiceCall, setOngoingVoiceCall] = useState<ActiveChatVoiceCall | null>(null);
+  const [joiningOngoingVoice, setJoiningOngoingVoice] = useState(false);
+
+  useEffect(() => {
+    if (!conversationId || voiceActiveHere) {
+      setOngoingVoiceCall(null);
+      return;
+    }
+    let cancelled = false;
+    const refresh = async () => {
+      try {
+        const active = await getActiveChatVoiceCall(conversationId);
+        if (cancelled) {
+          return;
+        }
+        // Show for anyone not already in this call UI — including rejoin after drop.
+        setOngoingVoiceCall(active ?? null);
+      } catch {
+        if (!cancelled) {
+          setOngoingVoiceCall(null);
+        }
+      }
+    };
+    void refresh();
+    const timer = setInterval(() => {
+      void refresh();
+    }, 2500);
+    const unsubscribe = subscribeCallEvents((event) => {
+      if (event.payload.conversationId !== conversationId) {
+        return;
+      }
+      void refresh();
+    });
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+      unsubscribe();
+    };
+  }, [conversationId, subscribeCallEvents, voiceActiveHere]);
   const [draft, setDraft] = useState('');
   const [pendingAttachments, setPendingAttachments] = useState<PendingAttachment[]>([]);
   const [lightbox, setLightbox] = useState<{ uris: string[]; index: number } | null>(null);
@@ -1249,6 +1443,13 @@ export default function ChatThreadScreen() {
   const [membersOpen, setMembersOpen] = useState(false);
   const [members, setMembers] = useState<ChatMember[]>([]);
   const [membersLoading, setMembersLoading] = useState(false);
+  const [membersBusy, setMembersBusy] = useState(false);
+  const [renameOpen, setRenameOpen] = useState(false);
+  const [addMembersOpen, setAddMembersOpen] = useState(false);
+  const [addMemberContacts, setAddMemberContacts] = useState<
+    { id: string; nickname: string; avatarUrl: string | null }[]
+  >([]);
+  const [pendingDeleteGroup, setPendingDeleteGroup] = useState(false);
   const [replyTo, setReplyTo] = useState<ChatReplyPreviewData | null>(null);
   const [actionMessage, setActionMessage] = useState<ChatMessage | null>(null);
   const [selectionMode, setSelectionMode] = useState(false);
@@ -1286,6 +1487,8 @@ export default function ChatThreadScreen() {
   const composerFieldWrapRef = useRef<View>(null);
   const composerInputRef = useRef<TextInput>(null);
   const selectionRef = useRef({ start: 0, end: 0 });
+  /** Игнор ложного onChangeText('') при blur при открытии эмодзи (iOS multiline / RN Web). */
+  const suppressComposerClearRef = useRef(false);
   const heldDiceMessagesRef = useRef(new Map<string, ChatMessage>());
   const [heldDiceIds, setHeldDiceIds] = useState<string[]>([]);
   const diceAnimQueueRef = useRef<ChatDiceOverlayRequest[]>([]);
@@ -1331,9 +1534,14 @@ export default function ChatThreadScreen() {
       if (prev.some((item) => item.id === message.id)) {
         return prev;
       }
-      return [...prev, message];
+      // Убираем optimistic pending того же отправителя — иначе прыжок pending→real.
+      const withoutPending =
+        myId && message.senderId === myId
+          ? prev.filter((item) => !item.id.startsWith('pending-'))
+          : prev;
+      return [...withoutPending, message];
     });
-  }, []);
+  }, [myId]);
 
   const startNextDiceAnimation = useCallback(() => {
     const next = diceAnimQueueRef.current.shift() ?? null;
@@ -1359,6 +1567,12 @@ export default function ChatThreadScreen() {
   const ingestIncomingMessage = useCallback(
     (message: ChatMessage) => {
       if (message.kind !== 'dice_roll') {
+        appendMessage(message);
+        return;
+      }
+
+      // Звонок уже крутит 3D поверх чата — второй оверлей зацикливал тот же бросок.
+      if (voiceActiveHere) {
         appendMessage(message);
         return;
       }
@@ -1415,7 +1629,7 @@ export default function ChatThreadScreen() {
         return request;
       });
     },
-    [appendMessage, myId],
+    [appendMessage, myId, voiceActiveHere],
   );
 
   const clearPendingAttachments = useCallback(() => {
@@ -1509,11 +1723,19 @@ export default function ChatThreadScreen() {
   }, []);
 
   const openEmojiPanel = useCallback(() => {
+    // Сначала ставим флаги — blur/keyboardDidHide могут прислать пустой onChangeText.
+    suppressComposerClearRef.current = true;
+    emojiPanelOpenRef.current = true;
     if (Platform.OS !== 'web') {
       Keyboard.dismiss();
       composerInputRef.current?.blur();
     }
     setEmojiPanelOpen(true);
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        suppressComposerClearRef.current = false;
+      });
+    });
   }, []);
 
   const closeEmojiPanel = useCallback((focusInput = false) => {
@@ -1656,6 +1878,11 @@ export default function ChatThreadScreen() {
       if (!conversationId || message.conversationId !== conversationId) {
         return;
       }
+      const alreadyHad = messagesRef.current.some((item) => item.id === message.id);
+      const hadOwnPending =
+        Boolean(myId) &&
+        message.senderId === myId &&
+        messagesRef.current.some((item) => item.id.startsWith('pending-'));
       ingestIncomingMessage(message);
       if (message.kind === 'favorite_received') {
         if (message.senderId !== myId) {
@@ -1685,10 +1912,14 @@ export default function ChatThreadScreen() {
           return { ...prev, peerFavoritedMe: false };
         });
       }
-      if (message.senderId === myId || stickToBottomRef.current) {
-        if (message.kind !== 'dice_roll' || !heldDiceMessagesRef.current.has(message.id)) {
-          scrollToBottom();
-        }
+      // Свой уже показанный ответ / pending→real не дёргаем повторным scroll.
+      if (
+        !alreadyHad &&
+        !hadOwnPending &&
+        (message.senderId === myId || stickToBottomRef.current) &&
+        (message.kind !== 'dice_roll' || !heldDiceMessagesRef.current.has(message.id))
+      ) {
+        scrollToBottom();
       }
       void markConversationRead(conversationId);
     });
@@ -1698,7 +1929,30 @@ export default function ChatThreadScreen() {
     if (!lastConversationUpdate || lastConversationUpdate.id !== conversationId) {
       return;
     }
-    setConversation(lastConversationUpdate);
+    setConversation((prev) => {
+      if (!prev || prev.id !== lastConversationUpdate.id) {
+        return lastConversationUpdate;
+      }
+      const nextPeer = lastConversationUpdate.peer;
+      const prevPeer = prev.peer;
+      const peer =
+        nextPeer && prevPeer && nextPeer.id === prevPeer.id
+          ? {
+              ...nextPeer,
+              // Не дергаем аватар на каждый conversation.update (в т.ч. после send).
+              avatarUrl: stableAvatarUrl(prevPeer.avatarUrl, nextPeer.avatarUrl),
+              avatarFrameId: nextPeer.avatarFrameId ?? prevPeer.avatarFrameId,
+              badges: nextPeer.badges ?? prevPeer.badges,
+              nickname: nextPeer.nickname || prevPeer.nickname,
+            }
+          : nextPeer;
+      return {
+        ...lastConversationUpdate,
+        peer,
+        isPinned: lastConversationUpdate.isPinned ?? prev.isPinned,
+        pinSortOrder: lastConversationUpdate.pinSortOrder ?? prev.pinSortOrder,
+      };
+    });
     setPeerLastReadAt(lastConversationUpdate.peerLastReadAt);
   }, [conversationId, lastConversationUpdate]);
 
@@ -1770,6 +2024,27 @@ export default function ChatThreadScreen() {
         },
       };
     });
+    setMembers((prev) => {
+      let changed = false;
+      const next = prev.map((member) => {
+        if (member.id !== lastPresence.userId) {
+          return member;
+        }
+        if (
+          member.online === lastPresence.online &&
+          member.lastSeenAt === lastPresence.lastSeenAt
+        ) {
+          return member;
+        }
+        changed = true;
+        return {
+          ...member,
+          online: lastPresence.online,
+          lastSeenAt: lastPresence.lastSeenAt,
+        };
+      });
+      return changed ? next : prev;
+    });
   }, [lastPresence]);
 
   useEffect(() => {
@@ -1784,7 +2059,6 @@ export default function ChatThreadScreen() {
   const title = isGroup
     ? conversation?.title?.trim() || 'Группа'
     : conversation?.peer?.nickname ?? 'Чат';
-  const peerInitial = [...title.trim()][0]?.toUpperCase() ?? '?';
   const statusLabel = isGroup
     ? `${conversation?.memberCount ?? members.length} участников`
     : conversation?.peer
@@ -1977,8 +2251,54 @@ export default function ChatThreadScreen() {
     }
 
     const replyToId = replyTo?.id;
+    const pendingId = `pending-${Date.now()}`;
+    const pendingMessage: ChatMessage = {
+      id: pendingId,
+      conversationId,
+      senderId: myId ?? '',
+      sender: myId
+        ? {
+            id: myId,
+            nickname: user?.nickname ?? 'Вы',
+            avatarUrl: null,
+          }
+        : undefined,
+      body: body.trim() || null,
+      kind: 'user',
+      createdAt: new Date().toISOString(),
+      image: null,
+      attachment: null,
+      attachments: attachments.map((item) => ({
+        kind: item.kind,
+        name: item.name,
+        mimeType: item.mimeType,
+        url: item.uri,
+        image:
+          item.kind === 'image'
+            ? { original: item.uri, large: item.uri, medium: item.uri, thumb: item.uri }
+            : null,
+      })),
+      replyTo: replyTo
+        ? {
+            id: replyTo.id,
+            body: replyTo.body,
+            senderNickname: replyTo.senderNickname,
+            hasMedia: replyTo.hasMedia,
+          }
+        : null,
+    };
+
     setSending(true);
     sendingRef.current = true;
+    setMessages((prev) => [...prev, pendingMessage]);
+    setDraft('');
+    draftRef.current = '';
+    selectionRef.current = { start: 0, end: 0 };
+    setEmojiPanelOpen(false);
+    setReplyTo(null);
+    clearPendingAttachments();
+    scrollToBottom();
+
     try {
       const message = await sendChatMessage(conversationId, {
         body,
@@ -1989,27 +2309,36 @@ export default function ChatThreadScreen() {
           mimeType: item.mimeType,
         })),
       });
-      setDraft('');
-      draftRef.current = '';
-      selectionRef.current = { start: 0, end: 0 };
-      setEmojiPanelOpen(false);
-      setReplyTo(null);
-      clearPendingAttachments();
       setMessages((prev) => {
-        if (prev.some((item) => item.id === message.id)) {
-          return prev;
+        const withoutPending = prev.filter((item) => item.id !== pendingId);
+        if (withoutPending.some((item) => item.id === message.id)) {
+          return withoutPending;
         }
-        return [...prev, message];
+        return [...withoutPending, message];
       });
-      scrollToBottom();
       requestAfterFirstMessage();
     } catch (error) {
+      setMessages((prev) => prev.filter((item) => item.id !== pendingId));
+      setDraft(body);
+      draftRef.current = body;
+      if (attachments.length > 0) {
+        setPendingAttachments(attachments);
+        pendingAttachmentsRef.current = attachments;
+      }
       toast.error(localizeErrorMessage(error, 'Не удалось отправить'));
     } finally {
       setSending(false);
       sendingRef.current = false;
     }
-  }, [clearPendingAttachments, conversationId, replyTo?.id, requestAfterFirstMessage, scrollToBottom]);
+  }, [
+    clearPendingAttachments,
+    conversationId,
+    myId,
+    replyTo,
+    requestAfterFirstMessage,
+    scrollToBottom,
+    user?.nickname,
+  ]);
 
   const handleLocalDiceRollComplete = useCallback((outcome: DiceRollOutcome | null) => {
     const resolve = localDiceRollResolveRef.current;
@@ -2024,6 +2353,7 @@ export default function ChatThreadScreen() {
       modifier: number;
       hidden: boolean;
       color: string;
+      skin?: string;
       mode: DiceRollMode;
     }) => {
       if (!conversationId || diceRollBusy || conversation?.blockedMe || localDiceRoll) {
@@ -2047,6 +2377,7 @@ export default function ChatThreadScreen() {
           dice: input.dice,
           modifier: input.modifier,
           color: input.color,
+          skin: input.skin,
           senderNickname: user?.nickname ?? 'Вы',
           mode: input.mode,
         });
@@ -2067,10 +2398,14 @@ export default function ChatThreadScreen() {
           ...(input.mode !== 'normal' ? { mode: input.mode } : {}),
         });
         const rolled = parseDiceRollPayload(message.body);
-        if (rolled && !rolled.color && input.color) {
+        if (rolled && ((!rolled.color && input.color) || (!rolled.skin && input.skin))) {
           message = {
             ...message,
-            body: JSON.stringify({ ...rolled, color: input.color }),
+            body: JSON.stringify({
+              ...rolled,
+              color: rolled.color ?? input.color,
+              ...(input.skin ? { skin: rolled.skin ?? input.skin } : {}),
+            }),
           };
         }
         // Уже показали анимацию со своими цифрами — в ленту без повтора.
@@ -2123,6 +2458,9 @@ export default function ChatThreadScreen() {
     if (isSystemChatMessage(message)) {
       return;
     }
+    if (message.id.startsWith('pending-')) {
+      return;
+    }
     if (selectionMode) {
       setSelectedIds((prev) =>
         prev.includes(message.id)
@@ -2158,6 +2496,28 @@ export default function ChatThreadScreen() {
     setSelectionMode(true);
     setSelectedIds([message.id]);
   }, []);
+
+  const getMessageCopyText = useCallback((message: ChatMessage) => {
+    if (message.kind === 'dice_roll') {
+      const payload = parseDiceRollPayload(message.body);
+      return payload ? diceRollPreviewText(payload) : (message.body?.trim() || '');
+    }
+    return message.body?.trim() || '';
+  }, []);
+
+  const handleCopyMessage = useCallback(async (message: ChatMessage) => {
+    const text = getMessageCopyText(message);
+    if (!text) {
+      return;
+    }
+    setActionMessage(null);
+    try {
+      await copyTextToClipboard(text);
+      toast.success('Скопировано');
+    } catch {
+      toast.error('Не удалось скопировать');
+    }
+  }, [getMessageCopyText]);
 
   const scrollToMessage = useCallback((messageId: string) => {
     const index = timelineRef.current.findIndex(
@@ -2340,6 +2700,176 @@ export default function ChatThreadScreen() {
     }
   }, [conversation, conversationId]);
 
+  const myGroupRole =
+    conversation?.myRole ??
+    members.find((member) => member.id === myId)?.role ??
+    null;
+  const canManageGroup =
+    isGroup &&
+    !conversation?.gameId &&
+    (myGroupRole === 'owner' || myGroupRole === 'admin');
+  const isGroupOwner = isGroup && !conversation?.gameId && myGroupRole === 'owner';
+
+  const handleRenameGroup = useCallback(
+    async (nextTitle: string) => {
+      if (!conversationId) {
+        return;
+      }
+      setMembersBusy(true);
+      try {
+        const summary = await renameGroupChat(conversationId, nextTitle);
+        setConversation(summary);
+        setRenameOpen(false);
+        toast.success('Название обновлено');
+      } catch (error) {
+        toast.error(localizeErrorMessage(error, 'Не удалось переименовать'));
+      } finally {
+        setMembersBusy(false);
+      }
+    },
+    [conversationId],
+  );
+
+  const handleOpenAddMembers = useCallback(async () => {
+    setAddMembersOpen(true);
+    try {
+      const [list, currentMembers] = await Promise.all([
+        listConversations(),
+        conversationId ? listChatMembers(conversationId) : Promise.resolve(members),
+      ]);
+      setAddMemberContacts(contactsFromConversations(list));
+      if (currentMembers.length > 0) {
+        setMembers(currentMembers);
+      }
+    } catch {
+      setAddMemberContacts([]);
+    }
+  }, [conversationId, members]);
+
+  const handleAddMembers = useCallback(
+    async (memberIds: string[]) => {
+      if (!conversationId || memberIds.length === 0) {
+        return;
+      }
+      setMembersBusy(true);
+      try {
+        const next = await addGroupMembers(conversationId, memberIds);
+        setMembers(next);
+        setConversation((prev) =>
+          prev
+            ? {
+                ...prev,
+                memberCount: next.length,
+              }
+            : prev,
+        );
+        setAddMembersOpen(false);
+        toast.success(memberIds.length === 1 ? 'Участник добавлен' : 'Участники добавлены');
+      } catch (error) {
+        toast.error(localizeErrorMessage(error, 'Не удалось добавить'));
+      } finally {
+        setMembersBusy(false);
+      }
+    },
+    [conversationId],
+  );
+
+  const handlePromoteMember = useCallback(
+    async (userId: string) => {
+      if (!conversationId) {
+        return;
+      }
+      setMembersBusy(true);
+      try {
+        setMembers(await setGroupMemberRole(conversationId, userId, 'admin'));
+        toast.success('Назначен администратором');
+      } catch (error) {
+        toast.error(localizeErrorMessage(error, 'Не удалось назначить'));
+      } finally {
+        setMembersBusy(false);
+      }
+    },
+    [conversationId],
+  );
+
+  const handleDemoteMember = useCallback(
+    async (userId: string) => {
+      if (!conversationId) {
+        return;
+      }
+      setMembersBusy(true);
+      try {
+        setMembers(await setGroupMemberRole(conversationId, userId, 'member'));
+        toast.success('Права администратора сняты');
+      } catch (error) {
+        toast.error(localizeErrorMessage(error, 'Не удалось снять права'));
+      } finally {
+        setMembersBusy(false);
+      }
+    },
+    [conversationId],
+  );
+
+  const handleTransferOwnership = useCallback(
+    async (userId: string) => {
+      if (!conversationId) {
+        return;
+      }
+      setMembersBusy(true);
+      try {
+        const next = await transferGroupOwnership(conversationId, userId);
+        setMembers(next);
+        setConversation((prev) => (prev ? { ...prev, myRole: 'admin' } : prev));
+        toast.success('Права создателя переданы');
+      } catch (error) {
+        toast.error(localizeErrorMessage(error, 'Не удалось передать права'));
+      } finally {
+        setMembersBusy(false);
+      }
+    },
+    [conversationId],
+  );
+
+  const handleRemoveMember = useCallback(
+    async (userId: string) => {
+      if (!conversationId) {
+        return;
+      }
+      setMembersBusy(true);
+      try {
+        const next = await removeGroupMember(conversationId, userId);
+        setMembers(next);
+        setConversation((prev) =>
+          prev ? { ...prev, memberCount: next.length } : prev,
+        );
+        toast.success('Участник исключён');
+      } catch (error) {
+        toast.error(localizeErrorMessage(error, 'Не удалось исключить'));
+      } finally {
+        setMembersBusy(false);
+      }
+    },
+    [conversationId],
+  );
+
+  const handleDeleteGroup = useCallback(async () => {
+    if (!conversationId) {
+      return;
+    }
+    setIsMenuBusy(true);
+    setPendingDeleteGroup(false);
+    setMenuOpen(false);
+    router.replace('/chats');
+    try {
+      await deleteGroupChat(conversationId);
+      toast.success('Группа удалена');
+    } catch (error) {
+      toast.error(localizeErrorMessage(error, 'Не удалось удалить группу'));
+    } finally {
+      setIsMenuBusy(false);
+    }
+  }, [conversationId, router]);
+
   const handleUnblock = useCallback(async () => {
     if (!conversationId || !conversation || unblocking) {
       return;
@@ -2443,9 +2973,11 @@ export default function ChatThreadScreen() {
 
   const headerPadTop = isDesktopWeb
     ? Spacing.md
-    : voicePlayerVisible
+    : voiceActiveHere && voiceMinimized
       ? Spacing.sm
-      : insets.top + Spacing.sm;
+      : voicePlayerVisible
+        ? Spacing.sm
+        : insets.top + Spacing.sm;
   const peerReadMs =
     !isGroup && peerLastReadAt ? new Date(peerLastReadAt).getTime() : 0;
   const renderedMessages = useMemo(() => {
@@ -2593,22 +3125,21 @@ export default function ChatThreadScreen() {
               pressed && styles.headerPeerPressed,
             ]}>
             <View style={styles.headerAvatarWrap}>
-              <View style={styles.headerAvatar}>
-                {!isGroup && conversation?.peer?.avatarUrl ? (
-                  <Image
-                    source={{ uri: conversation.peer.avatarUrl }}
-                    style={styles.headerAvatarImage}
-                  />
-                ) : (
+              {isGroup ? (
+                <View style={styles.headerAvatar}>
                   <View style={styles.headerAvatarFill}>
-                    {isGroup ? (
-                      <Ionicons name="people" size={18} color={colors.onPrimary} />
-                    ) : (
-                      <Text style={styles.headerAvatarInitial}>{peerInitial}</Text>
-                    )}
+                    <Ionicons name="people" size={18} color={colors.onPrimary} />
                   </View>
-                )}
-              </View>
+                </View>
+              ) : (
+                <UserAvatar
+                  nickname={conversation?.peer?.nickname ?? title}
+                  avatarUrl={conversation?.peer?.avatarUrl}
+                  size={36}
+                  badges={conversation?.peer?.badges}
+                  frameId={conversation?.peer?.avatarFrameId}
+                />
+              )}
             </View>
             <View style={styles.headerText}>
               <Text style={styles.headerTitle} numberOfLines={1}>
@@ -2630,6 +3161,90 @@ export default function ChatThreadScreen() {
           </Pressable>
           <Pressable
             accessibilityRole="button"
+            accessibilityLabel={
+              voiceActiveHere ? 'Завершить звонок' : 'Позвонить'
+            }
+            hitSlop={8}
+            onPressIn={() => {
+              if (Platform.OS === 'web' && !voiceActiveHere) {
+                beginMicrophonePrimeFromGesture();
+              }
+            }}
+            onPress={() => {
+              if (!conversationId) {
+                return;
+              }
+              if (voiceActiveHere) {
+                void hangupLiveVoice();
+                return;
+              }
+              if (ongoingVoiceCall) {
+                setJoiningOngoingVoice(true);
+                void joinOngoingCall(
+                  conversationId,
+                  ongoingVoiceCall.callId,
+                  ongoingVoiceCall.isGroup
+                    ? ongoingVoiceCall.conversationTitle || title
+                    : ongoingVoiceCall.fromNickname,
+                  ongoingVoiceCall.fromAvatarUrl,
+                  { isGroup: ongoingVoiceCall.isGroup },
+                ).finally(() => setJoiningOngoingVoice(false));
+                return;
+              }
+              void (async () => {
+                // Mic prime already started in onPressIn — do not await network before takePrimedMicrophone inside startCall.
+                let ringingPeers =
+                  isGroup
+                    ? members
+                        .filter((member) => member.id !== user?.id)
+                        .map((member) => ({
+                          userId: member.id,
+                          nickname: member.nickname,
+                          avatarUrl: member.avatarUrl,
+                        }))
+                    : conversation?.peer
+                      ? [
+                          {
+                            userId: conversation.peer.id,
+                            nickname: conversation.peer.nickname,
+                            avatarUrl: conversation.peer.avatarUrl,
+                          },
+                        ]
+                      : [];
+                // Kick off the call immediately; fill ringing peers if we already have them.
+                // Loading members must not block the mic gesture — startCall takes primed mic first.
+                const callPromise = startCall(
+                  conversationId,
+                  title,
+                  conversation?.peer?.avatarUrl ?? null,
+                  {
+                    isGroup,
+                    ringingPeers,
+                  },
+                );
+                if (isGroup && ringingPeers.length === 0) {
+                  try {
+                    const loaded = await listChatMembers(conversationId);
+                    setMembers(loaded);
+                  } catch {
+                    // invite response still carries ringing peers
+                  }
+                }
+                await callPromise;
+              })();
+            }}
+            style={[
+              styles.headerCallButton,
+              voiceActiveHere || ongoingVoiceCall ? styles.headerCallButtonActive : null,
+            ]}>
+              <Ionicons
+              name={voiceActiveHere || ongoingVoiceCall ? 'call' : 'call-outline'}
+              size={18}
+              color={voiceActiveHere || ongoingVoiceCall ? colors.primary : colors.textSubtle}
+            />
+          </Pressable>
+          <Pressable
+            accessibilityRole="button"
             accessibilityLabel="Ещё"
             hitSlop={8}
             onPress={handleOpenMenu}
@@ -2637,6 +3252,62 @@ export default function ChatThreadScreen() {
             <Ionicons name="ellipsis-vertical" size={18} color={colors.textSubtle} />
           </Pressable>
         </View>
+
+        {ongoingVoiceCall && !voiceActiveHere ? (
+          <View style={styles.voiceJoinBanner}>
+            <View style={styles.voiceJoinIcon}>
+              <Ionicons name="call" size={18} color={colors.primary} />
+            </View>
+            <View style={styles.voiceJoinCopy}>
+              <Text style={styles.voiceJoinTitle} numberOfLines={1}>
+                Идёт звонок
+              </Text>
+              <Text style={styles.voiceJoinHint} numberOfLines={1}>
+                {ongoingVoiceCall.joinedCount > 1
+                  ? `${ongoingVoiceCall.joinedCount} в эфире`
+                  : ongoingVoiceCall.fromNickname
+                    ? `${ongoingVoiceCall.fromNickname} в эфире`
+                    : 'Можно войти'}
+              </Text>
+            </View>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Войти в звонок"
+              disabled={joiningOngoingVoice}
+              onPressIn={() => {
+                if (Platform.OS === 'web') {
+                  beginMicrophonePrimeFromGesture();
+                }
+              }}
+              onPress={() => {
+                if (!conversationId || !ongoingVoiceCall) {
+                  return;
+                }
+                setJoiningOngoingVoice(true);
+                void joinOngoingCall(
+                  conversationId,
+                  ongoingVoiceCall.callId,
+                  ongoingVoiceCall.isGroup
+                    ? ongoingVoiceCall.conversationTitle || title
+                    : ongoingVoiceCall.fromNickname,
+                  ongoingVoiceCall.fromAvatarUrl,
+                  { isGroup: ongoingVoiceCall.isGroup },
+                ).finally(() => setJoiningOngoingVoice(false));
+              }}
+              style={({ pressed }) => [
+                styles.voiceJoinButton,
+                pressed && styles.voiceJoinButtonPressed,
+              ]}>
+              {joiningOngoingVoice ? (
+                <ActivityIndicator size="small" color="#FFFFFF" />
+              ) : (
+                <Text style={styles.voiceJoinButtonLabel}>
+                  {ongoingVoiceCall.isJoined ? 'Вернуться' : 'Войти'}
+                </Text>
+              )}
+            </Pressable>
+          </View>
+        ) : null}
 
         {showFavoriteBack || showFavoriteMine || showRemoveBack ? (
           <View
@@ -2787,10 +3458,12 @@ export default function ChatThreadScreen() {
 
               const item = timelineItem.message;
               const mine = item.senderId === myId;
+              const isPending = item.id.startsWith('pending-');
               const isFavoriteNotice = item.kind === 'favorite_received';
               const isFavoriteRemovedNotice = item.kind === 'favorite_removed';
               const isBlockNotice = item.kind === 'user_blocked';
               const isUnblockNotice = item.kind === 'user_unblocked';
+              const isMissedCallNotice = item.kind === 'missed_voice_call';
               const noticeText = isFavoriteNotice
                 ? mine
                   ? 'Вы добавили этого пользователя в избранные'
@@ -2807,7 +3480,11 @@ export default function ChatThreadScreen() {
                       ? mine
                         ? 'Вы разблокировали этого пользователя'
                         : 'разблокировал вас.'
-                      : null;
+                      : isMissedCallNotice
+                        ? mine
+                          ? 'Пропущенный звонок'
+                          : 'Пропущенный звонок'
+                        : null;
               const bodyText = noticeText ?? item.body;
               const attachments = normalizeMessageAttachments(item);
               const imageAttachments = attachments.filter((entry) => entry.kind === 'image');
@@ -2829,6 +3506,26 @@ export default function ChatThreadScreen() {
                     ...(Platform.OS === 'web' ? ({ title: fullDateTimeLabel } as object) : null),
                   } as object)
                 : null;
+
+              if (isMissedCallNotice) {
+                return (
+                  <View style={styles.systemNoticeRow}>
+                    <View style={styles.missedCallNotice}>
+                      <View style={styles.missedCallIconWrap}>
+                        <Ionicons name="call" size={14} color={colors.primary} style={styles.missedCallIcon} />
+                      </View>
+                      <Text style={[styles.missedCallText, { color: colors.primary }]}>
+                        {mine ? 'Звонок без ответа' : 'Пропущенный звонок'}
+                      </Text>
+                      {timeLabel ? (
+                        <Text style={[styles.missedCallTime, { color: colors.primary }]} {...timeAccessibilityProps}>
+                          {timeLabel}
+                        </Text>
+                      ) : null}
+                    </View>
+                  </View>
+                );
+              }
 
               if (isFavoriteNotice || isFavoriteRemovedNotice) {
                 const peerName = conversation?.peer?.nickname ?? 'пользователя';
@@ -2937,6 +3634,14 @@ export default function ChatThreadScreen() {
                               null
                             }
                             size={30}
+                            badges={
+                              item.sender?.badges ??
+                              members.find((member) => member.id === item.senderId)?.badges
+                            }
+                            frameId={
+                              item.sender?.avatarFrameId ??
+                              members.find((member) => member.id === item.senderId)?.avatarFrameId
+                            }
                           />
                         </Pressable>
                       ) : (
@@ -2946,9 +3651,15 @@ export default function ChatThreadScreen() {
                   ) : null}
                   <View style={[styles.bubbleShell, mine && styles.bubbleShellMine]}>
                     {isGroup && !mine && timelineItem.showAuthorMeta ? (
-                      <Text selectable={false} style={styles.senderName} numberOfLines={1}>
-                        {item.sender?.nickname ?? 'Игрок'}
-                      </Text>
+                      <NameWithBadges
+                        name={item.sender?.nickname ?? 'Игрок'}
+                        badges={
+                          item.sender?.badges ??
+                          members.find((member) => member.id === item.senderId)?.badges
+                        }
+                        textStyle={styles.senderName}
+                        badgeSize={11}
+                      />
                     ) : null}
                     <View
                       style={[
@@ -3076,13 +3787,20 @@ export default function ChatThreadScreen() {
                           />
                         ) : null}
                         <View style={styles.metaRow}>
-                          <Text
-                            selectable={false}
-                            style={[styles.metaTime, mine && styles.metaTimeMine]}
-                            {...timeAccessibilityProps}>
-                            {timeLabel}
-                          </Text>
-                          {mine ? (
+                          {isPending ? (
+                            <ActivityIndicator
+                              size="small"
+                              color={mine ? 'rgba(255,255,255,0.9)' : colors.primary}
+                            />
+                          ) : (
+                            <Text
+                              selectable={false}
+                              style={[styles.metaTime, mine && styles.metaTimeMine]}
+                              {...timeAccessibilityProps}>
+                              {timeLabel}
+                            </Text>
+                          )}
+                          {mine && !isPending ? (
                             <Ionicons
                               name={isRead ? 'checkmark-done' : 'checkmark'}
                               size={12}
@@ -3208,11 +3926,15 @@ export default function ChatThreadScreen() {
                   disabled={!canSend}
                   onPress={() => void handleSend()}
                   style={[styles.sendButton, canSend && styles.sendButtonReady]}>
-                  <Ionicons
-                    name="send"
-                    size={18}
-                    color={canSend ? colors.onPrimary : colors.textMuted}
-                  />
+                  {sending ? (
+                    <ActivityIndicator size="small" color={colors.onPrimary} />
+                  ) : (
+                    <Ionicons
+                      name="send"
+                      size={18}
+                      color={canSend ? colors.onPrimary : colors.textMuted}
+                    />
+                  )}
                 </Pressable>
               }
               onSent={(message) => {
@@ -3237,6 +3959,13 @@ export default function ChatThreadScreen() {
                       style={styles.input}
                       value={draft}
                       onChangeText={(value) => {
+                        if (
+                          suppressComposerClearRef.current &&
+                          value === '' &&
+                          draftRef.current.length > 0
+                        ) {
+                          return;
+                        }
                         draftRef.current = value;
                         setDraft(value);
                       }}
@@ -3260,7 +3989,15 @@ export default function ChatThreadScreen() {
                     accessibilityRole="button"
                     accessibilityLabel={emojiPanelOpen ? 'Скрыть эмодзи' : 'Эмодзи'}
                     accessibilityState={{ selected: emojiPanelOpen }}
+                    onPressIn={() => {
+                      // Blur инпута часто приходит раньше onPress и шлёт пустой onChangeText.
+                      suppressComposerClearRef.current = true;
+                    }}
                     onPress={toggleEmojiPanel}
+                    // @ts-expect-error RN Web: не забирать фокус у поля ввода
+                    onMouseDown={(event: { preventDefault?: () => void }) => {
+                      event.preventDefault?.();
+                    }}
                     style={[styles.iconButton, emojiPanelOpen ? styles.iconButtonActive : null]}>
                     <Ionicons
                       name={emojiPanelOpen ? 'happy' : 'happy-outline'}
@@ -3322,6 +4059,34 @@ export default function ChatThreadScreen() {
                       Участники
                     </Text>
                   </Pressable>
+                  {canManageGroup ? (
+                    <Pressable
+                      accessibilityRole="button"
+                      onPress={() => {
+                        handleCloseMenu();
+                        setRenameOpen(true);
+                      }}
+                      style={({ pressed }) => [styles.menuItem, pressed && styles.menuItemPressed]}>
+                      <Ionicons name="pencil-outline" size={18} color={colors.primary} />
+                      <Text style={[styles.menuItemLabel, { color: colors.primary }]}>
+                        Переименовать
+                      </Text>
+                    </Pressable>
+                  ) : null}
+                  {canManageGroup ? (
+                    <Pressable
+                      accessibilityRole="button"
+                      onPress={() => {
+                        handleCloseMenu();
+                        void handleOpenAddMembers();
+                      }}
+                      style={({ pressed }) => [styles.menuItem, pressed && styles.menuItemPressed]}>
+                      <Ionicons name="person-add-outline" size={18} color={colors.primary} />
+                      <Text style={[styles.menuItemLabel, { color: colors.primary }]}>
+                        Добавить участников
+                      </Text>
+                    </Pressable>
+                  ) : null}
                   <Pressable
                     accessibilityRole="button"
                     disabled={isMenuBusy}
@@ -3332,16 +4097,29 @@ export default function ChatThreadScreen() {
                       {conversation?.gameId ? 'Скрыть чат' : 'Выйти из группы'}
                     </Text>
                   </Pressable>
-                  <Pressable
-                    accessibilityRole="button"
-                    onPress={() => {
-                      handleCloseMenu();
-                      setPendingDelete(true);
-                    }}
-                    style={({ pressed }) => [styles.menuItem, pressed && styles.menuItemPressed]}>
-                    <Ionicons name="trash-outline" size={18} color={colors.destructive} />
-                    <Text style={styles.menuItemLabel}>Скрыть у себя</Text>
-                  </Pressable>
+                  {isGroupOwner ? (
+                    <Pressable
+                      accessibilityRole="button"
+                      onPress={() => {
+                        handleCloseMenu();
+                        setPendingDeleteGroup(true);
+                      }}
+                      style={({ pressed }) => [styles.menuItem, pressed && styles.menuItemPressed]}>
+                      <Ionicons name="trash-outline" size={18} color={colors.destructive} />
+                      <Text style={styles.menuItemLabel}>Удалить группу</Text>
+                    </Pressable>
+                  ) : (
+                    <Pressable
+                      accessibilityRole="button"
+                      onPress={() => {
+                        handleCloseMenu();
+                        setPendingDelete(true);
+                      }}
+                      style={({ pressed }) => [styles.menuItem, pressed && styles.menuItemPressed]}>
+                      <Ionicons name="eye-off-outline" size={18} color={colors.destructive} />
+                      <Text style={styles.menuItemLabel}>Скрыть у себя</Text>
+                    </Pressable>
+                  )}
                 </>
               ) : (
                 <>
@@ -3428,11 +4206,50 @@ export default function ChatThreadScreen() {
           title={title}
           members={members}
           loading={membersLoading}
+          busy={membersBusy}
+          myUserId={myId}
+          myRole={myGroupRole}
+          readOnly={Boolean(conversation?.gameId)}
           onClose={() => setMembersOpen(false)}
           onOpenProfile={(userId) => {
             setMembersOpen(false);
             router.push(`/users/${userId}`);
           }}
+          onAddMembers={() => {
+            void handleOpenAddMembers();
+          }}
+          onPromote={(userId) => void handlePromoteMember(userId)}
+          onDemote={(userId) => void handleDemoteMember(userId)}
+          onTransfer={(userId) => void handleTransferOwnership(userId)}
+          onRemove={(userId) => void handleRemoveMember(userId)}
+        />
+
+        <RenameGroupDialog
+          visible={renameOpen}
+          initialTitle={conversation?.title?.trim() || title}
+          isBusy={membersBusy}
+          onCancel={() => setRenameOpen(false)}
+          onSubmit={(nextTitle) => void handleRenameGroup(nextTitle)}
+        />
+
+        <AddGroupMembersDialog
+          visible={addMembersOpen}
+          contacts={addMemberContacts}
+          excludeIds={members.map((member) => member.id)}
+          isBusy={membersBusy}
+          onCancel={() => setAddMembersOpen(false)}
+          onSubmit={(ids) => void handleAddMembers(ids)}
+        />
+
+        <DeleteChatDialog
+          visible={pendingDeleteGroup}
+          nickname={title}
+          isDeleting={isMenuBusy}
+          title="Удалить группу"
+          message={`Группа «${title}» исчезнет у всех участников. Это нельзя отменить.`}
+          confirmLabel="Удалить для всех"
+          onDeleteForMe={() => void handleDeleteGroup()}
+          onCancel={() => setPendingDeleteGroup(false)}
         />
 
         <ChatBackgroundPickerSheet
@@ -3473,6 +4290,12 @@ export default function ChatThreadScreen() {
         <ChatMessageActionsSheet
           visible={Boolean(actionMessage)}
           onClose={() => setActionMessage(null)}
+          allowCopy={Boolean(actionMessage && getMessageCopyText(actionMessage))}
+          onCopy={() => {
+            if (actionMessage) {
+              void handleCopyMessage(actionMessage);
+            }
+          }}
           onReply={() => {
             if (actionMessage) {
               handleStartReply(actionMessage);

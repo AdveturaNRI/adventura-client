@@ -19,6 +19,7 @@ import {
   registerUser,
 } from '@/services/auth/authApi';
 import type { AuthUser } from '@/services/api/types';
+import { onAccessTokenRefreshed } from '@/services/auth/token-refresh';
 import {
   clearAuthSession,
   getStoredRefreshToken,
@@ -76,6 +77,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [token, setToken] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [redirectToQuestionnaire, setRedirectToQuestionnaire] = useState(false);
+
+  useEffect(() => {
+    return onAccessTokenRefreshed((accessToken) => {
+      setToken(accessToken);
+    });
+  }, []);
 
   useEffect(() => {
     if (Platform.OS !== 'web') {

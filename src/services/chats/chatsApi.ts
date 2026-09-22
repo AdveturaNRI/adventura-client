@@ -1,4 +1,5 @@
 import { apiMultipart, apiRequest } from '@/services/api/client';
+import { CHAT_DICE_SKINS_ENABLED } from '@/utils/chat-dice-roll';
 import { Platform } from 'react-native';
 
 export type ChatPeer = {
@@ -7,15 +8,19 @@ export type ChatPeer = {
   avatarUrl: string | null;
   online: boolean;
   lastSeenAt: string | null;
+  badges?: Array<'alpha_tester' | 'bug_hunter' | 'founding_dm' | 'early_arrival' | 'tavern_keeper'>;
+  avatarFrameId?: string | null;
 };
 
 export type ChatMember = {
   id: string;
   nickname: string;
   avatarUrl: string | null;
-  role: 'owner' | 'member';
+  role: 'owner' | 'admin' | 'member';
   online: boolean;
   lastSeenAt: string | null;
+  badges?: Array<'alpha_tester' | 'bug_hunter' | 'founding_dm' | 'early_arrival' | 'tavern_keeper'>;
+  avatarFrameId?: string | null;
 };
 
 export type ChatAttachmentKind = 'image' | 'audio' | 'file';
@@ -37,12 +42,15 @@ export type ChatMessageKind =
   | 'user_blocked'
   | 'user_unblocked'
   | 'game_deleted'
-  | 'dice_roll';
+  | 'dice_roll'
+  | 'missed_voice_call';
 
 export type ChatMessageSender = {
   id: string;
   nickname: string;
   avatarUrl: string | null;
+  badges?: Array<'alpha_tester' | 'bug_hunter' | 'founding_dm' | 'early_arrival' | 'tavern_keeper'>;
+  avatarFrameId?: string | null;
 };
 
 export type ChatMessage = {
@@ -83,6 +91,7 @@ export type ConversationListItem = {
   peer: ChatPeer | null;
   memberCount?: number;
   membersPreview?: ChatPeer[];
+  myRole?: 'owner' | 'admin' | 'member' | null;
   peerLastReadAt: string | null;
   lastMessage: {
     id: string;
@@ -186,6 +195,51 @@ export function openGameChat(gameId: string) {
 
 export function listChatMembers(conversationId: string) {
   return apiRequest<ChatMember[]>(`/chats/${conversationId}/members`);
+}
+
+export function renameGroupChat(conversationId: string, title: string) {
+  return apiRequest<ConversationListItem>(`/chats/${conversationId}`, {
+    method: 'PUT',
+    body: { title },
+  });
+}
+
+export function addGroupMembers(conversationId: string, memberIds: string[]) {
+  return apiRequest<ChatMember[]>(`/chats/${conversationId}/members`, {
+    method: 'POST',
+    body: { memberIds },
+  });
+}
+
+export function removeGroupMember(conversationId: string, userId: string) {
+  return apiRequest<ChatMember[]>(
+    `/chats/${conversationId}/members/${encodeURIComponent(userId)}`,
+    { method: 'DELETE' },
+  );
+}
+
+export function setGroupMemberRole(
+  conversationId: string,
+  userId: string,
+  role: 'admin' | 'member',
+) {
+  return apiRequest<ChatMember[]>(
+    `/chats/${conversationId}/members/${encodeURIComponent(userId)}/role`,
+    { method: 'PUT', body: { role } },
+  );
+}
+
+export function transferGroupOwnership(conversationId: string, userId: string) {
+  return apiRequest<ChatMember[]>(`/chats/${conversationId}/transfer`, {
+    method: 'POST',
+    body: { userId },
+  });
+}
+
+export function deleteGroupChat(conversationId: string) {
+  return apiRequest<{ ok: true }>(`/chats/${conversationId}/group`, {
+    method: 'DELETE',
+  });
 }
 
 export function leaveGroup(conversationId: string) {
@@ -335,7 +389,9 @@ export async function sendChatMessage(
     }
   }
 
-  return apiMultipart<ChatMessage>(`/chats/${conversationId}/messages`, formData);
+  return apiMultipart<ChatMessage>(`/chats/${conversationId}/messages`, formData, {
+    skipLoading: true,
+  });
 }
 
 export async function sendChatDiceRoll(
@@ -346,6 +402,7 @@ export async function sendChatDiceRoll(
     hidden?: boolean;
     /** Hex `#RRGGBB` — цвет кубов у отправителя. */
     color?: string;
+    skin?: string;
     /** Раскладка с 3D-броска на клиенте. */
     groups?: { sides: number; values: number[] }[];
     mode?: 'normal' | 'advantage' | 'disadvantage';
@@ -358,6 +415,9 @@ export async function sendChatDiceRoll(
       modifier: options.modifier ?? 0,
       hidden: Boolean(options.hidden),
       ...(options.color ? { color: options.color } : {}),
+      ...(CHAT_DICE_SKINS_ENABLED && options.skin && options.skin !== 'standard'
+        ? { skin: options.skin }
+        : {}),
       ...(options.groups && options.groups.length > 0 ? { groups: options.groups } : {}),
       ...(options.mode && options.mode !== 'normal' ? { mode: options.mode } : {}),
     },
@@ -371,5 +431,80 @@ export async function forwardChatMessages(
   return apiRequest<ChatMessage[]>(`/chats/${targetConversationId}/forward`, {
     method: 'POST',
     body: { messageIds },
+  });
+}
+
+export type ChatVoiceToken = {
+  url: string;
+  token: string;
+  roomName: string;
+};
+
+export function createChatVoiceToken(conversationId: string) {
+  return apiRequest<ChatVoiceToken>(`/chats/${conversationId}/voice/token`, {
+    method: 'POST',
+  });
+}
+
+export type VoiceCallPeer = {
+  userId: string;
+  nickname: string;
+  avatarUrl: string | null;
+};
+
+export function inviteChatVoiceCall(conversationId: string) {
+  return apiRequest<{
+    callId: string;
+    conversationId: string;
+    isGroup?: boolean;
+    ringing?: VoiceCallPeer[];
+  }>(`/chats/${conversationId}/voice/invite`, { method: 'POST' });
+}
+
+export type ActiveChatVoiceCall = {
+  callId: string;
+  conversationId: string;
+  fromUserId: string;
+  fromNickname: string;
+  fromAvatarUrl: string | null;
+  conversationTitle: string | null;
+  isGroup: boolean;
+  joinedCount: number;
+  canJoin: boolean;
+  /** Already on the server join list (e.g. dropped client still listed). */
+  isJoined?: boolean;
+};
+
+export function getActiveChatVoiceCall(conversationId: string) {
+  return apiRequest<ActiveChatVoiceCall | null>(`/chats/${conversationId}/voice/active`, {
+    skipLoading: true,
+  });
+}
+
+export function acceptChatVoiceCall(conversationId: string, callId: string) {
+  return apiRequest<{ callId: string; conversationId: string; byUserId: string }>(
+    `/chats/${conversationId}/voice/accept`,
+    { method: 'POST', body: { callId } },
+  );
+}
+
+export function joinChatVoiceCall(conversationId: string, callId?: string) {
+  return apiRequest<{ callId: string; conversationId: string; byUserId: string }>(
+    `/chats/${conversationId}/voice/join`,
+    { method: 'POST', body: callId ? { callId } : {} },
+  );
+}
+
+export function declineChatVoiceCall(conversationId: string, callId: string) {
+  return apiRequest<{ ok: true }>(`/chats/${conversationId}/voice/decline`, {
+    method: 'POST',
+    body: { callId },
+  });
+}
+
+export function endChatVoiceCall(conversationId: string, callId: string) {
+  return apiRequest<{ ok: true }>(`/chats/${conversationId}/voice/end`, {
+    method: 'POST',
+    body: { callId },
   });
 }

@@ -44,6 +44,7 @@ import {
   type ArtStyleId,
   type ArtTaskView,
 } from '@/services/art-studio';
+import { fetchMyRewards, type MyRewardsResponse } from '@/services/rewards/rewardsApi';
 import { localizeErrorMessage } from '@/utils/localizeError';
 
 type AccordionKey = 'style' | 'lighting' | 'camera' | 'prompt' | null;
@@ -320,6 +321,7 @@ export function ArtStudioPanel() {
   const [taskProgress, setTaskProgress] = useState(0);
   const [taskMessage, setTaskMessage] = useState<string | null>(null);
   const [elapsedSec, setElapsedSec] = useState(0);
+  const [limits, setLimits] = useState<MyRewardsResponse['limits'] | null>(null);
   const cooldownTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const elapsedTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -359,6 +361,9 @@ export function ArtStudioPanel() {
 
   useEffect(() => {
     void loadArtHistory();
+    void fetchMyRewards()
+      .then((data) => setLimits(data.limits))
+      .catch(() => undefined);
     return subscribeArtHistory(setHistory);
   }, []);
 
@@ -403,6 +408,10 @@ export function ArtStudioPanel() {
 
   const generate = useCallback(async () => {
     if (generating || cooldownLeft > 0) return;
+    if (input.entityId === 'portrait' && limits && limits.remainingPortraitGenerations <= 0) {
+      toast.error(`На сегодня портреты закончились (${limits.dailyPortraitGenerations})`);
+      return;
+    }
     if (!input.userPrompt.trim()) {
       toast.error('Сначала опиши персонажа или сцену');
       return;
@@ -442,6 +451,11 @@ export function ArtStudioPanel() {
       pushArtHistory(next);
       setTaskProgress(100);
       setTaskMessage(null);
+      if (requestInput.entityId === 'portrait') {
+        void fetchMyRewards()
+          .then((data) => setLimits(data.limits))
+          .catch(() => undefined);
+      }
     } catch (error) {
       if (error instanceof DOMException && error.name === 'AbortError') {
         toast.success('Генерация отменена');
@@ -459,7 +473,7 @@ export function ArtStudioPanel() {
       setTaskProgress(0);
       startCooldown();
     }
-  }, [cooldownLeft, generating, input, startCooldown]);
+  }, [cooldownLeft, generating, input, limits, startCooldown]);
 
   const handleCopyPrompt = useCallback(async () => {
     try {
@@ -730,16 +744,27 @@ export function ArtStudioPanel() {
       </View>
 
       <View style={styles.actions}>
+        {input.entityId === 'portrait' && limits ? (
+          <Text style={{ fontSize: FontSize.caption, color: colors.primary, fontWeight: '600' }}>
+            Портреты сегодня: {limits.usedPortraitGenerationsToday} / {limits.dailyPortraitGenerations}
+          </Text>
+        ) : null}
         <Button
           label={
             generating
               ? 'Генерация…'
               : cooldownLeft > 0
                 ? `Подожди ${cooldownLeft} с`
-                : 'Сгенерировать'
+                : input.entityId === 'portrait' && limits && limits.remainingPortraitGenerations <= 0
+                  ? 'Лимит портретов'
+                  : 'Сгенерировать'
           }
           icon={<Ionicons name="color-wand-outline" size={18} color={colors.onPrimary} />}
-          disabled={generating || cooldownLeft > 0}
+          disabled={
+            generating ||
+            cooldownLeft > 0 ||
+            Boolean(input.entityId === 'portrait' && limits && limits.remainingPortraitGenerations <= 0)
+          }
           onPress={() => void generate()}
           style={styles.actionBtn}
         />

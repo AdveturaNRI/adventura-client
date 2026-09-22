@@ -7,8 +7,13 @@ import { Gesture, GestureDetector, ScrollView as GestureScrollView } from 'react
 import type { BadgeVariant } from '../feedback/badge.config';
 import { Badge } from '../feedback/Badge';
 import { SwipeBlock, type SwipeAction, type SwipeDismissRequest } from '../swipe/SwipeBlock';
+import { QuestionnaireAura } from '@/components/rewards/QuestionnaireAura';
+import { QuestionnaireHighlight } from '@/components/rewards/QuestionnaireHighlight';
+import { NameWithBadges } from '@/components/rewards/RewardBadge';
 import { UserCardIcon } from '@/components/ui/cards/UserCardIcon';
 import type { UserCardIconKey } from '@/components/ui/cards/user-card-icon-assets';
+import type { QuestionnaireAuraId, RewardBadgeType } from '@/data/rewards/catalog';
+import { displayedAuraId } from '@/data/rewards/catalog';
 import { FontSize, Radius, Sizes, Spacing, type ThemeColors } from '@/constants/theme';
 import { UNKNOWN_USER_PLACEHOLDER } from '@/constants/image-assets';
 import { useTheme } from '@/hooks/use-theme';
@@ -67,6 +72,8 @@ export type UserCardProps = {
   showVisibility?: boolean;
   blockedByMe?: boolean;
   swipe?: UserCardSwipeConfig;
+  badges?: RewardBadgeType[];
+  auraId?: QuestionnaireAuraId | null;
 };
 
 const USER_CARD_PHOTO_ASPECT_RATIO = 0.9;
@@ -174,10 +181,7 @@ function createStyles(
     cardDeck: {
       ...(fillsDeck
         ? {
-            flex: 1,
-            minHeight: 0,
-            maxHeight: '100%' as const,
-            height: '100%' as const,
+            width: '100%' as const,
           }
         : {
             width: '100%' as const,
@@ -186,9 +190,8 @@ function createStyles(
     },
     cardDeckWide: {
       flexDirection: 'row',
-      flex: 1,
-      minHeight: 0,
-      height: '100%',
+      width: '100%',
+      // Height comes from deckFrame — avoid height:100% collapse on RN web.
     },
     photoWrap: {
       width: isDeckWide ? undefined : '100%',
@@ -202,6 +205,7 @@ function createStyles(
       flexShrink: 0,
       backgroundColor: colors.placeholder,
       overflow: 'hidden',
+      position: 'relative',
       ...Platform.select({
         web: {
           userSelect: 'none',
@@ -232,39 +236,46 @@ function createStyles(
       paddingTop: isDeckStacked ? Spacing.sm : undefined,
     },
     bodyScroll: {
-      flex: 1,
+      width: '100%',
       minHeight: 0,
       ...Platform.select({
         web: {
-          flexBasis: 0,
           overflowY: 'auto',
           scrollbarWidth: 'thin',
           scrollbarColor: `${colors.border} transparent`,
         } as object,
-        default: {},
+        default: {
+          flex: 1,
+        },
       }),
     },
     bodyScrollContent: {
-      flexGrow: 1,
+      flexGrow: 0,
     },
     cardScrollHost: {
-      flex: 1,
+      width: '100%',
       minHeight: 0,
+      ...Platform.select({
+        default: {
+          flex: 1,
+        },
+      }),
     },
     bodyScrollWide: {
-      flex: 1,
       minWidth: 0,
       borderLeftWidth: StyleSheet.hairlineWidth,
       borderLeftColor: colors.borderLight,
+      ...Platform.select({
+        default: {
+          flex: 1,
+        },
+      }),
     },
     bodyScrollWideContent: {
       flexGrow: 1,
     },
     swipeDeck: {
-      flex: 1,
-      minHeight: 0,
       width: '100%',
-      height: '100%',
       ...Platform.select({
         web: {
           userSelect: 'none',
@@ -430,6 +441,13 @@ function createStyles(
       flexDirection: 'row',
       alignItems: 'center',
       justifyContent: 'flex-end',
+      // Keep «Публичная» clear of oak rivets / mug corners.
+      paddingRight: 2,
+      paddingBottom: 2,
+    },
+    footerOak: {
+      paddingRight: 10,
+      paddingBottom: 6,
     },
   });
 }
@@ -468,6 +486,8 @@ export function UserCard({
   showVisibility = true,
   blockedByMe = false,
   swipe,
+  badges,
+  auraId,
 }: UserCardProps) {
   const colors = useTheme();
   const styles = useThemedStyles((themeColors) =>
@@ -476,22 +496,24 @@ export function UserCard({
   const iconSize = CARD_SIZE_CONFIG[size].iconSize;
   const [officialNames, setOfficialNames] = useState<Set<string>>(new Set());
   const fillsDeck = layout === 'deck' && deckFill;
+  // Feed/swipe needs a fixed frame. List cards (favorites/skipped) grow with content
+  // so the action bar stays below the card instead of floating over the body.
+  const lockDeckHeight =
+    Boolean(deckSize) && (layout === 'deckWide' || fillsDeck || Boolean(swipe));
 
   const deckFrame: ViewStyle | undefined =
     (layout === 'deck' || layout === 'deckWide') && deckSize
-      ? layout === 'deck'
-        ? fillsDeck
-          ? {
-              width: '100%',
-              flex: 1,
-              minHeight: 0,
-            }
-          : {
-              width: '100%',
-            }
-        : {
+      ? lockDeckHeight
+        ? {
             width: '100%',
             height: deckSize.height,
+            maxHeight: deckSize.height,
+            minHeight: deckSize.height,
+            flexGrow: 0,
+            flexShrink: 0,
+          }
+        : {
+            width: '100%',
           }
       : undefined;
   const deckWidePhoto =
@@ -501,7 +523,9 @@ export function UserCard({
   const deckStackedPhoto =
     layout === 'deck' && deckSize?.photoHeight != null
       ? { height: deckSize.photoHeight, aspectRatio: undefined as undefined }
-      : undefined;
+      : layout === 'deck'
+        ? { aspectRatio: USER_CARD_PHOTO_ASPECT_RATIO_DECK }
+        : undefined;
 
   useEffect(() => {
     void getOfficialGameSystemNames().then(setOfficialNames);
@@ -510,6 +534,8 @@ export function UserCard({
   const isDeckLayout = layout === 'deck' || layout === 'deckWide';
   const isDeckStacked = layout === 'deck';
   const showBio = bio !== '—' && bio.trim() !== tagline.trim();
+  const resolvedAura = displayedAuraId(badges ?? [], auraId);
+  const isOakCard = resolvedAura === 'oak_shield';
 
   const infoRows = useMemo<InfoRowSpec[]>(() => {
     const timezoneLabel = playInfo.timezone
@@ -551,10 +577,12 @@ export function UserCard({
   const bodyContent = (
     <>
       <View style={styles.identityBlock}>
-        <Text style={styles.name}>
-          {name}
-          {age != null ? <Text style={styles.age}>, {age}</Text> : null}
-        </Text>
+        <NameWithBadges
+          name={age != null ? `${name}, ${age}` : name}
+          badges={badges}
+          textStyle={styles.name}
+          badgeSize={size === 'compact' ? 12 : 14}
+        />
         {blockedByMe ? (
           <View style={styles.blockedMark}>
             <Text style={styles.blockedMarkLabel}>У вас в чёрном списке</Text>
@@ -604,7 +632,7 @@ export function UserCard({
         <>
           <View style={styles.sectionDivider} />
 
-          <View style={styles.footer}>
+          <View style={[styles.footer, isOakCard ? styles.footerOak : null]}>
             <Badge label={visibility} variant={visibilityVariant} style={styles.visibilityBadge} />
           </View>
         </>
@@ -628,12 +656,19 @@ export function UserCard({
     />
   );
 
+  const photoAura = <QuestionnaireAura auraId={auraId} badges={badges} />;
   const photo = isDeckStacked ? (
     <View style={styles.photoSectionStacked}>
-      <View style={[styles.photoWrap, styles.photoWrapStacked, deckStackedPhoto]}>{photoImage}</View>
+      <View style={[styles.photoWrap, styles.photoWrapStacked, deckStackedPhoto]}>
+        {photoImage}
+        {photoAura}
+      </View>
     </View>
   ) : (
-    <View style={[styles.photoWrap, deckWidePhoto, deckStackedPhoto]}>{photoImage}</View>
+    <View style={[styles.photoWrap, deckWidePhoto, deckStackedPhoto]}>
+      {photoImage}
+      {photoAura}
+    </View>
   );
 
   const nativeScrollGesture = useMemo(
@@ -650,7 +685,7 @@ export function UserCard({
 
   const stackedBodyScroll = (
     <DeckScrollView
-      style={styles.bodyScroll}
+      style={[styles.bodyScroll, fillsDeck && deckSize ? { height: deckSize.height } : null]}
       contentContainerStyle={styles.bodyScrollContent}
       {...(Platform.OS === 'web' ? { className: 'user-card-body-scroll' } : {})}
       showsVerticalScrollIndicator
@@ -664,7 +699,7 @@ export function UserCard({
   );
 
   const stackedScroll = fillsDeck ? (
-    <View style={styles.cardScrollHost}>
+    <View style={[styles.cardScrollHost, deckSize ? { height: deckSize.height } : null]}>
       {nativeScrollGesture ? (
         <GestureDetector gesture={nativeScrollGesture}>{stackedBodyScroll}</GestureDetector>
       ) : (
@@ -713,11 +748,9 @@ export function UserCard({
     </View>
   );
 
-  if (!swipe) {
-    return card;
-  }
+  const cardRadius = isDeckStacked ? 20 : CARD_SIZE_CONFIG[size].borderRadius;
 
-  return (
+  const swipeCard = swipe ? (
     <SwipeBlock
       variant="corner"
       style={
@@ -737,6 +770,19 @@ export function UserCard({
       dismissRequest={swipe.dismissRequest}>
       {card}
     </SwipeBlock>
+  ) : (
+    card
+  );
+
+  return (
+    <QuestionnaireHighlight
+      auraId={auraId}
+      badges={badges}
+      radius={cardRadius}
+      overlay={false}
+      style={deckFrame}>
+      {swipeCard}
+    </QuestionnaireHighlight>
   );
 }
 

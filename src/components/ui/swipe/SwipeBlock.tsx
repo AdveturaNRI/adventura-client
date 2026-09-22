@@ -4,6 +4,7 @@ import {
   StyleSheet,
   Text,
   View,
+  type GestureResponderEvent,
   type LayoutChangeEvent,
   type ViewStyle,
 } from 'react-native';
@@ -50,6 +51,8 @@ type SwipeBlockProps = {
   resetKey?: string | number;
   /** Shared native scroll gesture so horizontal swipes coexist with vertical ScrollView. */
   nativeScrollGesture?: ReturnType<typeof Gesture.Native>;
+  /** Keep false for deck cards with outer FX (dragon / oak rim). */
+  clipContent?: boolean;
   onDismiss?: (direction: 'left' | 'right') => void;
   onSwipeLeft?: () => void;
   onSwipeRight?: () => void;
@@ -80,16 +83,40 @@ const PAN_ACTIVATE_X = 18;
 const PAN_FAIL_Y = 8;
 const PAN_HORIZONTAL_RATIO = 1.25;
 
+type WebPanState = {
+  startX: number;
+  startY: number;
+  originTranslate: number;
+  axis: 'undecided' | 'horizontal' | 'vertical';
+};
+
 const webDragStyle = (dragging: boolean): ViewStyle =>
   Platform.OS === 'web'
     ? ({
         cursor: dragging ? 'grabbing' : 'grab',
-        userSelect: dragging ? 'none' : 'auto',
+        userSelect: 'none',
+        WebkitUserSelect: 'none',
+        WebkitTouchCallout: 'none',
         touchAction: 'none',
         WebkitUserDrag: 'none',
         userDrag: 'none',
       } as unknown as ViewStyle)
     : {};
+
+function readPagePoint(event: GestureResponderEvent): { x: number; y: number } {
+  const native = event.nativeEvent as GestureResponderEvent['nativeEvent'] & {
+    touches?: Array<{ pageX?: number; pageY?: number }>;
+    pageX?: number;
+    pageY?: number;
+    clientX?: number;
+    clientY?: number;
+  };
+  const touch = native.touches?.[0];
+  return {
+    x: touch?.pageX ?? native.pageX ?? native.clientX ?? native.locationX ?? 0,
+    y: touch?.pageY ?? native.pageY ?? native.clientY ?? native.locationY ?? 0,
+  };
+}
 
 function getStripLimits(leftWidth: number, rightWidth: number) {
   const restX = -leftWidth;
@@ -119,6 +146,7 @@ function CornerSwipeBlock({
   dismissible = false,
   resetKey,
   nativeScrollGesture,
+  clipContent = true,
   onDismiss,
   onSwipeLeft,
   onSwipeRight,
@@ -323,136 +351,338 @@ function CornerSwipeBlock({
   const leftText = leftAction?.textColor ?? colors.onPrimary;
   const rightText = rightAction?.textColor ?? colors.onPrimary;
 
-  const pan = useMemo(
-    () =>
-      Gesture.Pan()
-        .enabled(gesturesEnabled)
-        .manualActivation(true)
-        .simultaneousWithExternalGesture(nativeScrollGesture ?? Gesture.Native())
-        .mouseButton(MouseButton.LEFT)
-        .onTouchesDown((event) => {
-          'worklet';
-          const touch = event.allTouches[0];
-          if (touch) {
-            touchStartX.value = touch.x;
-            touchStartY.value = touch.y;
-          }
-          isPanActivated.value = false;
-        })
-        .onTouchesMove((_event, state) => {
-          'worklet';
-          if (isPanActivated.value) {
-            return;
-          }
+  const webPanRef = useRef<WebPanState | null>(null);
+  const webMouseCleanupRef = useRef<(() => void) | null>(null);
+  const webSawTouchRef = useRef(false);
 
-          const touch = _event.allTouches[0];
-          if (!touch) {
-            return;
-          }
+  const finishWebPan = useCallback(
+    (velocityX = 0) => {
+      const state = webPanRef.current;
+      webPanRef.current = null;
+      webMouseCleanupRef.current?.();
+      webMouseCleanupRef.current = null;
+      endDrag();
 
-          const dx = touch.x - touchStartX.value;
-          const dy = touch.y - touchStartY.value;
-          const absDx = Math.abs(dx);
-          const absDy = Math.abs(dy);
+      if (!state || state.axis !== 'horizontal') {
+        translateX.value = withSpring(restX, SPRING);
+        return;
+      }
 
-          if (absDy > PAN_FAIL_Y && absDy > absDx) {
-            state.fail();
-            return;
-          }
+      const projectedX = translateX.value + velocityX * 0.08;
 
-          if (absDx > PAN_ACTIVATE_X && absDx > absDy * PAN_HORIZONTAL_RATIO) {
-            isPanActivated.value = true;
-            state.activate();
-          }
-        })
-        .onTouchesUp((_event, state) => {
-          'worklet';
-          if (!isPanActivated.value) {
-            state.fail();
-          }
-        })
-        .onStart(() => {
-          if (!isExiting.value) {
-            enterOpacity.value = 1;
-            enterScale.value = 1;
-            enterTranslateY.value = 0;
-          }
-          startX.value = translateX.value;
-          runOnJS(startDrag)();
-        })
-        .onUpdate((event) => {
-          const nextX = startX.value + event.translationX;
-          translateX.value = Math.min(maxX, Math.max(minX, nextX));
-        })
-        .onEnd((event) => {
-          const projectedX = translateX.value + event.velocityX * 0.08;
+      if (leftAction && projectedX >= leftWidth * 0.4) {
+        if (dismissible) {
+          startDismiss('right', true, false, translateX.value);
+          return;
+        }
+        translateX.value = withSpring(restX, SPRING);
+        leftAction.onPress?.();
+        onSwipeRight?.();
+        return;
+      }
 
-          if (leftAction && projectedX >= leftWidth * 0.4) {
-            if (dismissible) {
-              runOnJS(startDismiss)('right', true, false, translateX.value);
-              return;
-            }
-            translateX.value = withSpring(restX, SPRING);
-            if (leftAction.onPress) {
-              runOnJS(leftAction.onPress)();
-            }
-            if (onSwipeRight) {
-              runOnJS(onSwipeRight)();
-            }
-            return;
-          }
+      if (rightAction && projectedX <= -rightWidth * 0.4) {
+        if (dismissible) {
+          startDismiss('left', false, true, translateX.value);
+          return;
+        }
+        translateX.value = withSpring(restX, SPRING);
+        rightAction.onPress?.();
+        onSwipeLeft?.();
+        return;
+      }
 
-          if (rightAction && projectedX <= -rightWidth * 0.4) {
-            if (dismissible) {
-              runOnJS(startDismiss)('left', false, true, translateX.value);
-              return;
-            }
-            translateX.value = withSpring(restX, SPRING);
-            if (rightAction.onPress) {
-              runOnJS(rightAction.onPress)();
-            }
-            if (onSwipeLeft) {
-              runOnJS(onSwipeLeft)();
-            }
-            return;
-          }
-
-          translateX.value = withSpring(restX, SPRING);
-        })
-        .onFinalize((_event, success) => {
-          isPanActivated.value = false;
-          runOnJS(endDrag)();
-          if (!success && !isExiting.value) {
-            translateX.value = withSpring(restX, SPRING);
-          }
-        }),
+      translateX.value = withSpring(restX, SPRING);
+    },
     [
       dismissible,
       endDrag,
-      enterOpacity,
-      enterScale,
-      enterTranslateY,
-      gesturesEnabled,
-      isExiting,
-      isPanActivated,
       leftAction,
       leftWidth,
-      maxX,
-      minX,
       onSwipeLeft,
       onSwipeRight,
       restX,
       rightAction,
       rightWidth,
       startDismiss,
-      startDrag,
-      startX,
-      nativeScrollGesture,
-      touchStartX,
-      touchStartY,
       translateX,
     ],
   );
+
+  const onWebPanStart = useCallback(
+    (x: number, y: number) => {
+      if (!gesturesEnabled || isExiting.value) {
+        return;
+      }
+      webPanRef.current = {
+        startX: x,
+        startY: y,
+        originTranslate: translateX.value,
+        axis: 'undecided',
+      };
+      startX.value = translateX.value;
+      startDrag();
+    },
+    [gesturesEnabled, isExiting, startDrag, startX, translateX],
+  );
+
+  const onWebPanMove = useCallback(
+    (x: number, y: number) => {
+      const state = webPanRef.current;
+      if (!state) {
+        return;
+      }
+
+      const dx = x - state.startX;
+      const dy = y - state.startY;
+      const absDx = Math.abs(dx);
+      const absDy = Math.abs(dy);
+
+      if (state.axis === 'undecided') {
+        if (absDy > PAN_FAIL_Y && absDy > absDx) {
+          state.axis = 'vertical';
+          translateX.value = restX;
+          endDrag();
+          return;
+        }
+        if (absDx > PAN_ACTIVATE_X && absDx > absDy * PAN_HORIZONTAL_RATIO) {
+          state.axis = 'horizontal';
+        } else {
+          return;
+        }
+      }
+
+      if (state.axis === 'vertical') {
+        return;
+      }
+
+      translateX.value = Math.min(maxX, Math.max(minX, state.originTranslate + dx));
+    },
+    [endDrag, maxX, minX, restX, translateX],
+  );
+
+  const onWebTouchStart = useCallback(
+    (event: GestureResponderEvent) => {
+      webSawTouchRef.current = true;
+      const point = readPagePoint(event);
+      onWebPanStart(point.x, point.y);
+    },
+    [onWebPanStart],
+  );
+
+  const onWebTouchMove = useCallback(
+    (event: GestureResponderEvent) => {
+      const state = webPanRef.current;
+      if (!state || state.axis === 'vertical') {
+        return;
+      }
+      if (state.axis === 'horizontal') {
+        event.preventDefault?.();
+      }
+      const point = readPagePoint(event);
+      onWebPanMove(point.x, point.y);
+    },
+    [onWebPanMove],
+  );
+
+  const onWebTouchEnd = useCallback(() => {
+    finishWebPan(0);
+    setTimeout(() => {
+      webSawTouchRef.current = false;
+    }, 400);
+  }, [finishWebPan]);
+
+  const onWebTouchCancel = useCallback(() => {
+    webPanRef.current = null;
+    webMouseCleanupRef.current?.();
+    webMouseCleanupRef.current = null;
+    translateX.value = withSpring(restX, SPRING);
+    endDrag();
+    setTimeout(() => {
+      webSawTouchRef.current = false;
+    }, 400);
+  }, [endDrag, restX, translateX]);
+
+  const onWebMouseDown = useCallback(
+    (event: GestureResponderEvent) => {
+      if (webSawTouchRef.current || typeof window === 'undefined') {
+        return;
+      }
+      const native = event.nativeEvent as unknown as {
+        button?: number;
+        pageX?: number;
+        pageY?: number;
+        clientX?: number;
+        clientY?: number;
+        preventDefault?: () => void;
+      };
+      if (native.button != null && native.button !== 0) {
+        return;
+      }
+      native.preventDefault?.();
+      const startPoint = {
+        x: native.pageX ?? native.clientX ?? 0,
+        y: native.pageY ?? native.clientY ?? 0,
+      };
+      onWebPanStart(startPoint.x, startPoint.y);
+
+      const onMove = (ev: MouseEvent) => {
+        onWebPanMove(ev.pageX, ev.pageY);
+      };
+      const onUp = (ev: MouseEvent) => {
+        finishWebPan(ev.movementX ?? 0);
+      };
+      window.addEventListener('mousemove', onMove);
+      window.addEventListener('mouseup', onUp);
+      webMouseCleanupRef.current = () => {
+        window.removeEventListener('mousemove', onMove);
+        window.removeEventListener('mouseup', onUp);
+      };
+    },
+    [finishWebPan, onWebPanMove, onWebPanStart],
+  );
+
+  useEffect(
+    () => () => {
+      webMouseCleanupRef.current?.();
+      webMouseCleanupRef.current = null;
+    },
+    [],
+  );
+
+  const pan = useMemo(() => {
+    const base = Gesture.Pan()
+      .enabled(gesturesEnabled)
+      .manualActivation(true)
+      .mouseButton(MouseButton.LEFT)
+      .onTouchesDown((event) => {
+        'worklet';
+        const touch = event.allTouches[0];
+        if (touch) {
+          touchStartX.value = touch.x;
+          touchStartY.value = touch.y;
+        }
+        isPanActivated.value = false;
+      })
+      .onTouchesMove((_event, state) => {
+        'worklet';
+        if (isPanActivated.value) {
+          return;
+        }
+
+        const touch = _event.allTouches[0];
+        if (!touch) {
+          return;
+        }
+
+        const dx = touch.x - touchStartX.value;
+        const dy = touch.y - touchStartY.value;
+        const absDx = Math.abs(dx);
+        const absDy = Math.abs(dy);
+
+        if (absDy > PAN_FAIL_Y && absDy > absDx) {
+          state.fail();
+          return;
+        }
+
+        if (absDx > PAN_ACTIVATE_X && absDx > absDy * PAN_HORIZONTAL_RATIO) {
+          isPanActivated.value = true;
+          state.activate();
+        }
+      })
+      .onTouchesUp((_event, state) => {
+        'worklet';
+        if (!isPanActivated.value) {
+          state.fail();
+        }
+      });
+
+    const withScroll = nativeScrollGesture
+      ? base.simultaneousWithExternalGesture(nativeScrollGesture)
+      : base;
+
+    return withScroll
+      .onStart(() => {
+        if (!isExiting.value) {
+          enterOpacity.value = 1;
+          enterScale.value = 1;
+          enterTranslateY.value = 0;
+        }
+        startX.value = translateX.value;
+        runOnJS(startDrag)();
+      })
+      .onUpdate((event) => {
+        const nextX = startX.value + event.translationX;
+        translateX.value = Math.min(maxX, Math.max(minX, nextX));
+      })
+      .onEnd((event) => {
+        const projectedX = translateX.value + event.velocityX * 0.08;
+
+        if (leftAction && projectedX >= leftWidth * 0.4) {
+          if (dismissible) {
+            runOnJS(startDismiss)('right', true, false, translateX.value);
+            return;
+          }
+          translateX.value = withSpring(restX, SPRING);
+          if (leftAction.onPress) {
+            runOnJS(leftAction.onPress)();
+          }
+          if (onSwipeRight) {
+            runOnJS(onSwipeRight)();
+          }
+          return;
+        }
+
+        if (rightAction && projectedX <= -rightWidth * 0.4) {
+          if (dismissible) {
+            runOnJS(startDismiss)('left', false, true, translateX.value);
+            return;
+          }
+          translateX.value = withSpring(restX, SPRING);
+          if (rightAction.onPress) {
+            runOnJS(rightAction.onPress)();
+          }
+          if (onSwipeLeft) {
+            runOnJS(onSwipeLeft)();
+          }
+          return;
+        }
+
+        translateX.value = withSpring(restX, SPRING);
+      })
+      .onFinalize((_event, success) => {
+        isPanActivated.value = false;
+        runOnJS(endDrag)();
+        if (!success && !isExiting.value) {
+          translateX.value = withSpring(restX, SPRING);
+        }
+      });
+  }, [
+    dismissible,
+    endDrag,
+    enterOpacity,
+    enterScale,
+    enterTranslateY,
+    gesturesEnabled,
+    isExiting,
+    isPanActivated,
+    leftAction,
+    leftWidth,
+    maxX,
+    minX,
+    onSwipeLeft,
+    onSwipeRight,
+    restX,
+    rightAction,
+    rightWidth,
+    startDismiss,
+    startDrag,
+    startX,
+    nativeScrollGesture,
+    touchStartX,
+    touchStartY,
+    translateX,
+  ]);
 
   const cardStyle = useAnimatedStyle(() => {
     const tilt = Math.max(-MAX_TILT, Math.min(MAX_TILT, translateX.value * 0.07));
@@ -520,8 +750,39 @@ function CornerSwipeBlock({
     );
   })();
 
+  const cardShellStyle = [
+    styles.cornerCard,
+    !clipContent && styles.cornerCardOpen,
+    styles.cornerCardFront,
+    fillsContainer && styles.cornerCardFill,
+    webDragStyle(dragging),
+    cardStyle,
+  ];
+
+  const cardNode =
+    Platform.OS === 'web' ? (
+      <Animated.View
+        style={cardShellStyle}
+        onTouchStart={onWebTouchStart}
+        onTouchMove={onWebTouchMove}
+        onTouchEnd={onWebTouchEnd}
+        onTouchCancel={onWebTouchCancel}
+        // @ts-expect-error RN Web mouse drag
+        onMouseDown={onWebMouseDown}
+        {...({ dataSet: { advSwipeDeck: '1' } } as object)}>
+        {children}
+      </Animated.View>
+    ) : (
+      <GestureDetector gesture={pan}>
+        <Animated.View style={cardShellStyle}>{children}</Animated.View>
+      </GestureDetector>
+    );
+
   return (
-    <View style={[styles.cornerWrap, style]} onLayout={onContainerLayout}>
+    <View
+      style={[styles.cornerWrap, style]}
+      onLayout={onContainerLayout}
+      {...(Platform.OS === 'web' ? ({ dataSet: { advSwipeDeck: '1' } } as object) : null)}>
       {leftAction ? (
         <Animated.View
           pointerEvents="none"
@@ -548,23 +809,17 @@ function CornerSwipeBlock({
         </Animated.View>
       ) : null}
 
-      <GestureDetector gesture={pan}>
-        <Animated.View
-          style={[
-            styles.cornerCard,
-            styles.cornerCardFront,
-            fillsContainer && styles.cornerCardFill,
-            webDragStyle(dragging),
-            cardStyle,
-          ]}>
-          {children}
-        </Animated.View>
-      </GestureDetector>
+      {cardNode}
 
       {outgoingCard ? (
         <Animated.View
           pointerEvents="none"
-          style={[styles.cornerCard, styles.cornerCardExit, exitCardStyle]}>
+          style={[
+            styles.cornerCard,
+            !clipContent && styles.cornerCardOpen,
+            styles.cornerCardExit,
+            exitCardStyle,
+          ]}>
           {outgoingCard}
         </Animated.View>
       ) : null}
@@ -762,6 +1017,12 @@ function createSwipeStyles(colors: ThemeColors) {
     cornerWrap: {
       position: 'relative',
       overflow: 'visible',
+      ...Platform.select({
+        web: {
+          touchAction: 'none',
+        } as object,
+        default: {},
+      }),
     },
     cornerCard: {
       borderRadius: BLOCK_RADIUS,
@@ -769,14 +1030,25 @@ function createSwipeStyles(colors: ThemeColors) {
       borderColor: colors.border,
       backgroundColor: colors.surface,
       overflow: 'hidden',
+      ...Platform.select({
+        web: {
+          touchAction: 'none',
+        } as object,
+        default: {},
+      }),
+    },
+    cornerCardOpen: {
+      overflow: 'visible',
+      backgroundColor: 'transparent',
+      borderWidth: 0,
     },
     cornerCardFront: {
       zIndex: 1,
     },
     cornerCardFill: {
-      flex: 1,
-      minHeight: 0,
+      width: '100%',
       height: '100%',
+      minHeight: 0,
     },
     cornerCardExit: {
       position: 'absolute',

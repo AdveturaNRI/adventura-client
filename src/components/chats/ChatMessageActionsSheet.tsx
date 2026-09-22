@@ -12,7 +12,9 @@ type ChatMessageActionsSheetProps = {
   onReply: () => void;
   onForward: () => void;
   onSelectMore: () => void;
+  onCopy?: () => void;
   allowForward?: boolean;
+  allowCopy?: boolean;
 };
 
 function createStyles(colors: ThemeColors, isDesktopWeb: boolean) {
@@ -69,7 +71,9 @@ export function ChatMessageActionsSheet({
   onReply,
   onForward,
   onSelectMore,
+  onCopy,
   allowForward = true,
+  allowCopy = false,
 }: ChatMessageActionsSheetProps) {
   const colors = useTheme();
   const isDesktopWeb = useIsDesktopWeb();
@@ -85,6 +89,15 @@ export function ChatMessageActionsSheet({
         <Pressable style={StyleSheet.absoluteFill} onPress={onClose} accessibilityRole="button" />
         <View style={styles.sheet}>
           <Text style={styles.title}>Сообщение</Text>
+          {allowCopy && onCopy ? (
+            <Pressable
+              accessibilityRole="button"
+              onPress={onCopy}
+              style={({ pressed }) => [styles.action, pressed && styles.actionPressed]}>
+              <Ionicons name="copy-outline" size={20} color={colors.primary} />
+              <Text style={styles.actionLabel}>Копировать</Text>
+            </Pressable>
+          ) : null}
           <Pressable
             accessibilityRole="button"
             onPress={onReply}

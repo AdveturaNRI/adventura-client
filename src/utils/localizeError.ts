@@ -45,6 +45,16 @@ function translateKnownErrorMessage(message: string): string | null {
   if (isGenericFileTooLargeMessage(message)) {
     return getFileTooLargeMessage();
   }
+  if (/invalid constraint|overconstrained/i.test(message)) {
+    return 'Не удалось открыть микрофон';
+  }
+  if (
+    /not allowed by the user agent|notallowederror|permission denied|permission dismissed/i.test(
+      message,
+    )
+  ) {
+    return 'Не удалось получить доступ к микрофону';
+  }
 
   return null;
 }

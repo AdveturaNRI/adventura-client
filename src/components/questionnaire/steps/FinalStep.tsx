@@ -5,9 +5,12 @@ import { useIsDesktopWeb } from '@/components/navigation/DesktopThemeToggle';
 import { FinalStepActions } from '@/components/questionnaire/FinalStepActions';
 import { QuestionnaireHint } from '@/components/questionnaire/QuestionnaireHint';
 import { QuestionnaireVisibilityNotice } from '@/components/questionnaire/QuestionnaireVisibilityNotice';
+import { getCardFxOverhang } from '@/components/rewards/card-fx-layout';
 import { UserCard } from '@/components/ui';
 import type { UserCardDeckSize } from '@/components/ui/cards/UserCard';
 import { FontSize, Spacing, type ThemeColors } from '@/constants/theme';
+import { useProfile } from '@/context/ProfileContext';
+import { displayedAuraId } from '@/data/rewards/catalog';
 import { useThemedStyles } from '@/hooks/use-themed-styles';
 import {
   FINAL_STEP,
@@ -82,15 +85,25 @@ type FinalStepProps = {
   onDelete: () => void;
 };
 
-function createStyles(colors: ThemeColors, isDesktopWeb: boolean) {
+function createStyles(
+  colors: ThemeColors,
+  isDesktopWeb: boolean,
+  overhang: { top: number; bottom: number; left: number; right: number },
+) {
+  const sidePad = Math.max(overhang.left, overhang.right);
   return StyleSheet.create({
     previewWrap: {
       alignItems: 'center',
       width: '100%',
+      overflow: 'visible',
+      paddingTop: overhang.top,
+      paddingHorizontal: sidePad,
     },
     previewCard: {
       width: '100%',
       maxWidth: isDesktopWeb ? DESKTOP_CONTENT_MAX_WIDTH : undefined,
+      overflow: 'visible',
+      marginBottom: overhang.bottom,
     },
     previewCaption: {
       marginTop: Spacing.sm,
@@ -112,9 +125,23 @@ export function FinalStep({
 }: FinalStepProps) {
   const isDesktopWeb = useIsDesktopWeb();
   const { width: windowWidth } = useWindowDimensions();
+  const { profile } = useProfile();
   const screenStyles = useQuestionnaireScreenStyles();
-  const styles = useThemedStyles((colors) => createStyles(colors, isDesktopWeb));
-  const cardProps = useMemo(() => questionnaireDraftToUserCardProps(draft), [draft]);
+  const auraId = displayedAuraId(
+    profile?.perks?.visibleBadges ?? profile?.perks?.badges ?? [],
+    profile?.perks?.questionnaireAuraId,
+  );
+  // UserCard wraps with overlay={false} → wide FX (mugs / dragon peek).
+  const overhang = getCardFxOverhang(auraId, true);
+  const styles = useThemedStyles((colors) => createStyles(colors, isDesktopWeb, overhang));
+  const cardProps = useMemo(
+    () =>
+      questionnaireDraftToUserCardProps(draft, {
+        auraId: profile?.perks?.questionnaireAuraId,
+        badges: profile?.perks?.visibleBadges ?? profile?.perks?.badges,
+      }),
+    [draft, profile?.perks],
+  );
   const completion = useMemo(() => getQuestionnaireCompletionFromDraft(draft), [draft]);
   const showEdit = completion.isComplete;
 
@@ -148,6 +175,7 @@ export function FinalStep({
             {
               width: deckSize.width,
               height: deckSize.height,
+              minHeight: deckSize.height,
               maxWidth: deckSize.width,
             },
           ]}>

@@ -17,6 +17,7 @@ export default function MainTabsLayout() {
       }}>
       <Tabs.Screen name="wanderers" options={{ title: 'Странники' }} />
       <Tabs.Screen name="games" options={{ title: 'Игры' }} />
+      <Tabs.Screen name="characters" options={{ href: null, title: 'Персонажи' }} />
       <Tabs.Screen name="clubs" options={{ title: 'Клубы' }} />
       <Tabs.Screen name="dice" options={{ title: 'Дайсы' }} />
       <Tabs.Screen name="generators" options={{ title: 'Генераторы' }} />

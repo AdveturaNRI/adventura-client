@@ -29,18 +29,60 @@ let messagingPromise: Promise<import('firebase/messaging').Messaging | null> | n
 let vapidCache: { key: string; at: number } | null = null;
 const VAPID_CACHE_MS = 5 * 60_000;
 
-function canUseWebPush(): boolean {
+function canUseWebPushApis(): boolean {
   return (
     Platform.OS === 'web' &&
     typeof window !== 'undefined' &&
+    typeof navigator !== 'undefined' &&
     'serviceWorker' in navigator &&
     'PushManager' in window &&
     typeof Notification !== 'undefined'
   );
 }
 
+/** Low-level browser APIs only (no Firebase / VAPID). */
+function canUseWebPush(): boolean {
+  return canUseWebPushApis() && Boolean(window.isSecureContext);
+}
+
+export type WebPushBlockReason =
+  | null
+  | 'unsupported'
+  | 'insecure'
+  | 'firebase_unconfigured';
+
+/** Why the settings toggle is disabled — null means ready. */
+export function getWebPushBlockReason(): WebPushBlockReason {
+  if (Platform.OS !== 'web' || typeof window === 'undefined') {
+    return 'unsupported';
+  }
+  if (!window.isSecureContext) {
+    return 'insecure';
+  }
+  if (!canUseWebPushApis()) {
+    return 'unsupported';
+  }
+  if (!isFirebaseWebConfigured()) {
+    return 'firebase_unconfigured';
+  }
+  return null;
+}
+
 export function isWebPushSupported(): boolean {
-  return canUseWebPush() && isFirebaseWebConfigured();
+  return getWebPushBlockReason() === null;
+}
+
+export function webPushBlockHint(reason: WebPushBlockReason): string | null {
+  switch (reason) {
+    case 'insecure':
+      return 'Уведомления сейчас недоступны.';
+    case 'firebase_unconfigured':
+      return 'Уведомления сейчас недоступны.';
+    case 'unsupported':
+      return 'Этот браузер не поддерживает уведомления.';
+    default:
+      return null;
+  }
 }
 
 export function getNotificationPermission(): NotificationPermission | 'unsupported' {

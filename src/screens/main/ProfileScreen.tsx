@@ -47,6 +47,9 @@ function handleMenuPress(key: string, router: ReturnType<typeof useRouter>, exte
     case 'profile':
       router.push('/questionnaire');
       return;
+    case 'appearance':
+      router.push('/profile-appearance');
+      return;
     case 'settings':
       router.push('/settings');
       return;
@@ -114,6 +117,8 @@ export default function ProfileScreen() {
           accountLabel={getProfileTagline(user.isGuest, user.email)}
           isDesktopWeb={isDesktopWeb}
           logoutButton={isDesktopWeb ? logoutButton : undefined}
+          badges={profile?.perks?.visibleBadges ?? profile?.perks?.badges}
+          frameId={profile?.perks ? profile.perks.avatarFrameId : undefined}
         />
 
         <EmailVerificationBanner />

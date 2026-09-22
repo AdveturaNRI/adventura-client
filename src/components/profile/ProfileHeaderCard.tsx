@@ -1,7 +1,9 @@
 import type { ReactNode } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
+import { NameWithBadges } from '@/components/rewards/RewardBadge';
 import { ProfileAvatarEditor } from '@/components/profile/ProfileAvatarEditor';
+import type { AvatarFrameId, RewardBadgeType } from '@/data/rewards/catalog';
 import { FontSize, Spacing, type ThemeColors } from '@/constants/theme';
 import { useThemedStyles } from '@/hooks/use-themed-styles';
 
@@ -11,6 +13,8 @@ type ProfileHeaderCardProps = {
   accountLabel: string;
   isDesktopWeb: boolean;
   logoutButton?: ReactNode;
+  badges?: RewardBadgeType[];
+  frameId?: AvatarFrameId | string | null;
 };
 
 function formatNicknameForDisplay(nickname: string): string {
@@ -67,15 +71,22 @@ export function ProfileHeaderCard({
   accountLabel,
   isDesktopWeb,
   logoutButton,
+  badges,
+  frameId,
 }: ProfileHeaderCardProps) {
   const styles = useThemedStyles((colors) => createStyles(colors, isDesktopWeb));
 
   if (isDesktopWeb) {
     return (
       <View style={styles.card}>
-        <ProfileAvatarEditor nickname={nickname} avatarUrl={avatarUrl} size={96} />
+        <ProfileAvatarEditor nickname={nickname} avatarUrl={avatarUrl} size={96} badges={badges} frameId={frameId} />
         <View style={styles.desktopMain}>
-          <Text style={styles.name}>{formatNicknameForDisplay(nickname)}</Text>
+          <NameWithBadges
+            name={formatNicknameForDisplay(nickname)}
+            badges={badges}
+            textStyle={styles.name}
+            badgeSize={14}
+          />
           <Text style={styles.accountLabel}>{accountLabel}</Text>
         </View>
         {logoutButton ? <View style={styles.desktopLogout}>{logoutButton}</View> : null}
@@ -85,8 +96,13 @@ export function ProfileHeaderCard({
 
   return (
     <View style={styles.card}>
-      <ProfileAvatarEditor nickname={nickname} avatarUrl={avatarUrl} size={80} />
-      <Text style={styles.name}>{formatNicknameForDisplay(nickname)}</Text>
+      <ProfileAvatarEditor nickname={nickname} avatarUrl={avatarUrl} size={80} badges={badges} frameId={frameId} />
+      <NameWithBadges
+        name={formatNicknameForDisplay(nickname)}
+        badges={badges}
+        textStyle={styles.name}
+        badgeSize={14}
+      />
       <Text style={styles.accountLabel}>{accountLabel}</Text>
     </View>
   );

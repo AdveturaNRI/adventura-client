@@ -185,17 +185,21 @@ export function ChatAudioPlayer({
     return () => cancelAnimationFrame(frame);
   }, [live]);
 
-  // Unheard incoming = bright white. Heard / own = faded bars.
-  const dimColor = heard
-    ? mine
+  // Own (blue) bubbles: white bars. Incoming (light) bubbles: ink/primary — never #fff.
+  const dimColor = mine
+    ? heard
       ? 'rgba(255,255,255,0.42)'
-      : `${textColor}55`
-    : '#FFFFFF';
-  const playedColor = heard
-    ? mine
-      ? 'rgba(255,255,255,0.82)'
-      : `${textColor}CC`
-    : 'rgba(21, 122, 254, 0.55)';
+      : 'rgba(255,255,255,0.72)'
+    : heard
+      ? `${textColor}66`
+      : `${accentColor}99`;
+  const playedColor = mine
+    ? heard
+      ? 'rgba(255,255,255,0.88)'
+      : '#FFFFFF'
+    : heard
+      ? textColor
+      : accentColor;
 
   return (
     <Pressable

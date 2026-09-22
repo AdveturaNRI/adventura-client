@@ -34,6 +34,7 @@ export function createQuestionnaireScreenStyles(
       width: '100%',
       alignItems: 'center',
       overflow: 'hidden',
+      position: 'relative',
       backgroundColor: colors.background,
       ...(Platform.OS === 'web' ? ({ overflowX: 'hidden' } as object) : null),
     },

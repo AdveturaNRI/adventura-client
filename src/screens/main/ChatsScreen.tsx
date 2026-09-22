@@ -23,8 +23,10 @@ import { CreateGroupDialog, contactsFromConversations } from '@/components/chats
 import { CrownOffIcon } from '@/components/chats/CrownOffIcon';
 import { DeleteChatDialog } from '@/components/chats/DeleteChatDialog';
 import { MobileScreenHeader } from '@/components/navigation/MobileScreenHeader';
+import { UserAvatar } from '@/components/navigation/UserAvatar';
 import { useIsDesktopSidebarVisible } from '@/components/navigation/DesktopThemeToggle';
 import { ScreenTransition } from '@/components/navigation/ScreenTransition';
+import { avatarFrameOuterSize } from '@/components/rewards/AvatarFrame';
 import { toast } from '@/components/ui';
 import { FontSize, Spacing, type ThemeColors } from '@/constants/theme';
 import { useAuth } from '@/context/AuthContext';
@@ -52,6 +54,24 @@ import { localizeErrorMessage } from '@/utils/localizeError';
 
 function isGroupChat(item: ConversationListItem) {
   return item.type === 'group';
+}
+
+/** Одинаковый путь (игнор query) — оставляем старый url, чтобы Image не перезагружался. */
+function stableAvatarUrl(prevUrl?: string | null, nextUrl?: string | null) {
+  const prev = prevUrl?.trim() || null;
+  const next = nextUrl?.trim() || null;
+  if (!prev) {
+    return next;
+  }
+  if (!next) {
+    return prev;
+  }
+  if (prev === next) {
+    return prev;
+  }
+  const prevPath = prev.split('?')[0];
+  const nextPath = next.split('?')[0];
+  return prevPath === nextPath ? prev : next;
 }
 
 function sortConversations(items: ConversationListItem[]) {
@@ -228,13 +248,12 @@ function createStyles(colors: ThemeColors, isRail: boolean, isDark: boolean) {
       flexShrink: 0,
     },
     avatarWrap: {
-      width: 48,
-      height: 48,
+      width: avatarFrameOuterSize(40),
+      height: avatarFrameOuterSize(40),
       flexShrink: 0,
-    },
-    avatarFavorite: {
-      borderWidth: 1.5,
-      borderColor: '#D4AF37',
+      alignItems: 'center',
+      justifyContent: 'center',
+      overflow: 'visible',
     },
     avatar: {
       width: 48,
@@ -448,6 +467,9 @@ function formatPreview(item: ConversationListItem) {
     // Уже отформатированное превью с API / старый кэш
     return raw || 'Бросок костей';
   }
+  if (item.lastMessage.kind === 'missed_voice_call') {
+    return 'Пропущенный звонок';
+  }
   if (item.lastMessage.body?.trim()) {
     return item.lastMessage.body.trim();
   }
@@ -512,6 +534,7 @@ export default function ChatsScreen({ variant = 'page' }: ChatsScreenProps) {
     lastConversationUpdate,
     lastConversationDeleted,
     lastMessage,
+    lastPresence,
     publishConversationUpdate,
   } = useRealtime();
   const { user } = useAuth();
@@ -574,20 +597,64 @@ export default function ChatsScreen({ variant = 'page' }: ChatsScreenProps) {
     setItems((prev) => {
       const exists = prev.some((item) => item.id === lastConversationUpdate.id);
       const next = exists
-        ? prev.map((item) =>
-            item.id === lastConversationUpdate.id
-              ? {
-                  ...lastConversationUpdate,
-                  isPinned: lastConversationUpdate.isPinned ?? item.isPinned,
-                  pinSortOrder:
-                    lastConversationUpdate.pinSortOrder ?? item.pinSortOrder ?? null,
-                }
-              : item,
-          )
+        ? prev.map((item) => {
+            if (item.id !== lastConversationUpdate.id) {
+              return item;
+            }
+            const nextPeer = lastConversationUpdate.peer;
+            const prevPeer = item.peer;
+            const peer =
+              nextPeer && prevPeer && nextPeer.id === prevPeer.id
+                ? {
+                    ...nextPeer,
+                    avatarUrl: stableAvatarUrl(prevPeer.avatarUrl, nextPeer.avatarUrl),
+                    avatarFrameId: nextPeer.avatarFrameId ?? prevPeer.avatarFrameId,
+                    badges: nextPeer.badges ?? prevPeer.badges,
+                    nickname: nextPeer.nickname || prevPeer.nickname,
+                  }
+                : nextPeer;
+            return {
+              ...lastConversationUpdate,
+              peer,
+              isPinned: lastConversationUpdate.isPinned ?? item.isPinned,
+              pinSortOrder:
+                lastConversationUpdate.pinSortOrder ?? item.pinSortOrder ?? null,
+            };
+          })
         : [lastConversationUpdate, ...prev];
       return sortConversations(next);
     });
   }, [lastConversationUpdate]);
+
+  useEffect(() => {
+    if (!lastPresence) {
+      return;
+    }
+    setItems((prev) => {
+      let changed = false;
+      const next = prev.map((item) => {
+        if (!item.peer || item.peer.id !== lastPresence.userId) {
+          return item;
+        }
+        if (
+          item.peer.online === lastPresence.online &&
+          item.peer.lastSeenAt === lastPresence.lastSeenAt
+        ) {
+          return item;
+        }
+        changed = true;
+        return {
+          ...item,
+          peer: {
+            ...item.peer,
+            online: lastPresence.online,
+            lastSeenAt: lastPresence.lastSeenAt,
+          },
+        };
+      });
+      return changed ? next : prev;
+    });
+  }, [lastPresence]);
 
   useEffect(() => {
     if (!lastMessage) {
@@ -909,7 +976,6 @@ export default function ChatsScreen({ variant = 'page' }: ChatsScreenProps) {
     ({ item, drag, isActive }: RenderItemParams<ConversationListItem>) => {
       const group = isGroupChat(item);
       const title = conversationTitle(item);
-      const initial = [...title.trim()][0]?.toUpperCase() ?? '?';
       const timeLabel = formatListTime(item.lastMessage?.createdAt ?? item.updatedAt);
       const selected = Boolean(pathname?.includes(`/chats/${item.id}`));
       const isFavorite =
@@ -985,18 +1051,13 @@ export default function ChatsScreen({ variant = 'page' }: ChatsScreenProps) {
                     )}
                   </View>
                 ) : (
-                  <View style={[localStyles.avatar, isFavorite && localStyles.avatarFavorite]}>
-                    {item.peer?.avatarUrl ? (
-                      <Image
-                        source={{ uri: item.peer.avatarUrl }}
-                        style={localStyles.avatarImage}
-                      />
-                    ) : (
-                      <View style={localStyles.avatarFill}>
-                        <Text style={localStyles.avatarInitial}>{initial}</Text>
-                      </View>
-                    )}
-                  </View>
+                  <UserAvatar
+                    nickname={item.peer?.nickname ?? title}
+                    avatarUrl={item.peer?.avatarUrl}
+                    size={40}
+                    badges={item.peer?.badges}
+                    frameId={item.peer?.avatarFrameId}
+                  />
                 )}
                 {isPinned ? (
                   <View style={localStyles.pinSeal} accessibilityLabel="Закреплён">
@@ -1177,7 +1238,7 @@ export default function ChatsScreen({ variant = 'page' }: ChatsScreenProps) {
                         color={colors.primary}
                         style={menuTarget.isPinned ? { transform: [{ rotate: '-45deg' }] } : undefined}
                       />
-                      <Text style={localStyles.menuItemLabel}>
+                      <Text style={[localStyles.menuItemLabel, { color: colors.primary }]}>
                         {menuTarget.isPinned ? 'Открепить' : 'Закрепить'}
                       </Text>
                     </Pressable>
@@ -1244,7 +1305,7 @@ export default function ChatsScreen({ variant = 'page' }: ChatsScreenProps) {
                             menuTarget.isPinned ? { transform: [{ rotate: '-45deg' }] } : undefined
                           }
                         />
-                        <Text style={localStyles.menuItemLabel}>
+                        <Text style={[localStyles.menuItemLabel, { color: colors.primary }]}>
                           {menuTarget.isPinned ? 'Открепить' : 'Закрепить'}
                         </Text>
                       </Pressable>

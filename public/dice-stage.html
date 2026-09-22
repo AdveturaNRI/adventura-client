@@ -39,6 +39,64 @@
     #status {
       display: none;
     }
+    #skin-fx {
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      z-index: 1;
+      opacity: 0;
+      transition: opacity 0.25s ease;
+    }
+    html.skin-aurora #dice-box canvas {
+      filter: saturate(1.35) contrast(1.08) drop-shadow(0 0 18px rgba(232,195,106,0.55));
+    }
+    html.skin-aurora #skin-fx {
+      opacity: 1;
+      background:
+        radial-gradient(circle at 30% 20%, rgba(232,195,106,0.22), transparent 42%),
+        radial-gradient(circle at 70% 80%, rgba(57,243,255,0.16), transparent 46%);
+    }
+    html.skin-glitch #dice-box canvas {
+      filter: saturate(1.5) hue-rotate(-8deg) drop-shadow(0 0 14px rgba(57,243,255,0.55));
+    }
+    html.skin-glitch #skin-fx {
+      opacity: 1;
+      background:
+        repeating-linear-gradient(0deg, transparent, transparent 6px, rgba(57,243,255,0.08) 7px),
+        radial-gradient(circle at 80% 20%, rgba(255,77,219,0.18), transparent 40%);
+    }
+    html.skin-obsidian #dice-box canvas {
+      filter: saturate(1.2) contrast(1.12) drop-shadow(0 0 16px rgba(124,58,237,0.6));
+    }
+    html.skin-obsidian #skin-fx {
+      opacity: 1;
+      background:
+        radial-gradient(circle at 50% 80%, rgba(124,58,237,0.28), transparent 50%),
+        radial-gradient(circle at 20% 20%, rgba(245,208,254,0.12), transparent 36%);
+    }
+    html.skin-oak #dice-box canvas {
+      filter: saturate(1.18) sepia(0.16) contrast(1.06) drop-shadow(0 0 16px rgba(196,122,58,0.55));
+    }
+    html.skin-oak #skin-fx {
+      opacity: 1;
+      background:
+        radial-gradient(circle at 50% 86%, rgba(196,122,58,0.3), transparent 50%),
+        radial-gradient(circle at 22% 18%, rgba(246,226,179,0.16), transparent 34%),
+        repeating-linear-gradient(92deg, transparent 0 11px, rgba(90,50,20,0.08) 12px);
+    }
+    html.skin-crit #skin-fx::after {
+      content: '';
+      position: absolute;
+      inset: 18%;
+      border-radius: 50%;
+      border: 2px solid rgba(255, 241, 194, 0.85);
+      box-shadow: 0 0 40px rgba(232, 195, 106, 0.55);
+      animation: skin-crit-ring 0.9s ease-out forwards;
+    }
+    @keyframes skin-crit-ring {
+      from { transform: scale(0.4); opacity: 1; }
+      to { transform: scale(1.8); opacity: 0; }
+    }
   </style>
   <script>
     if (new URLSearchParams(location.search).get('transparent') === '1') {
@@ -50,6 +108,7 @@
   <div id="dice-box">
     <div id="status">Тянем 3D-движок…</div>
     <div id="hint" style="display:none"></div>
+    <div id="skin-fx"></div>
   </div>
   <script type="module">
     // Только локальные модули — CDN modulepreload на телефоне в LAN даёт
@@ -132,6 +191,9 @@
     const params = new URLSearchParams(location.search);
     let currentAccent = params.get('accent') || '#157AFE';
     const transparent = params.get('transparent') === '1';
+    const parsedScale = Number(params.get('scale'));
+    const dieScale = Number.isFinite(parsedScale) && parsedScale > 0 ? parsedScale : 6;
+    const forceCenter = params.get('center') === '1';
 
     if (transparent) {
       document.documentElement.style.background = 'transparent';
@@ -165,6 +227,14 @@
       // Physics worker uses this when newStartPoint is false.
       startPosition: [0, 1.1, 0],
     };
+    const CENTER_ROLL_CFG = {
+      throwForce: 3.2,
+      spinForce: 3.4,
+      startingHeight: 3.4,
+      settleTimeout: 1600,
+      gravity: 2.1,
+      startPosition: [0, 3.4, 0],
+    };
 
     let currentSpeed = 'normal';
     function rollCfgForSpeed(speed) {
@@ -178,7 +248,7 @@
       assetPath: '/dice-box/',
       theme: 'default',
       themeColor: currentAccent,
-      scale: 6,
+      scale: dieScale,
       ...rollCfgForSpeed(currentSpeed),
       offscreen: false,
       enableShadows: false,
@@ -208,9 +278,39 @@
       return currentAccent;
     }
 
-    async function runPreview(notation, themeColor) {
+    const SKIN_CLASS = {
+      alpha_pioneer: 'skin-aurora',
+      neon_glitch: 'skin-glitch',
+      founding_obsidian: 'skin-obsidian',
+      tavern_oak: 'skin-oak',
+    };
+    function applySkin(next) {
+      const root = document.documentElement;
+      root.classList.remove('skin-aurora', 'skin-glitch', 'skin-obsidian', 'skin-oak', 'skin-crit');
+      const cls = SKIN_CLASS[next];
+      if (cls) root.classList.add(cls);
+      return next;
+    }
+    function flashCrit(results) {
+      const values = [];
+      (results || []).forEach((group) => {
+        const rolls = Array.isArray(group.rolls)
+          ? group.rolls.map((d) => d.value)
+          : typeof group.value === 'number'
+            ? [group.value]
+            : [];
+        rolls.forEach((v) => values.push(v));
+      });
+      const nat20 = values.some((v) => v === 20);
+      if (!nat20) return;
+      document.documentElement.classList.add('skin-crit');
+      setTimeout(() => document.documentElement.classList.remove('skin-crit'), 900);
+    }
+
+    async function runPreview(notation, themeColor, skin) {
       const token = ++generation;
       const color = applyAccent(themeColor);
+      applySkin(skin);
       if (isEmptyNotation(notation)) {
         box.clear();
         return;
@@ -235,28 +335,31 @@
       }
     }
 
-    async function runRoll(notation, themeColor, speed) {
+    async function runRoll(notation, themeColor, speed, skin, center) {
       const token = ++generation;
       const color = applyAccent(themeColor);
+      applySkin(skin);
       if (speed === 'fast' || speed === 'normal') {
         currentSpeed = speed;
       }
-      const rollCfg = rollCfgForSpeed(currentSpeed);
+      const centered = center === true || forceCenter;
+      const rollCfg = centered ? CENTER_ROLL_CFG : rollCfgForSpeed(currentSpeed);
       box.updateConfig(rollCfg);
       busy = true;
       try {
         const results = await box.roll(normalizeNotation(notation), {
           theme: 'default',
           themeColor: color,
-          newStartPoint: true,
+          newStartPoint: !centered,
         });
         if (token === generation) {
+          flashCrit(results);
           post({ type: 'done', outcome: flatten(results, notation) });
         }
       } finally {
         busy = false;
         if (token === generation) {
-          box.updateConfig(rollCfg);
+          box.updateConfig(centered ? CENTER_ROLL_CFG : rollCfgForSpeed(currentSpeed));
         }
       }
     }
@@ -318,13 +421,13 @@
           if (busy && data.force !== true) {
             // Still bump generation so an in-flight preview is ignored after.
           }
-          await runPreview(data.notation, data.themeColor);
+          await runPreview(data.notation, data.themeColor, data.skin);
           return;
         }
 
         if (data.type === 'roll') {
           hintEl.style.display = 'none';
-          await runRoll(data.notation ?? '1d20', data.themeColor, data.speed);
+          await runRoll(data.notation ?? '1d20', data.themeColor, data.speed, data.skin, data.center);
           return;
         }
 

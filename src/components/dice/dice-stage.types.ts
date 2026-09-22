@@ -44,6 +44,12 @@ export type DiceStageProps = {
   transparent?: boolean;
   /** Hex color for dice body (`themeColor` in dice-box). */
   accent?: string;
+  /** Exclusive cosmetic shader. */
+  skin?: string | null;
+  /** Крупнее кубик — для компактной витрины. */
+  scale?: number;
+  /** Кидать из центра стола, а не с края. */
+  centerSpawn?: boolean;
   /** Скорость физики броска. */
   animationSpeed?: DiceAnimationSpeed;
 };

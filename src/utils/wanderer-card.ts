@@ -1,4 +1,5 @@
 import type { UserCardProps } from '@/components/ui/cards/UserCard';
+import { sanitizeBadges } from '@/data/rewards/catalog';
 import { pickProfileCardUrl } from '@/services/profile/profileApi';
 import type { WandererCardItem } from '@/services/profile/wanderersApi';
 import { DEFAULT_TIMEZONE } from '@/utils/timezones';
@@ -41,5 +42,10 @@ export function wandererCardToUserCardProps(item: WandererCardItem): UserCardPro
     visibility: visibility.label,
     visibilityVariant: visibility.variant,
     blockedByMe: Boolean(item.blockedByMe),
+    badges: sanitizeBadges(item.badges),
+    auraId:
+      item.questionnaireAuraId === undefined
+        ? undefined
+        : ((item.questionnaireAuraId as UserCardProps['auraId']) ?? 'none'),
   };
 }

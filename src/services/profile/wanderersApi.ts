@@ -22,6 +22,9 @@ export type WandererCardItem = {
   profileCard: ImageUrls | null;
   blockedByMe?: boolean;
   isFavorite?: boolean;
+  badges?: Array<'alpha_tester' | 'bug_hunter' | 'founding_dm' | 'early_arrival' | 'tavern_keeper'>;
+  avatarFrameId?: string | null;
+  questionnaireAuraId?: string | null;
 };
 
 export type WandererBucket = 'feed' | 'favorites' | 'skipped';

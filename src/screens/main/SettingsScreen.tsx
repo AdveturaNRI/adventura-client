@@ -17,6 +17,7 @@ import { ThemeToggle, useIsDesktopSidebarVisible } from '@/components/navigation
 import { MobileScreenHeader } from '@/components/navigation/MobileScreenHeader';
 import { ScreenTransition } from '@/components/navigation/ScreenTransition';
 import { ChatBackgroundPickerSheet } from '@/components/chats/ChatBackgroundPickerSheet';
+import { VoiceDevicesSettingsSection } from '@/components/settings/VoiceDevicesSettingsSection';
 import { toast } from '@/components/ui';
 import { FontSize, Spacing, type ThemeColors } from '@/constants/theme';
 import { usePushPrompt } from '@/context/PushPromptContext';
@@ -31,9 +32,11 @@ import {
   enableWebPush,
   fetchPushStatusForThisDevice,
   getNotificationPermission,
+  getWebPushBlockReason,
   isIosSafariNeedPwaHint,
   isWebPushSupported,
   WEB_PUSH_OPT_IN_ENABLED,
+  webPushBlockHint,
 } from '@/services/push/webPush';
 import { previewNotificationSound, unlockChatAlerts } from '@/utils/chat-alerts';
 import { localizeErrorMessage } from '@/utils/localizeError';
@@ -139,10 +142,23 @@ function createSettingsStyles(colors: ThemeColors) {
       fontWeight: '600',
       color: colors.text,
     },
+    rowTitleWithIcon: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+    },
     rowSubtitle: {
       fontSize: FontSize.caption,
       color: colors.textMuted,
       lineHeight: FontSize.caption * 1.45,
+    },
+    sectionIconWell: {
+      width: 28,
+      height: 28,
+      borderRadius: 8,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: 'rgba(21, 122, 254, 0.12)',
     },
     presetRow: {
       flexDirection: 'row',
@@ -234,7 +250,9 @@ export default function SettingsScreen() {
     refreshPushAttention,
   } = usePushPrompt();
 
+  const webPushBlockReason = WEB_PUSH_OPT_IN_ENABLED ? getWebPushBlockReason() : 'unsupported';
   const webPushAvailable = WEB_PUSH_OPT_IN_ENABLED && isWebPushSupported();
+  const webPushHint = webPushBlockHint(webPushBlockReason);
   const iosHint = WEB_PUSH_OPT_IN_ENABLED && isIosSafariNeedPwaHint();
   const [pushEnabled, setPushEnabled] = useState(false);
   const [pushLoading, setPushLoading] = useState(webPushAvailable);
@@ -565,9 +583,6 @@ export default function SettingsScreen() {
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
             <Text style={styles.sectionHeaderTitle}>Уведомления и звуки</Text>
-            <Text style={styles.sectionHeaderSubtitle}>
-              Звук входящих сообщений. В открытом чате не играет. Список пресетов правится в админке.
-            </Text>
           </View>
 
           <View style={[styles.row, styles.rowBorder]}>
@@ -685,6 +700,23 @@ export default function SettingsScreen() {
           </View>
         </View>
 
+        <View style={styles.section}>
+          <View style={styles.row}>
+            <View style={styles.rowText}>
+              <View style={styles.rowTitleWithIcon}>
+                <View style={styles.sectionIconWell}>
+                  <Ionicons name="volume-high" size={16} color={colors.primary} />
+                </View>
+                <Text style={styles.rowTitle}>Звук и микрофон</Text>
+              </View>
+              <Text style={styles.rowSubtitle}>
+                Микрофон и динамики для звонков, плюс проверка перед входом в голос
+              </Text>
+            </View>
+          </View>
+          <VoiceDevicesSettingsSection />
+        </View>
+
         {WEB_PUSH_OPT_IN_ENABLED && Platform.OS === 'web' ? (
           <View style={styles.section}>
             <View style={styles.row}>
@@ -716,8 +748,8 @@ export default function SettingsScreen() {
                 Разрешение заблокировано. Включите уведомления в настройках браузера для этого сайта.
               </Text>
             ) : null}
-            {!webPushAvailable && !iosHint ? (
-              <Text style={styles.hint}>Этот браузер не поддерживает веб-пуши.</Text>
+            {!webPushAvailable && !iosHint && webPushHint ? (
+              <Text style={styles.hint}>{webPushHint}</Text>
             ) : null}
           </View>
         ) : null}

@@ -17,10 +17,12 @@ import { LocationStep } from '@/components/questionnaire/steps/LocationStep';
 import { ProfileStep } from '@/components/questionnaire/steps/ProfileStep';
 import { RolesStep } from '@/components/questionnaire/steps/RolesStep';
 import { SystemsStep } from '@/components/questionnaire/steps/SystemsStep';
+import { QuestionnaireAura } from '@/components/rewards/QuestionnaireAura';
 import { ScreenTransition } from '@/components/navigation/ScreenTransition';
 import { toast } from '@/components/ui';
 import { useAuth } from '@/context/AuthContext';
 import { useProfile } from '@/context/ProfileContext';
+import type { QuestionnaireAuraId } from '@/data/rewards/catalog';
 import {
   isQuestionnaireDraftDirty,
   profileToQuestionnaireDraft,
@@ -585,6 +587,10 @@ export default function QuestionnaireScreen() {
           const nextWidth = Math.floor(event.nativeEvent.layout.width);
           setShellWidth((current) => (current === nextWidth ? current : nextWidth));
         }}>
+        <QuestionnaireAura
+          auraId={profile?.perks?.questionnaireAuraId as QuestionnaireAuraId | null}
+          badges={profile?.perks?.badges}
+        />
         <ScrollView
           key={stepIndex}
           ref={scrollRef}

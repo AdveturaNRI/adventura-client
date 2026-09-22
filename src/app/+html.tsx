@@ -31,11 +31,15 @@ body {
 }
 
 .user-card-body-scroll {
-  flex: 1 1 0%;
   min-height: 0;
   overflow-y: auto;
   scrollbar-width: thin;
   scrollbar-color: rgba(0, 0, 0, 0.28) transparent;
+}
+
+/* Horizontal deck swipe — don't let the browser steal the touch. */
+[data-adv-swipe-deck] {
+  touch-action: none !important;
 }
 
 .user-card-body-scroll::-webkit-scrollbar {

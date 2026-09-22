@@ -65,7 +65,7 @@ function createStyles(colors: ThemeColors) {
  * Native: WebView wrapper around the same @3d-dice/dice-box engine (CDN assets).
  */
 export const DiceStage = forwardRef<DiceStageHandle, DiceStageProps>(function DiceStage(
-  { onReady, onDone, transparent = false, accent, animationSpeed = 'normal' },
+  { onReady, onDone, transparent = false, accent, skin, animationSpeed = 'normal' },
   ref,
 ) {
   const colors = useTheme();
@@ -74,6 +74,8 @@ export const DiceStage = forwardRef<DiceStageHandle, DiceStageProps>(function Di
   const bridgeRef = useRef<WebBridge | null>(null);
   const speedRef = useRef(animationSpeed);
   speedRef.current = animationSpeed;
+  const skinRef = useRef(skin ?? 'standard');
+  skinRef.current = skin ?? 'standard';
   const pendingRef = useRef<{
     resolve: (outcome: DiceRollOutcome) => void;
     reject: (error: Error) => void;
@@ -93,10 +95,10 @@ export const DiceStage = forwardRef<DiceStageHandle, DiceStageProps>(function Di
       roll: (notation: DiceNotation) =>
         new Promise<DiceRollOutcome>((resolve, reject) => {
           pendingRef.current = { resolve, reject };
-          send({ type: 'roll', notation, speed: speedRef.current });
+          send({ type: 'roll', notation, speed: speedRef.current, skin: skinRef.current });
         }),
       preview: (notation) => {
-        send({ type: 'preview', notation: notation ?? [], speed: speedRef.current });
+        send({ type: 'preview', notation: notation ?? [], speed: speedRef.current, skin: skinRef.current });
       },
       clear: () => {
         const pending = pendingRef.current;

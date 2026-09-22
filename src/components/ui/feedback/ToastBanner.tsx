@@ -264,7 +264,7 @@ export function ToastBanner({ text1, text2, onPress, variant, props }: ToastBann
               ? ({ className: 'adventura-toast-message' } as object)
               : null)}
             style={[styles.message, { color: colors.textSecondary }]}
-            numberOfLines={2}>
+            numberOfLines={4}>
             {message}
           </Text>
         ) : null}

@@ -1,4 +1,12 @@
+import { isDiceSkinId } from '@/data/rewards/catalog';
+
 export const DICE_ROLL_PAYLOAD_VERSION = 1 as const;
+
+/** Косметические скины кубов в чате временно скрыты. */
+export const CHAT_DICE_SKINS_ENABLED = false;
+
+/** Скины кубов на экране «Дайсы» временно скрыты. */
+export const DICE_SCREEN_SKINS_ENABLED = false;
 
 export type DiceRollGroupPayload = {
   sides: number;
@@ -20,6 +28,8 @@ export type DiceRollPayload = {
   redacted?: boolean;
   /** Hex `#RRGGBB` цвета кубов отправителя. */
   color?: string;
+  /** Эксклюзивный скин кубиков. */
+  skin?: string;
   mode?: DiceRollMode;
 };
 
@@ -109,6 +119,13 @@ export function parseDiceRollPayload(body: string | null | undefined): DiceRollP
       typeof parsed.color === 'string' && /^#[0-9A-Fa-f]{6}$/.test(parsed.color.trim())
         ? `#${parsed.color.trim().slice(1).toUpperCase()}`
         : undefined;
+    const skin =
+      CHAT_DICE_SKINS_ENABLED &&
+      typeof parsed.skin === 'string' &&
+      isDiceSkinId(parsed.skin) &&
+      parsed.skin !== 'standard'
+        ? parsed.skin
+        : undefined;
     const mode = parseDiceRollMode(parsed.mode);
     return {
       v: DICE_ROLL_PAYLOAD_VERSION,
@@ -120,6 +137,7 @@ export function parseDiceRollPayload(body: string | null | undefined): DiceRollP
       hidden: Boolean(parsed.hidden),
       redacted: Boolean(parsed.redacted),
       ...(color ? { color } : {}),
+      ...(skin ? { skin } : {}),
       ...(mode ? { mode } : {}),
     };
   } catch {

@@ -34,6 +34,8 @@ function MainStack() {
       <Stack.Screen name="games-manage" />
       <Stack.Screen name="games/[id]" />
       <Stack.Screen name="users/[id]" />
+      <Stack.Screen name="rewards-lab" />
+      <Stack.Screen name="profile-appearance" />
     </Stack>
   );
 }

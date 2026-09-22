@@ -616,8 +616,9 @@ export default function CreateClubScreen() {
           throw new Error('Ссылки указываются в формате «Название | https://…»');
         }
         const label = line.slice(0, separator).trim();
-        const url = line.slice(separator + 1).trim();
-        if (!label || !/^https?:\/\//i.test(url)) {
+        const rawUrl = line.slice(separator + 1).trim();
+        const url = /^https?:\/\//i.test(rawUrl) ? rawUrl : `https://${rawUrl}`;
+        if (!label || !rawUrl || !/^[^\s]+\.[^\s]+/.test(rawUrl.replace(/^https?:\/\//i, ''))) {
           throw new Error('Проверьте название и адрес ссылки');
         }
         return { label, url };

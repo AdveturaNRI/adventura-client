@@ -284,7 +284,7 @@ export function PushPromptProvider({ children }: { children: ReactNode }) {
         }
         if (result.reason === 'missing_vapid' || result.reason === 'server_disabled') {
           toast.error(
-            'Не задан Firebase Web Push VAPID key. Задай его в админке: Web Push / FCM.',
+            'Не задан Firebase Web Push VAPID key. Добавь его в настройках Web Push / FCM.',
           );
           return;
         }

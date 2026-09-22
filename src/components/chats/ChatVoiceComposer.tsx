@@ -217,7 +217,7 @@ export function ChatVoiceComposer({ conversationId, disabled, replyToId, showMic
         : await requestRecordingPermissionsAsync();
       if (!pressingRef.current && phaseRef.current !== 'locked') return;
       if (!permission.granted) {
-        toast.error('Нет доступа к микрофону. Разрешите его в настройках браузера или приложения.');
+        toast.error('Не удалось получить доступ к микрофону');
         reset();
         return;
       }
@@ -234,7 +234,7 @@ export function ChatVoiceComposer({ conversationId, disabled, replyToId, showMic
       }
     } catch {
       reset();
-      toast.error('Не удалось начать запись. Проверьте доступность микрофона.');
+      toast.error('Не удалось начать запись');
     }
   }, [disabled, recorder, reset, sending]);
 

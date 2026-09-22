@@ -18,7 +18,13 @@ export function AppToast() {
   return (
     <>
       <NotificationToastListener />
-      <Toast config={config} topOffset={72} bottomOffset={40} />
+      <Toast
+        config={config}
+        topOffset={72}
+        bottomOffset={40}
+        // Library default wrapper is white — keep it transparent so our banner owns the fill.
+        style={{ backgroundColor: 'transparent', elevation: 0, shadowOpacity: 0 }}
+      />
     </>
   );
 }
