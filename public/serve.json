@@ -59,6 +59,17 @@
     { "source": "/auth/forgot-password", "destination": "/auth/forgot-password.html" },
     { "source": "/auth/reset-password", "destination": "/auth/reset-password.html" },
     { "source": "/auth/verify-email", "destination": "/auth/verify-email.html" },
-    { "source": "/ui-lib/components", "destination": "/ui-lib/components.html" }
+    { "source": "/auth/oauth/yandex/callback", "destination": "/auth/oauth/yandex/callback.html" },
+    { "source": "/authors", "destination": "/authors/index.html" },
+    { "source": "/authors/:authorId/posts/:postId", "destination": "/index.html" },
+    { "source": "/authors/:authorId", "destination": "/index.html" },
+    { "source": "/author-cabinet", "destination": "/author-cabinet.html" },
+    { "source": "/generators", "destination": "/generators.html" },
+    { "source": "/characters", "destination": "/characters.html" },
+    { "source": "/rewards-lab", "destination": "/rewards-lab.html" },
+    { "source": "/profile-appearance", "destination": "/profile-appearance.html" },
+    { "source": "/clubs-edit", "destination": "/clubs-edit.html" },
+    { "source": "/ui-lib/components", "destination": "/ui-lib/components.html" },
+    { "source": "/ui-lib/rewards", "destination": "/ui-lib/rewards.html" }
   ]
 }
