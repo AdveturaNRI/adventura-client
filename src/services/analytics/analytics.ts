@@ -23,6 +23,9 @@ const METRIKA_GOAL_BY_EVENT: Record<string, string> = {
   game_application_sent: 'application_sent',
   player_match_completed: 'match_completed',
   club_profile_created: 'club_created',
+  landing_view: 'landing_view',
+  cta_click: 'cta_click',
+  registration_started: 'registration_started',
 };
 
 type TrackPayload = {

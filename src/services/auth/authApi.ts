@@ -6,6 +6,7 @@ type RegisterPayload = {
   nickname: string;
   password: string;
   acquisitionSource?: string;
+  anonymousId?: string;
 };
 
 type LoginPayload = {

@@ -1,4 +1,4 @@
-import { Redirect, Stack } from 'expo-router';
+import { Redirect, Stack, usePathname } from 'expo-router';
 import { ActivityIndicator, StyleSheet, View } from 'react-native';
 
 import { MobileAppMenuProvider } from '@/components/navigation/MobileAppMenuContext';
@@ -6,6 +6,7 @@ import { MainDesktopHeader } from '@/components/navigation/MainDesktopHeader';
 import { MainDesktopSidebar } from '@/components/navigation/MainDesktopSidebar';
 import { useIsDesktopSidebarVisible, useIsDesktopWeb } from '@/components/navigation/DesktopThemeToggle';
 import { stackScreenOptions } from '@/constants/navigation.config';
+import { buildLoginHref, isPublicAppPath } from '@/constants/auth-routes';
 import { useAuth } from '@/context/AuthContext';
 import { useTheme } from '@/hooks/use-theme';
 
@@ -43,6 +44,7 @@ function MainStack() {
 
 export default function MainLayout() {
   const { isAuthenticated, isLoading } = useAuth();
+  const pathname = usePathname();
   const colors = useTheme();
   const isDesktopWeb = useIsDesktopWeb();
   const showDesktopSidebar = useIsDesktopSidebarVisible();
@@ -55,8 +57,8 @@ export default function MainLayout() {
     );
   }
 
-  if (!isAuthenticated) {
-    return <Redirect href="/auth/login" />;
+  if (!isAuthenticated && !isPublicAppPath(pathname)) {
+    return <Redirect href={buildLoginHref(pathname)} />;
   }
 
   if (isDesktopWeb) {

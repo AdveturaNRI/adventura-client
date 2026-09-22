@@ -32,6 +32,7 @@
     }
   ],
   "rewrites": [
+    { "source": "/l/:slug", "destination": "/index.html" },
     { "source": "/games/:id", "destination": "/index.html" },
     { "source": "/users/:id", "destination": "/index.html" },
     { "source": "/chats/:id", "destination": "/index.html" },

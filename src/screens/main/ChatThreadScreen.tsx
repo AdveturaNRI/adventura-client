@@ -5,6 +5,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  AppState,
   Keyboard,
   KeyboardAvoidingView,
   Linking,
@@ -1435,6 +1436,7 @@ export default function ChatThreadScreen() {
   const [unblocking, setUnblocking] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [backgroundPickerOpen, setBackgroundPickerOpen] = useState(false);
+  const backgroundRefreshAtRef = useRef(0);
   const [pendingDelete, setPendingDelete] = useState(false);
   const [pendingBlock, setPendingBlock] = useState(false);
   const [isMenuBusy, setIsMenuBusy] = useState(false);
@@ -1965,6 +1967,28 @@ export default function ChatThreadScreen() {
     conversation?.background?.url,
     conversation == null,
   ]);
+
+  // Signed URL фона протухает — обновляем при возврате во вкладку / foreground.
+  useEffect(() => {
+    if (!conversationId) return;
+    const refreshBg = () => {
+      void loadConversation();
+    };
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state === 'active') refreshBg();
+    });
+    if (Platform.OS === 'web' && typeof document !== 'undefined') {
+      const onVisible = () => {
+        if (document.visibilityState === 'visible') refreshBg();
+      };
+      document.addEventListener('visibilitychange', onVisible);
+      return () => {
+        sub.remove();
+        document.removeEventListener('visibilitychange', onVisible);
+      };
+    }
+    return () => sub.remove();
+  }, [conversationId, loadConversation]);
 
   useEffect(() => {
     if (!lastConversationDeleted || lastConversationDeleted.conversationId !== conversationId) {
@@ -3060,7 +3084,16 @@ export default function ChatThreadScreen() {
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         keyboardVerticalOffset={0}>
         <View ref={dropZoneRef} style={styles.dropZone} collapsable={false}>
-        <ChatBackgroundLayer isDark={isDark} conversationId={conversationId} />
+        <ChatBackgroundLayer
+          isDark={isDark}
+          conversationId={conversationId}
+          onCustomImageError={() => {
+            const now = Date.now();
+            if (now - backgroundRefreshAtRef.current < 15_000) return;
+            backgroundRefreshAtRef.current = now;
+            void loadConversation();
+          }}
+        />
         {Platform.OS === 'web' && isDraggingFile ? (
           <View style={styles.dropOverlay} pointerEvents="none">
             <View style={styles.dropOverlayCard}>

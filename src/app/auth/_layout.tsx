@@ -1,9 +1,9 @@
-import { Redirect, Stack, usePathname, useRootNavigationState } from 'expo-router';
+import { Redirect, Stack, useLocalSearchParams, usePathname, useRootNavigationState } from 'expo-router';
 import { ActivityIndicator, StyleSheet, View } from 'react-native';
 
 import { AuthHeader } from '@/components/navigation/header';
-import { MAIN_APP_ENTRY } from '@/components/ui/navigation/navbar.config';
 import { stackScreenOptions } from '@/constants/navigation.config';
+import { resolvePostLoginHref } from '@/constants/auth-routes';
 import { useAuth } from '@/context/AuthContext';
 import { useTheme } from '@/hooks/use-theme';
 import { QUESTIONNAIRE_ENTRY } from '@/screens/questionnaire/questionnaire.config';
@@ -29,6 +29,8 @@ function useIsEmailTokenRoute() {
 
 export default function AuthLayout() {
   const pathname = usePathname();
+  const params = useLocalSearchParams<{ next?: string | string[] }>();
+  const nextParam = Array.isArray(params.next) ? params.next[0] : params.next;
   const navigationState = useRootNavigationState();
   const isEmailTokenRoute = useIsEmailTokenRoute();
   const { isAuthenticated, isLoading, redirectToQuestionnaire } = useAuth();
@@ -46,7 +48,15 @@ export default function AuthLayout() {
   }
 
   if (navReady && isAuthenticated && !isLoading && !isEmailTokenRoute) {
-    return <Redirect href={redirectToQuestionnaire ? QUESTIONNAIRE_ENTRY : MAIN_APP_ENTRY} />;
+    return (
+      <Redirect
+        href={
+          redirectToQuestionnaire
+            ? QUESTIONNAIRE_ENTRY
+            : resolvePostLoginHref(nextParam)
+        }
+      />
+    );
   }
 
   return (

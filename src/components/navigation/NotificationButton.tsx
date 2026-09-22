@@ -4,7 +4,9 @@ import { useEffect, useRef, useState } from 'react';
 import { Animated, Pressable, StyleSheet, Text } from 'react-native';
 
 import { createMobileHeaderButtonStyles } from '@/components/navigation/mobile-header-button.styles';
+import { buildLoginHref } from '@/constants/auth-routes';
 import { type ThemeColors } from '@/constants/theme';
+import { useAuth } from '@/context/AuthContext';
 import { useRealtimeOptional } from '@/context/RealtimeContext';
 import { useTheme } from '@/hooks/use-theme';
 import { useThemedStyles } from '@/hooks/use-themed-styles';
@@ -73,6 +75,7 @@ export function NotificationButton({ variant = 'default' }: NotificationButtonPr
   const colors = useTheme();
   const styles = useThemedStyles(createStyles);
   const compactStyles = useThemedStyles(createMobileHeaderButtonStyles);
+  const { isAuthenticated } = useAuth();
   const realtime = useRealtimeOptional();
   const unread = realtime?.unreadNotifications ?? 0;
   const isCompact = variant === 'compact';
@@ -107,6 +110,10 @@ export function NotificationButton({ variant = 'default' }: NotificationButtonPr
   }, [unread, badgeOpacity, badgeScale]);
 
   const handlePress = () => {
+    if (!isAuthenticated) {
+      router.push(buildLoginHref('/notifications'));
+      return;
+    }
     if (!isActive) {
       router.push('/notifications');
     }

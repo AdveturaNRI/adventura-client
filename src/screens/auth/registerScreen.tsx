@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 import { Link, useRouter } from 'expo-router';
 
@@ -17,12 +17,19 @@ import { Spacing, type ThemeColors } from '@/constants/theme';
 import { useAuth } from '@/context/AuthContext';
 import { useThemedStyles } from '@/hooks/use-themed-styles';
 import { getEmailError, getNicknameError, getPasswordConfirmError } from '@/utils/validateAuth';
+import {
+  getMarketingAnonymousId,
+  recordMarketingConversion,
+} from '@/services/marketing/attribution';
+import { reachYandexMetrikaGoal } from '@/services/analytics/yandex-metrika';
 
 type RegisterErrors = {
   nickname?: string;
   email?: string;
   passwordConfirm?: string;
 };
+
+let registrationStartedSent = false;
 
 function createStyles(_colors: ThemeColors) {
   return StyleSheet.create({
@@ -52,6 +59,25 @@ export default function RegisterScreen() {
   const [errors, setErrors] = useState<RegisterErrors>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
   const styles = useThemedStyles(createStyles);
+
+  useEffect(() => {
+    if (registrationStartedSent) {
+      return;
+    }
+    registrationStartedSent = true;
+
+    void (async () => {
+      const anonymousId = await getMarketingAnonymousId().catch(() => null);
+      if (!anonymousId) return;
+      const day = new Date().toISOString().slice(0, 10);
+      void recordMarketingConversion({
+        type: 'REGISTRATION_STARTED',
+        anonymousId,
+        idempotencyKey: `registration_started:${anonymousId}:${day}`,
+      });
+      reachYandexMetrikaGoal('registration_started');
+    })();
+  }, []);
 
   const handleSubmit = async () => {
     const nextErrors: RegisterErrors = {

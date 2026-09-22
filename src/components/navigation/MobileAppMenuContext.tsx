@@ -30,6 +30,7 @@ import {
   type MobileAppMenuItem,
 } from '@/components/ui/navigation/navbar.config';
 import { Radius, Spacing, type ThemeColors } from '@/constants/theme';
+import { useAuth } from '@/context/AuthContext';
 import { useRealtimeOptional } from '@/context/RealtimeContext';
 import { useTheme } from '@/hooks/use-theme';
 import { useThemedStyles } from '@/hooks/use-themed-styles';
@@ -252,6 +253,7 @@ function MobileAppMenuModal({
 export function MobileAppMenuProvider({ children }: { children: ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
+  const { isAuthenticated } = useAuth();
   const [isOpen, setIsOpen] = useState(false);
 
   const open = useCallback(() => setIsOpen(true), []);
@@ -261,9 +263,9 @@ export function MobileAppMenuProvider({ children }: { children: ReactNode }) {
   const handleNavigate = useCallback(
     (item: MobileAppMenuItem) => {
       close();
-      navigateMainTabFromNav(router, item.key, pathname);
+      navigateMainTabFromNav(router, item.key, pathname, { isAuthenticated });
     },
-    [close, pathname, router],
+    [close, isAuthenticated, pathname, router],
   );
 
   useEffect(() => {
@@ -285,12 +287,12 @@ export function MobileAppMenuProvider({ children }: { children: ReactNode }) {
 
       event.preventDefault();
       close();
-      navigateMainTab(router, 'generators');
+      navigateMainTab(router, 'generators', { isAuthenticated });
     };
 
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [close, router]);
+  }, [close, isAuthenticated, router]);
 
   const value = useMemo(
     () => ({
