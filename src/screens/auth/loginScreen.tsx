@@ -3,6 +3,7 @@ import { Pressable, StyleSheet, View } from 'react-native';
 import { Link, useLocalSearchParams, useRouter } from 'expo-router';
 
 import { AuthScreenLayout } from '@/components/auth/AuthScreenLayout';
+import { OauthButtons } from '@/components/auth/OauthButtons';
 import {
   Button,
   Caption,
@@ -161,6 +162,11 @@ export default function LoginScreen() {
       <Button
         label={isSubmitting ? 'Входим...' : 'Войти'}
         onPress={handleSubmit}
+      />
+
+      <OauthButtons
+        disabled={isSubmitting || isGuestSubmitting}
+        onSuccess={() => router.replace(resolvePostLoginHref(nextParam))}
       />
 
       <Button

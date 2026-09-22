@@ -13,13 +13,25 @@ import { toast } from '@/components/ui/feedback/toast';
 import {
   fetchCurrentUser,
   guestLogin,
+  linkVkAccount,
+  linkYandexAccount,
   loginUser,
+  loginWithVk,
+  loginWithYandex,
   logoutUser,
   refreshAuthTokens,
   registerUser,
+  unlinkOauthAccount,
 } from '@/services/auth/authApi';
-import type { AuthUser } from '@/services/api/types';
+import type { AuthUser, LinkedOAuthProvider } from '@/services/api/types';
 import { onAccessTokenRefreshed } from '@/services/auth/token-refresh';
+import {
+  getVkAppId,
+  getYandexClientId,
+  isOauthWebAvailable,
+  requestVkAccessToken,
+  requestYandexAccessToken,
+} from '@/services/auth/oauth-web';
 import {
   clearAuthSession,
   getStoredRefreshToken,
@@ -64,10 +76,16 @@ type AuthContextValue = {
   redirectToQuestionnaire: boolean;
   signIn: (email: string, password: string) => Promise<boolean>;
   signInAsGuest: () => Promise<boolean>;
+  signInWithVk: () => Promise<boolean>;
+  signInWithYandex: () => Promise<boolean>;
+  linkVk: () => Promise<boolean>;
+  linkYandex: () => Promise<boolean>;
+  unlinkOauth: (provider: LinkedOAuthProvider) => Promise<boolean>;
   signUp: (email: string, nickname: string, password: string) => Promise<boolean>;
   signOut: () => Promise<void>;
   clearPostSignUpRedirect: () => void;
   updateUser: (patch: Partial<AuthUser>) => Promise<void>;
+  oauthWebAvailable: boolean;
 };
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -182,6 +200,133 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  const applyOAuthSession = useCallback(
+    async (
+      response: Awaited<ReturnType<typeof loginWithVk>>,
+      method: 'vk' | 'yandex',
+    ) => {
+      await saveAuthSession(
+        response.accessToken,
+        response.refreshToken,
+        response.user,
+      );
+      if (!response.user.isGuest) {
+        await markOfferPushAfterAuth();
+      }
+      const anonymousId = await getMarketingAnonymousId().catch(() => null);
+      if (anonymousId) {
+        void bindMarketingTouches(response.accessToken, anonymousId);
+      }
+      setToken(response.accessToken);
+      setUser(response.user);
+      trackUserSessionStarted(method);
+      toast.success('Добро пожаловать!');
+      return true;
+    },
+    [],
+  );
+
+  const signInWithVk = useCallback(async () => {
+    try {
+      if (!getVkAppId()) {
+        toast.error('VK ID не настроен');
+        return false;
+      }
+      const { accessToken } = await requestVkAccessToken();
+      const anonymousId = await getMarketingAnonymousId().catch(() => undefined);
+      const response = await loginWithVk({
+        accessToken,
+        acquisitionSource: 'vk',
+        anonymousId,
+      });
+      return applyOAuthSession(response, 'vk');
+    } catch (error) {
+      const message = localizeErrorMessage(error, 'Не удалось войти через VK');
+      toast.error(message);
+      return false;
+    }
+  }, [applyOAuthSession]);
+
+  const signInWithYandex = useCallback(async () => {
+    try {
+      if (!getYandexClientId()) {
+        toast.error('Яндекс ID не настроен');
+        return false;
+      }
+      const accessToken = await requestYandexAccessToken();
+      const anonymousId = await getMarketingAnonymousId().catch(() => undefined);
+      const response = await loginWithYandex({
+        accessToken,
+        acquisitionSource: 'yandex',
+        anonymousId,
+      });
+      return applyOAuthSession(response, 'yandex');
+    } catch (error) {
+      const message = localizeErrorMessage(error, 'Не удалось войти через Яндекс');
+      toast.error(message);
+      return false;
+    }
+  }, [applyOAuthSession]);
+
+  const linkVk = useCallback(async () => {
+    try {
+      if (!token) {
+        toast.error('Нужно войти в аккаунт');
+        return false;
+      }
+      const { accessToken } = await requestVkAccessToken();
+      const nextUser = await linkVkAccount(token, { accessToken });
+      await patchStoredUser(nextUser);
+      setUser(nextUser);
+      toast.success('VK привязан');
+      return true;
+    } catch (error) {
+      const message = localizeErrorMessage(error, 'Не удалось привязать VK');
+      toast.error(message);
+      return false;
+    }
+  }, [token]);
+
+  const linkYandex = useCallback(async () => {
+    try {
+      if (!token) {
+        toast.error('Нужно войти в аккаунт');
+        return false;
+      }
+      const accessToken = await requestYandexAccessToken();
+      const nextUser = await linkYandexAccount(token, { accessToken });
+      await patchStoredUser(nextUser);
+      setUser(nextUser);
+      toast.success('Яндекс привязан');
+      return true;
+    } catch (error) {
+      const message = localizeErrorMessage(error, 'Не удалось привязать Яндекс');
+      toast.error(message);
+      return false;
+    }
+  }, [token]);
+
+  const unlinkOauth = useCallback(
+    async (provider: LinkedOAuthProvider) => {
+      try {
+        if (!token) {
+          toast.error('Нужно войти в аккаунт');
+          return false;
+        }
+        const nextUser = await unlinkOauthAccount(token, provider);
+        await patchStoredUser(nextUser);
+        setUser(nextUser);
+        toast.success(provider === 'vk' ? 'VK отвязан' : 'Яндекс отвязан');
+        return true;
+      } catch (error) {
+        const message = localizeErrorMessage(error, 'Не удалось отвязать');
+        toast.error(message);
+        return false;
+      }
+    },
+    [token],
+  );
+
   const signUp = useCallback(
     async (email: string, nickname: string, password: string) => {
       try {
@@ -275,10 +420,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       redirectToQuestionnaire,
       signIn,
       signInAsGuest,
+      signInWithVk,
+      signInWithYandex,
+      linkVk,
+      linkYandex,
+      unlinkOauth,
       signUp,
       signOut,
       clearPostSignUpRedirect,
       updateUser,
+      oauthWebAvailable: isOauthWebAvailable() && Boolean(getVkAppId() || getYandexClientId()),
     }),
     [
       user,
@@ -287,6 +438,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       redirectToQuestionnaire,
       signIn,
       signInAsGuest,
+      signInWithVk,
+      signInWithYandex,
+      linkVk,
+      linkYandex,
+      unlinkOauth,
       signUp,
       signOut,
       clearPostSignUpRedirect,

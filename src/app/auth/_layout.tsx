@@ -18,13 +18,24 @@ function isEmailTokenPath(path: string) {
   );
 }
 
+function isOauthCallbackPath(path: string) {
+  const normalized = path.split('?')[0].replace(/\/$/, '');
+  return (
+    normalized.includes('/auth/oauth/') &&
+    normalized.endsWith('/callback')
+  );
+}
+
 /** Prefer window path on web — usePathname can lag on first paint / static hydrate. */
-function useIsEmailTokenRoute() {
+function useIsPassthroughAuthRoute() {
   const pathname = usePathname();
-  if (typeof window !== 'undefined' && isEmailTokenPath(window.location.pathname)) {
-    return true;
+  if (typeof window !== 'undefined') {
+    const winPath = window.location.pathname;
+    if (isEmailTokenPath(winPath) || isOauthCallbackPath(winPath)) {
+      return true;
+    }
   }
-  return isEmailTokenPath(pathname);
+  return isEmailTokenPath(pathname) || isOauthCallbackPath(pathname);
 }
 
 export default function AuthLayout() {
@@ -32,14 +43,14 @@ export default function AuthLayout() {
   const params = useLocalSearchParams<{ next?: string | string[] }>();
   const nextParam = Array.isArray(params.next) ? params.next[0] : params.next;
   const navigationState = useRootNavigationState();
-  const isEmailTokenRoute = useIsEmailTokenRoute();
+  const isPassthroughRoute = useIsPassthroughAuthRoute();
   const { isAuthenticated, isLoading, redirectToQuestionnaire } = useAuth();
   const colors = useTheme();
 
   const navReady = Boolean(navigationState?.key);
 
-  // Don't unmount token screens while session restores — otherwise verify never runs.
-  if ((isLoading || !navReady) && !isEmailTokenRoute) {
+  // Don't unmount token/oauth screens while session restores — otherwise verify never runs.
+  if ((isLoading || !navReady) && !isPassthroughRoute) {
     return (
       <View style={[styles.loader, { backgroundColor: colors.background }]}>
         <ActivityIndicator color={colors.primary} />
@@ -47,7 +58,7 @@ export default function AuthLayout() {
     );
   }
 
-  if (navReady && isAuthenticated && !isLoading && !isEmailTokenRoute) {
+  if (navReady && isAuthenticated && !isLoading && !isPassthroughRoute) {
     return (
       <Redirect
         href={
@@ -72,8 +83,9 @@ export default function AuthLayout() {
         <Stack.Screen name="forgot-password" />
         <Stack.Screen name="reset-password" />
         <Stack.Screen name="verify-email" />
+        <Stack.Screen name="oauth/yandex/callback" />
       </Stack>
-      {pathname.startsWith('/auth') || isEmailTokenRoute ? <AuthHeader /> : null}
+      {pathname.startsWith('/auth') || isPassthroughRoute ? <AuthHeader /> : null}
     </View>
   );
 }
