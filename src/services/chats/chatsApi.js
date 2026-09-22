@@ -197,7 +197,9 @@ export async function sendChatMessage(conversationId, options) {
             });
         }
     }
-    return apiMultipart(`/chats/${conversationId}/messages`, formData);
+    return apiMultipart(`/chats/${conversationId}/messages`, formData, {
+        skipLoading: true,
+    });
 }
 export async function sendChatDiceRoll(conversationId, options) {
     return apiRequest(`/chats/${conversationId}/dice-rolls`, {

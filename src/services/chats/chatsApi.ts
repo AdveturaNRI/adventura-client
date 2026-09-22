@@ -389,7 +389,9 @@ export async function sendChatMessage(
     }
   }
 
-  return apiMultipart<ChatMessage>(`/chats/${conversationId}/messages`, formData);
+  return apiMultipart<ChatMessage>(`/chats/${conversationId}/messages`, formData, {
+    skipLoading: true,
+  });
 }
 
 export async function sendChatDiceRoll(

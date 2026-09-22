@@ -182,9 +182,18 @@ export default function WanderersScreen() {
     });
   }, [handleFiltersChange]);
 
-  const handleBucketChange = useCallback((nextBucket: WandererBucket) => {
-    setBucket(nextBucket);
-  }, []);
+  const handleBucketChange = useCallback(
+    (nextBucket: WandererBucket) => {
+      if (nextBucket === bucket) {
+        return;
+      }
+      setBucket(nextBucket);
+      setItems([]);
+      setIsLoading(true);
+      setErrorMessage(null);
+    },
+    [bucket],
+  );
 
   const handleRestart = useCallback(() => {
     void loadWanderers(bucket);
@@ -260,6 +269,12 @@ export default function WanderersScreen() {
     [bucket, loadWanderers],
   );
 
+  const pageHeader = showCompactNav ? (
+    <MobileScreenHeader title={WANDERERS_SCREEN.title} />
+  ) : (
+    <Text style={styles.title}>{WANDERERS_SCREEN.title}</Text>
+  );
+
   const filtersPanel = isFiltersReady ? (
     <WanderersFiltersPanel
       filters={filters}
@@ -275,11 +290,15 @@ export default function WanderersScreen() {
     />
   ) : null;
 
-  if (isLoading && items.length === 0) {
+  if (isLoading) {
     return (
       <ScreenTransition animateOnFocus>
-        <View style={[styles.container, styles.stateWrap]}>
-          <ActivityIndicator color={colors.primary} />
+        <View style={styles.container}>
+          {pageHeader}
+          {filtersPanel}
+          <View style={[styles.stateWrap, { flex: 1, justifyContent: 'center' }]}>
+            <ActivityIndicator color={colors.primary} size="large" />
+          </View>
         </View>
       </ScreenTransition>
     );
@@ -289,11 +308,7 @@ export default function WanderersScreen() {
     return (
       <ScreenTransition animateOnFocus>
         <View style={styles.container}>
-          {showCompactNav ? (
-            <MobileScreenHeader title={WANDERERS_SCREEN.title} />
-          ) : (
-            <Text style={styles.title}>{WANDERERS_SCREEN.title}</Text>
-          )}
+          {pageHeader}
           {filtersPanel}
           <Text style={styles.stateText}>{errorMessage}</Text>
         </View>

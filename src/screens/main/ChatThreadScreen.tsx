@@ -2158,8 +2158,54 @@ export default function ChatThreadScreen() {
     }
 
     const replyToId = replyTo?.id;
+    const pendingId = `pending-${Date.now()}`;
+    const pendingMessage: ChatMessage = {
+      id: pendingId,
+      conversationId,
+      senderId: myId ?? '',
+      sender: myId
+        ? {
+            id: myId,
+            nickname: user?.nickname ?? 'Вы',
+            avatarUrl: null,
+          }
+        : undefined,
+      body: body.trim() || null,
+      kind: 'user',
+      createdAt: new Date().toISOString(),
+      image: null,
+      attachment: null,
+      attachments: attachments.map((item) => ({
+        kind: item.kind,
+        name: item.name,
+        mimeType: item.mimeType,
+        url: item.uri,
+        image:
+          item.kind === 'image'
+            ? { original: item.uri, large: item.uri, medium: item.uri, thumb: item.uri }
+            : null,
+      })),
+      replyTo: replyTo
+        ? {
+            id: replyTo.id,
+            body: replyTo.body,
+            senderNickname: replyTo.senderNickname,
+            hasMedia: replyTo.hasMedia,
+          }
+        : null,
+    };
+
     setSending(true);
     sendingRef.current = true;
+    setMessages((prev) => [...prev, pendingMessage]);
+    setDraft('');
+    draftRef.current = '';
+    selectionRef.current = { start: 0, end: 0 };
+    setEmojiPanelOpen(false);
+    setReplyTo(null);
+    clearPendingAttachments();
+    scrollToBottom();
+
     try {
       const message = await sendChatMessage(conversationId, {
         body,
@@ -2170,27 +2216,36 @@ export default function ChatThreadScreen() {
           mimeType: item.mimeType,
         })),
       });
-      setDraft('');
-      draftRef.current = '';
-      selectionRef.current = { start: 0, end: 0 };
-      setEmojiPanelOpen(false);
-      setReplyTo(null);
-      clearPendingAttachments();
       setMessages((prev) => {
-        if (prev.some((item) => item.id === message.id)) {
-          return prev;
+        const withoutPending = prev.filter((item) => item.id !== pendingId);
+        if (withoutPending.some((item) => item.id === message.id)) {
+          return withoutPending;
         }
-        return [...prev, message];
+        return [...withoutPending, message];
       });
-      scrollToBottom();
       requestAfterFirstMessage();
     } catch (error) {
+      setMessages((prev) => prev.filter((item) => item.id !== pendingId));
+      setDraft(body);
+      draftRef.current = body;
+      if (attachments.length > 0) {
+        setPendingAttachments(attachments);
+        pendingAttachmentsRef.current = attachments;
+      }
       toast.error(localizeErrorMessage(error, 'Не удалось отправить'));
     } finally {
       setSending(false);
       sendingRef.current = false;
     }
-  }, [clearPendingAttachments, conversationId, replyTo?.id, requestAfterFirstMessage, scrollToBottom]);
+  }, [
+    clearPendingAttachments,
+    conversationId,
+    myId,
+    replyTo,
+    requestAfterFirstMessage,
+    scrollToBottom,
+    user?.nickname,
+  ]);
 
   const handleLocalDiceRollComplete = useCallback((outcome: DiceRollOutcome | null) => {
     const resolve = localDiceRollResolveRef.current;
@@ -2308,6 +2363,9 @@ export default function ChatThreadScreen() {
 
   const openMessageActions = useCallback((message: ChatMessage) => {
     if (isSystemChatMessage(message)) {
+      return;
+    }
+    if (message.id.startsWith('pending-')) {
       return;
     }
     if (selectionMode) {
@@ -3276,6 +3334,7 @@ export default function ChatThreadScreen() {
 
               const item = timelineItem.message;
               const mine = item.senderId === myId;
+              const isPending = item.id.startsWith('pending-');
               const isFavoriteNotice = item.kind === 'favorite_received';
               const isFavoriteRemovedNotice = item.kind === 'favorite_removed';
               const isBlockNotice = item.kind === 'user_blocked';
@@ -3604,13 +3663,20 @@ export default function ChatThreadScreen() {
                           />
                         ) : null}
                         <View style={styles.metaRow}>
-                          <Text
-                            selectable={false}
-                            style={[styles.metaTime, mine && styles.metaTimeMine]}
-                            {...timeAccessibilityProps}>
-                            {timeLabel}
-                          </Text>
-                          {mine ? (
+                          {isPending ? (
+                            <ActivityIndicator
+                              size="small"
+                              color={mine ? 'rgba(255,255,255,0.9)' : colors.primary}
+                            />
+                          ) : (
+                            <Text
+                              selectable={false}
+                              style={[styles.metaTime, mine && styles.metaTimeMine]}
+                              {...timeAccessibilityProps}>
+                              {timeLabel}
+                            </Text>
+                          )}
+                          {mine && !isPending ? (
                             <Ionicons
                               name={isRead ? 'checkmark-done' : 'checkmark'}
                               size={12}
@@ -3736,11 +3802,15 @@ export default function ChatThreadScreen() {
                   disabled={!canSend}
                   onPress={() => void handleSend()}
                   style={[styles.sendButton, canSend && styles.sendButtonReady]}>
-                  <Ionicons
-                    name="send"
-                    size={18}
-                    color={canSend ? colors.onPrimary : colors.textMuted}
-                  />
+                  {sending ? (
+                    <ActivityIndicator size="small" color={colors.onPrimary} />
+                  ) : (
+                    <Ionicons
+                      name="send"
+                      size={18}
+                      color={canSend ? colors.onPrimary : colors.textMuted}
+                    />
+                  )}
                 </Pressable>
               }
               onSent={(message) => {
