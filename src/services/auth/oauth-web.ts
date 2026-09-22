@@ -1,4 +1,7 @@
+import { useEffect, useState } from 'react';
 import { Platform } from 'react-native';
+
+import { apiRequest } from '@/services/api/client';
 
 export type LinkedOAuthProvider = 'vk' | 'yandex';
 
@@ -6,16 +9,93 @@ function env(name: string): string {
   return (process.env[name] ?? '').trim();
 }
 
+type OauthPublicState = {
+  vkAppId: string;
+  yandexClientId: string;
+  loaded: boolean;
+};
+
+const listeners = new Set<() => void>();
+
+let oauthState: OauthPublicState = {
+  vkAppId: env('EXPO_PUBLIC_VK_APP_ID'),
+  yandexClientId: env('EXPO_PUBLIC_YANDEX_CLIENT_ID'),
+  loaded: false,
+};
+
+function setOauthState(next: OauthPublicState) {
+  oauthState = next;
+  listeners.forEach((listener) => listener());
+}
+
 export function getVkAppId(): string {
-  return env('EXPO_PUBLIC_VK_APP_ID');
+  return oauthState.vkAppId;
 }
 
 export function getYandexClientId(): string {
-  return env('EXPO_PUBLIC_YANDEX_CLIENT_ID');
+  return oauthState.yandexClientId;
 }
 
 export function isOauthWebAvailable(): boolean {
   return Platform.OS === 'web' && typeof window !== 'undefined';
+}
+
+/** Prefer API `/config/public` (from backend VK_APP_ID / YANDEX_CLIENT_ID). Env is optional local fallback. */
+export async function bootstrapOauthPublicConfig(): Promise<OauthPublicState> {
+  if (!isOauthWebAvailable()) {
+    const next = { ...oauthState, loaded: true };
+    setOauthState(next);
+    return next;
+  }
+
+  try {
+    const payload = await apiRequest<{
+      oauth?: {
+        vk?: { enabled?: boolean; appId?: string | null };
+        yandex?: { enabled?: boolean; clientId?: string | null };
+      };
+    }>('/config/public', {
+      skipLoading: true,
+      skipAuthRefresh: true,
+    });
+
+    const vkAppId =
+      (payload.oauth?.vk?.enabled && payload.oauth.vk.appId?.trim()) ||
+      env('EXPO_PUBLIC_VK_APP_ID');
+    const yandexClientId =
+      (payload.oauth?.yandex?.enabled &&
+        payload.oauth.yandex.clientId?.trim()) ||
+      env('EXPO_PUBLIC_YANDEX_CLIENT_ID');
+
+    const next = {
+      vkAppId: vkAppId || '',
+      yandexClientId: yandexClientId || '',
+      loaded: true,
+    };
+    setOauthState(next);
+    return next;
+  } catch {
+    const next = { ...oauthState, loaded: true };
+    setOauthState(next);
+    return next;
+  }
+}
+
+export function useOauthPublicConfig() {
+  const [state, setState] = useState(oauthState);
+
+  useEffect(() => {
+    const sync = () => setState(oauthState);
+    listeners.add(sync);
+    if (!oauthState.loaded) {
+      void bootstrapOauthPublicConfig();
+    }
+    return () => {
+      listeners.delete(sync);
+    };
+  }, []);
+
+  return state;
 }
 
 type VkAuthResult = {
@@ -102,7 +182,7 @@ export async function requestVkAccessToken(): Promise<{ accessToken: string }> {
   }
   const appId = Number(getVkAppId());
   if (!appId) {
-    throw new Error('EXPO_PUBLIC_VK_APP_ID не задан');
+    throw new Error('VK ID не настроен');
   }
 
   const VKID = await loadVkSdk();
@@ -167,7 +247,7 @@ export async function requestYandexAccessToken(): Promise<string> {
   }
   const clientId = getYandexClientId();
   if (!clientId) {
-    throw new Error('EXPO_PUBLIC_YANDEX_CLIENT_ID не задан');
+    throw new Error('Яндекс ID не настроен');
   }
 
   const redirectUri = `${window.location.origin}/auth/oauth/yandex/callback`;

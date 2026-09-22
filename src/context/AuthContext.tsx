@@ -29,6 +29,7 @@ import {
   getVkAppId,
   getYandexClientId,
   isOauthWebAvailable,
+  bootstrapOauthPublicConfig,
   requestVkAccessToken,
   requestYandexAccessToken,
 } from '@/services/auth/oauth-web';
@@ -95,10 +96,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [token, setToken] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [redirectToQuestionnaire, setRedirectToQuestionnaire] = useState(false);
+  const [oauthIdsReady, setOauthIdsReady] = useState(
+    () => Boolean(getVkAppId() || getYandexClientId()),
+  );
 
   useEffect(() => {
     return onAccessTokenRefreshed((accessToken) => {
       setToken(accessToken);
+    });
+  }, []);
+
+  useEffect(() => {
+    if (Platform.OS !== 'web') {
+      return;
+    }
+    void bootstrapOauthPublicConfig().then((state) => {
+      setOauthIdsReady(Boolean(state.vkAppId || state.yandexClientId));
     });
   }, []);
 
@@ -429,7 +442,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       signOut,
       clearPostSignUpRedirect,
       updateUser,
-      oauthWebAvailable: isOauthWebAvailable() && Boolean(getVkAppId() || getYandexClientId()),
+      oauthWebAvailable: isOauthWebAvailable() && oauthIdsReady,
     }),
     [
       user,
@@ -447,6 +460,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       signOut,
       clearPostSignUpRedirect,
       updateUser,
+      oauthIdsReady,
     ],
   );
 

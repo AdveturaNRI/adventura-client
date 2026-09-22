@@ -25,9 +25,8 @@ import { usePushPrompt } from '@/context/PushPromptContext';
 import { useTheme } from '@/hooks/use-theme';
 import { useThemedStyles } from '@/hooks/use-themed-styles';
 import {
-  getVkAppId,
-  getYandexClientId,
   isOauthWebAvailable,
+  useOauthPublicConfig,
 } from '@/services/auth/oauth-web';
 import {
   deleteNotificationSound,
@@ -250,6 +249,7 @@ export default function SettingsScreen() {
   const showCompactNav = !hasDesktopSidebar;
   const { user, linkVk, linkYandex, unlinkOauth } = useAuth();
   const [oauthBusy, setOauthBusy] = useState(false);
+  const { vkAppId, yandexClientId, loaded: oauthLoaded } = useOauthPublicConfig();
   const {
     showSettingsAlert,
     dismissSettingsAlert,
@@ -572,12 +572,15 @@ export default function SettingsScreen() {
           </View>
         </View>
 
-        {isOauthWebAvailable() && (getVkAppId() || getYandexClientId()) && !user?.isGuest ? (
+        {isOauthWebAvailable() &&
+        oauthLoaded &&
+        (vkAppId || yandexClientId) &&
+        !user?.isGuest ? (
           <View style={styles.section}>
             <View style={styles.sectionHeader}>
               <Text style={styles.sectionHeaderTitle}>Привязанные аккаунты</Text>
             </View>
-            {getVkAppId() ? (
+            {vkAppId ? (
               <View style={[styles.row, styles.rowBorder]}>
                 <View style={styles.rowText}>
                   <Text style={styles.rowTitle}>VK ID</Text>
@@ -608,7 +611,7 @@ export default function SettingsScreen() {
                 </Pressable>
               </View>
             ) : null}
-            {getYandexClientId() ? (
+            {yandexClientId ? (
               <View style={[styles.row, styles.rowBorder]}>
                 <View style={styles.rowText}>
                   <Text style={styles.rowTitle}>Яндекс ID</Text>

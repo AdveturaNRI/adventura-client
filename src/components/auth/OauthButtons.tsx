@@ -5,9 +5,8 @@ import { Spacing, type ThemeColors } from '@/constants/theme';
 import { useAuth } from '@/context/AuthContext';
 import { useThemedStyles } from '@/hooks/use-themed-styles';
 import {
-  getVkAppId,
-  getYandexClientId,
   isOauthWebAvailable,
+  useOauthPublicConfig,
 } from '@/services/auth/oauth-web';
 
 function createStyles(_colors: ThemeColors) {
@@ -26,11 +25,12 @@ type OauthButtonsProps = {
 export function OauthButtons({ disabled, onSuccess }: OauthButtonsProps) {
   const { signInWithVk, signInWithYandex } = useAuth();
   const styles = useThemedStyles(createStyles);
+  const { vkAppId, yandexClientId, loaded } = useOauthPublicConfig();
   const web = isOauthWebAvailable();
-  const showVk = web && Boolean(getVkAppId());
-  const showYandex = web && Boolean(getYandexClientId());
+  const showVk = web && Boolean(vkAppId);
+  const showYandex = web && Boolean(yandexClientId);
 
-  if (!showVk && !showYandex) {
+  if (!loaded || (!showVk && !showYandex)) {
     return null;
   }
 
