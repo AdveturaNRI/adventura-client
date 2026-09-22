@@ -13,6 +13,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 
 import { CharacterCard } from '@/components/characters/CharacterCard';
+import { AuthorsBar } from '@/components/authors/AuthorsBar';
 import { fetchMyRewards } from '@/services/rewards/rewardsApi';
 import { BASE_CHARACTER_SLOTS } from '@/data/rewards/catalog';
 import {
@@ -32,6 +33,7 @@ import {
 import { Switcher, type SwitcherOption } from '@/components/ui';
 import { FontSize, Radius, Spacing, type ThemeColors } from '@/constants/theme';
 import { useAuth } from '@/context/AuthContext';
+import { useAuthors } from '@/context/AuthorsContext';
 import {
   buildMockCharacters,
   charactersByScope,
@@ -226,6 +228,7 @@ export default function CharactersScreen() {
   const mainStyles = useMainScreenStyles();
   const colors = useTheme();
   const { user } = useAuth();
+  const { authors } = useAuthors();
   const isDesktopWeb = useIsDesktopWeb();
   const hasDesktopSidebar = useIsDesktopSidebarVisible();
   const showCompactNav = !hasDesktopSidebar;
@@ -417,6 +420,8 @@ export default function CharactersScreen() {
                 <Text style={styles.pageSubtitle}>{pageSubtitle}</Text>
               </View>
             )}
+
+            <AuthorsBar authors={authors} />
 
             <View style={styles.scopeSwitcher}>
               <Switcher

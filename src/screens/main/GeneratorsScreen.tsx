@@ -11,6 +11,7 @@ import {
 } from 'react-native';
 
 import { ArtStudioPanel } from '@/components/art-studio';
+import { AuthorsBar } from '@/components/authors/AuthorsBar';
 import { copyTextToClipboard } from '@/components/gm-toolkit/copyText';
 import { GmChatTargetPicker } from '@/components/gm-toolkit/GmChatTargetPicker';
 import { GmResultCard } from '@/components/gm-toolkit/GmResultCard';
@@ -30,6 +31,7 @@ import {
   type SwitcherOption,
 } from '@/components/ui';
 import { FontSize, Spacing, type ThemeColors } from '@/constants/theme';
+import { useAuthors } from '@/context/AuthorsContext';
 import { useTheme, useThemePreference } from '@/hooks/use-theme';
 import { useThemedStyles } from '@/hooks/use-themed-styles';
 import { useMainScreenStyles } from '@/screens/main/main-screen.styles';
@@ -218,6 +220,7 @@ function createStyles(colors: ThemeColors, isDark: boolean) {
 export default function GeneratorsScreen() {
   const pageStyles = useMainScreenStyles();
   const colors = useTheme();
+  const { authors } = useAuthors();
   const { colorScheme } = useThemePreference();
   const isDark = colorScheme === 'dark';
   const styles = useThemedStyles((themeColors) => createStyles(themeColors, isDark));
@@ -379,6 +382,8 @@ export default function GeneratorsScreen() {
         ) : (
           <MobileScreenHeader title="Генераторы" />
         )}
+
+        <AuthorsBar authors={authors} />
 
         <View
           style={styles.notice}

@@ -1,5 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useRouter, useSegments } from 'expo-router';
+import { usePathname, useRouter } from 'expo-router';
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import {
   Modal,
@@ -23,11 +23,10 @@ import Animated, {
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { navigateMainTab } from '@/components/navigation/navigate-main-tab';
+import { navigateMainTab, navigateMainTabFromNav } from '@/components/navigation/navigate-main-tab';
 import { Menu, MenuItem } from '@/components/ui/navigation/Menu';
 import {
   MOBILE_APP_MENU_ITEMS,
-  MAIN_NAVBAR_ITEMS,
   type MobileAppMenuItem,
 } from '@/components/ui/navigation/navbar.config';
 import { Radius, Spacing, type ThemeColors } from '@/constants/theme';
@@ -110,19 +109,6 @@ function createStyles(colors: ThemeColors) {
       width: '100%',
     },
   });
-}
-
-function resolveActiveRoute(segments: string[]): string {
-  const tabKeys = new Set(MAIN_NAVBAR_ITEMS.map((item) => item.key));
-
-  for (let index = segments.length - 1; index >= 0; index -= 1) {
-    const segment = segments[index];
-    if (segment && tabKeys.has(segment as (typeof MAIN_NAVBAR_ITEMS)[number]['key'])) {
-      return segment;
-    }
-  }
-
-  return '';
 }
 
 function AnimatedMenuRow({
@@ -265,10 +251,8 @@ function MobileAppMenuModal({
 
 export function MobileAppMenuProvider({ children }: { children: ReactNode }) {
   const router = useRouter();
-  const segments = useSegments();
+  const pathname = usePathname();
   const [isOpen, setIsOpen] = useState(false);
-
-  const activeKey = useMemo(() => resolveActiveRoute(segments), [segments]);
 
   const open = useCallback(() => setIsOpen(true), []);
   const close = useCallback(() => setIsOpen(false), []);
@@ -277,13 +261,9 @@ export function MobileAppMenuProvider({ children }: { children: ReactNode }) {
   const handleNavigate = useCallback(
     (item: MobileAppMenuItem) => {
       close();
-      if (item.key === activeKey) {
-        return;
-      }
-
-      navigateMainTab(router, item.key);
+      navigateMainTabFromNav(router, item.key, pathname);
     },
-    [activeKey, close, router],
+    [close, pathname, router],
   );
 
   useEffect(() => {

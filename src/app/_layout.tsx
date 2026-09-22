@@ -16,6 +16,7 @@ import { ProfileProvider } from '@/context/ProfileContext';
 import { PushPromptProvider } from '@/context/PushPromptContext';
 import { RealtimeProvider } from '@/context/RealtimeContext';
 import { VoiceCallProvider } from '@/context/VoiceCallContext';
+import { AuthorsProvider } from '@/context/AuthorsContext';
 import { useTheme, useThemePreference } from '@/hooks/use-theme';
 import { registerLivekitGlobals } from '@/services/livekit/platform';
 
@@ -50,16 +51,18 @@ export default function RootLayout() {
           <AuthProvider>
             <RealtimeProvider>
               <ProfileProvider>
-                <VoiceCallProvider>
-                  <PushPromptProvider>
-                    <View style={rootStyles.container}>
-                      <YandexMetrikaTracker />
-                      <RootNavigator />
-                      <AppToast />
-                      <GlobalLoadingOverlay />
-                    </View>
-                  </PushPromptProvider>
-                </VoiceCallProvider>
+                <AuthorsProvider>
+                  <VoiceCallProvider>
+                    <PushPromptProvider>
+                      <View style={rootStyles.container}>
+                        <YandexMetrikaTracker />
+                        <RootNavigator />
+                        <AppToast />
+                        <GlobalLoadingOverlay />
+                      </View>
+                    </PushPromptProvider>
+                  </VoiceCallProvider>
+                </AuthorsProvider>
               </ProfileProvider>
             </RealtimeProvider>
           </AuthProvider>

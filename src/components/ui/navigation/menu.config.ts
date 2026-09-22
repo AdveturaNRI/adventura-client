@@ -5,6 +5,7 @@ export type MenuIconKey =
   | 'notifications'
   | 'settings'
   | 'master'
+  | 'author'
   | 'clubs'
   | 'telegram'
   | 'support'
@@ -84,6 +85,12 @@ export const PROFILE_MENU_SECTIONS: ProfileMenuSectionSpec[] = [
         label: 'Кабинет мастера',
         subtitle: 'Здесь вы можете создавать игры и управлять ими',
         icon: 'master',
+      },
+      {
+        key: 'author-cabinet',
+        label: 'Кабинет автора',
+        subtitle: 'Свои материалы в общем разделе «Публикации»',
+        icon: 'author',
       },
       {
         key: 'my-clubs',
