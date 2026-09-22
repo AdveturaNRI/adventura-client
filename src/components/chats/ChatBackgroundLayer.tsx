@@ -15,6 +15,8 @@ import {
 type ChatBackgroundLayerProps = {
   isDark: boolean;
   conversationId?: string | null;
+  /** Signed URL протух — родитель пусть перезапросит conversation.background. */
+  onCustomImageError?: () => void;
 };
 
 function PresetFill({ colors }: { colors: [string, string] }) {
@@ -42,7 +44,11 @@ function PresetFill({ colors }: { colors: [string, string] }) {
   );
 }
 
-export function ChatBackgroundLayer({ isDark, conversationId }: ChatBackgroundLayerProps) {
+export function ChatBackgroundLayer({
+  isDark,
+  conversationId,
+  onCustomImageError,
+}: ChatBackgroundLayerProps) {
   const [setting, setSetting] = useState<ChatBackgroundSetting>(() =>
     resolveChatBackgroundSync(conversationId),
   );
@@ -86,6 +92,11 @@ export function ChatBackgroundLayer({ isDark, conversationId }: ChatBackgroundLa
           style={StyleSheet.absoluteFill}
           contentFit="cover"
           transition={0}
+          onError={() => {
+            if (setting.uri.startsWith('http://') || setting.uri.startsWith('https://')) {
+              onCustomImageError?.();
+            }
+          }}
         />
       )}
       <View
