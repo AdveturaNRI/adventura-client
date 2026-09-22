@@ -56,6 +56,24 @@ function isGroupChat(item: ConversationListItem) {
   return item.type === 'group';
 }
 
+/** Одинаковый путь (игнор query) — оставляем старый url, чтобы Image не перезагружался. */
+function stableAvatarUrl(prevUrl?: string | null, nextUrl?: string | null) {
+  const prev = prevUrl?.trim() || null;
+  const next = nextUrl?.trim() || null;
+  if (!prev) {
+    return next;
+  }
+  if (!next) {
+    return prev;
+  }
+  if (prev === next) {
+    return prev;
+  }
+  const prevPath = prev.split('?')[0];
+  const nextPath = next.split('?')[0];
+  return prevPath === nextPath ? prev : next;
+}
+
 function sortConversations(items: ConversationListItem[]) {
   return [...items].sort((left, right) => {
     const leftPinned = Boolean(left.isPinned);
@@ -579,16 +597,30 @@ export default function ChatsScreen({ variant = 'page' }: ChatsScreenProps) {
     setItems((prev) => {
       const exists = prev.some((item) => item.id === lastConversationUpdate.id);
       const next = exists
-        ? prev.map((item) =>
-            item.id === lastConversationUpdate.id
-              ? {
-                  ...lastConversationUpdate,
-                  isPinned: lastConversationUpdate.isPinned ?? item.isPinned,
-                  pinSortOrder:
-                    lastConversationUpdate.pinSortOrder ?? item.pinSortOrder ?? null,
-                }
-              : item,
-          )
+        ? prev.map((item) => {
+            if (item.id !== lastConversationUpdate.id) {
+              return item;
+            }
+            const nextPeer = lastConversationUpdate.peer;
+            const prevPeer = item.peer;
+            const peer =
+              nextPeer && prevPeer && nextPeer.id === prevPeer.id
+                ? {
+                    ...nextPeer,
+                    avatarUrl: stableAvatarUrl(prevPeer.avatarUrl, nextPeer.avatarUrl),
+                    avatarFrameId: nextPeer.avatarFrameId ?? prevPeer.avatarFrameId,
+                    badges: nextPeer.badges ?? prevPeer.badges,
+                    nickname: nextPeer.nickname || prevPeer.nickname,
+                  }
+                : nextPeer;
+            return {
+              ...lastConversationUpdate,
+              peer,
+              isPinned: lastConversationUpdate.isPinned ?? item.isPinned,
+              pinSortOrder:
+                lastConversationUpdate.pinSortOrder ?? item.pinSortOrder ?? null,
+            };
+          })
         : [lastConversationUpdate, ...prev];
       return sortConversations(next);
     });

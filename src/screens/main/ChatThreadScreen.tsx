@@ -431,6 +431,24 @@ function buildChatTimeline(
   return items;
 }
 
+/** Одинаковый путь (игнор query) — оставляем старый url, чтобы Image не перезагружался. */
+function stableAvatarUrl(prevUrl?: string | null, nextUrl?: string | null) {
+  const prev = prevUrl?.trim() || null;
+  const next = nextUrl?.trim() || null;
+  if (!prev) {
+    return next;
+  }
+  if (!next) {
+    return prev;
+  }
+  if (prev === next) {
+    return prev;
+  }
+  const prevPath = prev.split('?')[0];
+  const nextPath = next.split('?')[0];
+  return prevPath === nextPath ? prev : next;
+}
+
 function formatLastSeen(online: boolean, lastSeenAt: string | null) {
   if (online) {
     return 'в сети';
@@ -1115,6 +1133,7 @@ function createStyles(colors: ThemeColors, bottomPad: number, isDark: boolean) {
       flexDirection: 'row',
       alignItems: 'center',
       gap: 3,
+      minHeight: 14,
       paddingBottom: 1,
     },
     metaTime: {
@@ -1338,6 +1357,8 @@ export default function ChatThreadScreen() {
 
   const [conversation, setConversation] = useState<ConversationListItem | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const messagesRef = useRef<ChatMessage[]>([]);
+  messagesRef.current = messages;
   const [peerLastReadAt, setPeerLastReadAt] = useState<string | null>(null);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -1508,9 +1529,14 @@ export default function ChatThreadScreen() {
       if (prev.some((item) => item.id === message.id)) {
         return prev;
       }
-      return [...prev, message];
+      // Убираем optimistic pending того же отправителя — иначе прыжок pending→real.
+      const withoutPending =
+        myId && message.senderId === myId
+          ? prev.filter((item) => !item.id.startsWith('pending-'))
+          : prev;
+      return [...withoutPending, message];
     });
-  }, []);
+  }, [myId]);
 
   const startNextDiceAnimation = useCallback(() => {
     const next = diceAnimQueueRef.current.shift() ?? null;
@@ -1839,6 +1865,11 @@ export default function ChatThreadScreen() {
       if (!conversationId || message.conversationId !== conversationId) {
         return;
       }
+      const alreadyHad = messagesRef.current.some((item) => item.id === message.id);
+      const hadOwnPending =
+        Boolean(myId) &&
+        message.senderId === myId &&
+        messagesRef.current.some((item) => item.id.startsWith('pending-'));
       ingestIncomingMessage(message);
       if (message.kind === 'favorite_received') {
         if (message.senderId !== myId) {
@@ -1868,10 +1899,14 @@ export default function ChatThreadScreen() {
           return { ...prev, peerFavoritedMe: false };
         });
       }
-      if (message.senderId === myId || stickToBottomRef.current) {
-        if (message.kind !== 'dice_roll' || !heldDiceMessagesRef.current.has(message.id)) {
-          scrollToBottom();
-        }
+      // Свой уже показанный ответ / pending→real не дёргаем повторным scroll.
+      if (
+        !alreadyHad &&
+        !hadOwnPending &&
+        (message.senderId === myId || stickToBottomRef.current) &&
+        (message.kind !== 'dice_roll' || !heldDiceMessagesRef.current.has(message.id))
+      ) {
+        scrollToBottom();
       }
       void markConversationRead(conversationId);
     });
@@ -1881,7 +1916,30 @@ export default function ChatThreadScreen() {
     if (!lastConversationUpdate || lastConversationUpdate.id !== conversationId) {
       return;
     }
-    setConversation(lastConversationUpdate);
+    setConversation((prev) => {
+      if (!prev || prev.id !== lastConversationUpdate.id) {
+        return lastConversationUpdate;
+      }
+      const nextPeer = lastConversationUpdate.peer;
+      const prevPeer = prev.peer;
+      const peer =
+        nextPeer && prevPeer && nextPeer.id === prevPeer.id
+          ? {
+              ...nextPeer,
+              // Не дергаем аватар на каждый conversation.update (в т.ч. после send).
+              avatarUrl: stableAvatarUrl(prevPeer.avatarUrl, nextPeer.avatarUrl),
+              avatarFrameId: nextPeer.avatarFrameId ?? prevPeer.avatarFrameId,
+              badges: nextPeer.badges ?? prevPeer.badges,
+              nickname: nextPeer.nickname || prevPeer.nickname,
+            }
+          : nextPeer;
+      return {
+        ...lastConversationUpdate,
+        peer,
+        isPinned: lastConversationUpdate.isPinned ?? prev.isPinned,
+        pinSortOrder: lastConversationUpdate.pinSortOrder ?? prev.pinSortOrder,
+      };
+    });
     setPeerLastReadAt(lastConversationUpdate.peerLastReadAt);
   }, [conversationId, lastConversationUpdate]);
 
