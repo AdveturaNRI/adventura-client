@@ -13,6 +13,7 @@ import {
 import { AuthorFilters } from '@/components/authors/AuthorFilters';
 import { AuthorPostCard } from '@/components/authors/AuthorPostCard';
 import { BecomeAuthorBanner } from '@/components/authors/BecomeAuthorBanner';
+import { PartnersTicker } from '@/components/partners/PartnersTicker';
 import {
   useIsDesktopSidebarVisible,
   useIsDesktopWeb,
@@ -183,6 +184,8 @@ export default function AuthorsScreen() {
                 </Text>
               </View>
             )}
+
+            <PartnersTicker />
 
             <BecomeAuthorBanner onBecomeAuthor={() => router.push('/author-cabinet')} />
 

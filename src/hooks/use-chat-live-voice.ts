@@ -23,9 +23,13 @@ import {
 } from '@/services/livekit/platform';
 import { playMicToggleSound, playUrgentRequestAlert } from '@/utils/call-ringtone';
 import { localizeErrorMessage } from '@/utils/localizeError';
-import { loadVoiceDevicePrefs } from '@/utils/voice-device-settings';
+import { loadVoiceDevicePrefs, subscribeVoiceDevicePrefs } from '@/utils/voice-device-settings';
 import { applyAudioOutputToElement, stopMediaStream, takePrimedMicrophone } from '@/utils/voice-media-devices';
-import { applyMicPipelineToRoom, isUsableMediaDeviceId } from '@/utils/voice-mic-pipeline';
+import {
+  applyMicPipelineToRoom,
+  isUsableMediaDeviceId,
+  syncVoicePrefsToRoom,
+} from '@/utils/voice-mic-pipeline';
 
 export type ChatLiveVoiceStatus = 'idle' | 'connecting' | 'connected' | 'error';
 
@@ -65,12 +69,15 @@ type UseChatLiveVoiceResult = {
   participants: ChatLiveVoiceParticipant[];
   /** identity → urgent flag (cleared only by sender toggle / leave) */
   urgentById: Record<string, boolean>;
+  /** Local playback gain per remote identity (0…1). Does not affect what others hear. */
+  volumeById: Record<string, number>;
   join: (conversationIdOverride?: string, options?: JoinLiveOptions) => Promise<void>;
   leave: () => Promise<void>;
   toggleMute: () => Promise<void>;
   toggleDeafen: () => Promise<void>;
   toggleCamera: () => Promise<void>;
   sendUrgentRequest: () => Promise<void>;
+  setParticipantVolume: (identity: string, volume: number) => void;
 };
 
 function parseAvatarFromMetadata(raw: string | undefined): string | null {
@@ -195,12 +202,25 @@ function setRemoteOutputsDeafened(deafened: boolean) {
   }
 }
 
-function setNativeRemoteAudioVolume(room: Room | null, deafened: boolean) {
-  if (!room || Platform.OS === 'web') {
+function clampPlaybackVolume(value: number): number {
+  if (!Number.isFinite(value)) {
+    return 1;
+  }
+  return Math.min(1, Math.max(0, value));
+}
+
+/** LiveKit setVolume works on web + native; deafen forces 0. */
+function applyRemotePlaybackVolumes(
+  room: Room | null,
+  deafened: boolean,
+  volumeById: Record<string, number>,
+) {
+  if (!room) {
     return;
   }
-  const volume = deafened ? 0 : 1;
   for (const participant of room.remoteParticipants.values()) {
+    const userVol = clampPlaybackVolume(volumeById[participant.identity] ?? 1);
+    const volume = deafened ? 0 : userVol;
     for (const pub of participant.audioTrackPublications.values()) {
       const track = pub.track as RemoteAudioTrack | undefined;
       if (track && typeof track.setVolume === 'function') {
@@ -257,7 +277,10 @@ export function useChatLiveVoice(conversationId: string | null): UseChatLiveVoic
   const [muted, setMuted] = useState(false);
   const [deafened, setDeafened] = useState(false);
   const [cameraOn, setCameraOn] = useState(false);
+  const [volumeById, setVolumeById] = useState<Record<string, number>>({});
   const deafenedRef = useRef(false);
+  const volumeByIdRef = useRef<Record<string, number>>({});
+  volumeByIdRef.current = volumeById;
   const [participants, setParticipants] = useState<ChatLiveVoiceParticipant[]>([]);
   const [urgentById, setUrgentById] = useState<Record<string, boolean>>({});
   const urgentByIdRef = useRef<Record<string, boolean>>({});
@@ -327,6 +350,8 @@ export function useChatLiveVoice(conversationId: string | null): UseChatLiveVoic
     setMuted(false);
     setDeafened(false);
     setCameraOn(false);
+    setVolumeById({});
+    volumeByIdRef.current = {};
     deafenedRef.current = false;
     setStatus('idle');
     setError(null);
@@ -404,12 +429,15 @@ export function useChatLiveVoice(conversationId: string | null): UseChatLiveVoic
         .on(RoomEvent.LocalTrackUnpublished, sync)
         .on(
           RoomEvent.TrackSubscribed,
-          (track: RemoteTrack, _pub: RemoteTrackPublication, _participant: RemoteParticipant) => {
+          (track: RemoteTrack, _pub: RemoteTrackPublication, participant: RemoteParticipant) => {
             attachRemoteAudio(track, deafenedRef.current);
-            if (Platform.OS !== 'web' && track.kind === Track.Kind.Audio) {
+            if (track.kind === Track.Kind.Audio) {
               const audio = track as RemoteAudioTrack;
               if (typeof audio.setVolume === 'function') {
-                audio.setVolume(deafenedRef.current ? 0 : 1);
+                const userVol = clampPlaybackVolume(
+                  volumeByIdRef.current[participant.identity] ?? 1,
+                );
+                audio.setVolume(deafenedRef.current ? 0 : userVol);
               }
             }
             sync();
@@ -473,6 +501,8 @@ export function useChatLiveVoice(conversationId: string | null): UseChatLiveVoic
           setMuted(false);
           setDeafened(false);
           setCameraOn(false);
+          setVolumeById({});
+          volumeByIdRef.current = {};
           deafenedRef.current = false;
           if (
             reason === DisconnectReason.DUPLICATE_IDENTITY ||
@@ -566,6 +596,8 @@ export function useChatLiveVoice(conversationId: string | null): UseChatLiveVoic
       setMuted(!micOn);
       setDeafened(false);
       setCameraOn(false);
+      setVolumeById({});
+      volumeByIdRef.current = {};
       deafenedRef.current = false;
       setStatus('connected');
       if (!micOn) {
@@ -650,8 +682,25 @@ export function useChatLiveVoice(conversationId: string | null): UseChatLiveVoic
     deafenedRef.current = next;
     setDeafened(next);
     setRemoteOutputsDeafened(next);
-    setNativeRemoteAudioVolume(roomRef.current, next);
+    applyRemotePlaybackVolumes(roomRef.current, next, volumeByIdRef.current);
   }, [status]);
+
+  const setParticipantVolume = useCallback((identity: string, volume: number) => {
+    const id = identity.trim();
+    if (!id) {
+      return;
+    }
+    const nextVol = clampPlaybackVolume(volume);
+    const prev = volumeByIdRef.current;
+    const current = clampPlaybackVolume(prev[id] ?? 1);
+    if (Math.abs(current - nextVol) < 0.001) {
+      return;
+    }
+    const next = { ...prev, [id]: nextVol };
+    volumeByIdRef.current = next;
+    setVolumeById(next);
+    applyRemotePlaybackVolumes(roomRef.current, deafenedRef.current, next);
+  }, []);
 
   const toggleCamera = useCallback(async () => {
     const room = roomRef.current;
@@ -711,6 +760,53 @@ export function useChatLiveVoice(conversationId: string | null): UseChatLiveVoic
     };
   }, [teardownRoom]);
 
+  // Settings → live call: switch mic/speaker/camera without rejoining.
+  useEffect(() => {
+    let applySeq = 0;
+    return subscribeVoiceDevicePrefs((prefs) => {
+      const room = roomRef.current;
+      if (!room || room.state !== ConnectionState.Connected) {
+        return;
+      }
+      const seq = ++applySeq;
+      void (async () => {
+        preferredOutputDeviceId = prefs.outputDeviceId;
+        if (isUsableMediaDeviceId(prefs.outputDeviceId)) {
+          try {
+            await room.switchActiveDevice('audiooutput', prefs.outputDeviceId!);
+          } catch {
+            // Safari / some Chromium builds reject sink switches
+          }
+        }
+        await applyPreferredOutputToAllRemote();
+        if (seq !== applySeq || roomRef.current !== room) {
+          return;
+        }
+
+        await syncVoicePrefsToRoom(room, {
+          deviceId: prefs.inputDeviceId,
+          micGain: prefs.micGain,
+          noiseSuppression: prefs.noiseSuppression,
+        });
+        if (seq !== applySeq || roomRef.current !== room) {
+          return;
+        }
+
+        if (
+          room.localParticipant.isCameraEnabled &&
+          isUsableMediaDeviceId(prefs.videoDeviceId)
+        ) {
+          try {
+            await room.switchActiveDevice('videoinput', prefs.videoDeviceId!);
+          } catch {
+            // camera may have been unplugged
+          }
+        }
+        refreshParticipants();
+      })();
+    });
+  }, [refreshParticipants]);
+
   const conversationIdRef = useRef(conversationId);
   useEffect(() => {
     const prev = conversationIdRef.current;
@@ -731,11 +827,13 @@ export function useChatLiveVoice(conversationId: string | null): UseChatLiveVoic
     cameraOn,
     participants,
     urgentById,
+    volumeById,
     join,
     leave,
     toggleMute,
     toggleDeafen,
     toggleCamera,
     sendUrgentRequest,
+    setParticipantVolume,
   };
 }

@@ -15,6 +15,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { ClubsSelectedCity } from '@/components/map/clubs-map-session';
 import { toLatLng } from '@/components/map/map-coords';
 import { useIsDesktopWeb } from '@/components/navigation/DesktopThemeToggle';
+import { PartnersTicker } from '@/components/partners/PartnersTicker';
 import { FadeInImage } from '@/components/ui/media/FadeInImage';
 import { AnalyticsImpression } from '@/components/analytics/AnalyticsImpression';
 import { FontSize, Radius, Spacing, type ThemeColors } from '@/constants/theme';
@@ -716,6 +717,10 @@ export function ClubsMapFeed({
             </Pressable>
           ) : null}
         </View>
+      </View>
+
+      <View style={{ paddingHorizontal: Spacing.md, paddingBottom: Spacing.sm }}>
+        <PartnersTicker />
       </View>
 
       <ScrollView contentContainerStyle={styles.list} nestedScrollEnabled>

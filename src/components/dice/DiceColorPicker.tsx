@@ -17,7 +17,14 @@ type DiceColorPickerProps = {
 function createStyles(colors: ThemeColors) {
   return StyleSheet.create({
     root: {
+      gap: 4,
+    },
+    rootInline: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      flexWrap: 'wrap',
       gap: 8,
+      rowGap: 4,
     },
     label: {
       fontSize: FontSize.caption,
@@ -75,7 +82,7 @@ export function DiceColorPicker({
   const selected = value.toLowerCase();
 
   return (
-    <View style={styles.root}>
+    <View style={[styles.root, !compact && styles.rootInline]}>
       {!compact ? <Text style={styles.label}>Цвет кубиков</Text> : null}
       <View style={[styles.row, compact && styles.rowCompact]}>
         {DICE_ACCENT_PALETTE.map((option: DiceAccentOption) => {

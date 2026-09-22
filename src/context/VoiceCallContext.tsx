@@ -168,12 +168,14 @@ export function VoiceCallProvider({ children }: { children: ReactNode }) {
     cameraOn,
     participants,
     urgentById,
+    volumeById,
     join,
     leave,
     toggleMute,
     toggleDeafen,
     toggleCamera,
     sendUrgentRequest,
+    setParticipantVolume,
   } = useChatLiveVoice(liveConversationId);
 
   const clearPendingInvite = useCallback(() => {
@@ -869,6 +871,7 @@ export function VoiceCallProvider({ children }: { children: ReactNode }) {
           participants={participants}
           waitingPeers={waitingPeers}
           urgentById={urgentById}
+          volumeById={volumeById}
           onToggleMute={() => void toggleMute()}
           onMicGesture={() => beginMicrophonePrimeFromGesture()}
           onToggleDeafen={() => void toggleDeafen()}
@@ -878,6 +881,7 @@ export function VoiceCallProvider({ children }: { children: ReactNode }) {
           onMinimize={minimize}
           onExpand={expand}
           onUrgentRequest={() => void sendUrgentRequest()}
+          onSetParticipantVolume={setParticipantVolume}
           conversationId={session?.conversationId ?? null}
           diceSenderNickname={user?.nickname ?? 'Вы'}
         />

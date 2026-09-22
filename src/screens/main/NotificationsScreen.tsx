@@ -136,6 +136,7 @@ export default function NotificationsScreen() {
         );
         try {
           const conversation = await openConversationWith(notification.actor.id);
+          // openConversationWith уже с актуальным lastMessage после события избранного.
           publishConversationUpdate({ ...conversation, isFavorite: true });
         } catch {
           // Chat list will catch up via realtime / next focus load.

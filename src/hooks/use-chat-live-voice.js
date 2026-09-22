@@ -6,9 +6,9 @@ import { createChatVoiceToken } from '@/services/chats/chatsApi';
 import { startLivekitAudioSession, stopLivekitAudioSession, } from '@/services/livekit/platform';
 import { playMicToggleSound, playUrgentRequestAlert } from '@/utils/call-ringtone';
 import { localizeErrorMessage } from '@/utils/localizeError';
-import { loadVoiceDevicePrefs } from '@/utils/voice-device-settings';
+import { loadVoiceDevicePrefs, subscribeVoiceDevicePrefs } from '@/utils/voice-device-settings';
 import { applyAudioOutputToElement } from '@/utils/voice-media-devices';
-import { applyMicPipelineToRoom } from '@/utils/voice-mic-pipeline';
+import { applyMicPipelineToRoom, syncVoicePrefsToRoom } from '@/utils/voice-mic-pipeline';
 const URGENT_TOPIC = 'adventura.urgent';
 const URGENT_TTL_MS = 8_000;
 const URGENT_COOLDOWN_MS = 4_000;
@@ -567,6 +567,49 @@ export function useChatLiveVoice(conversationId) {
             void teardownRoom(room);
         };
     }, [teardownRoom]);
+    // Settings → live call: switch mic/speaker/camera without rejoining.
+    useEffect(() => {
+        let applySeq = 0;
+        return subscribeVoiceDevicePrefs((prefs) => {
+            const room = roomRef.current;
+            if (!room || room.state !== ConnectionState.Connected) {
+                return;
+            }
+            const seq = ++applySeq;
+            void (async () => {
+                preferredOutputDeviceId = prefs.outputDeviceId;
+                if (prefs.outputDeviceId) {
+                    try {
+                        await room.switchActiveDevice('audiooutput', prefs.outputDeviceId);
+                    }
+                    catch {
+                        // Safari / some Chromium builds reject sink switches
+                    }
+                }
+                await applyPreferredOutputToAllRemote();
+                if (seq !== applySeq || roomRef.current !== room) {
+                    return;
+                }
+                await syncVoicePrefsToRoom(room, {
+                    deviceId: prefs.inputDeviceId,
+                    micGain: prefs.micGain,
+                    noiseSuppression: prefs.noiseSuppression,
+                });
+                if (seq !== applySeq || roomRef.current !== room) {
+                    return;
+                }
+                if (room.localParticipant.isCameraEnabled && prefs.videoDeviceId?.trim()) {
+                    try {
+                        await room.switchActiveDevice('videoinput', prefs.videoDeviceId.trim());
+                    }
+                    catch {
+                        // camera may have been unplugged
+                    }
+                }
+                refreshParticipants();
+            })();
+        });
+    }, [refreshParticipants]);
     const conversationIdRef = useRef(conversationId);
     useEffect(() => {
         const prev = conversationIdRef.current;

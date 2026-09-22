@@ -20,6 +20,32 @@ export type VoiceDevicePrefs = {
   noiseSuppression: boolean;
 };
 
+type VoiceDevicePrefsListener = (prefs: VoiceDevicePrefs) => void;
+
+const prefsListeners = new Set<VoiceDevicePrefsListener>();
+
+/** Live call / composer can hot-apply Settings changes without polling storage. */
+export function subscribeVoiceDevicePrefs(listener: VoiceDevicePrefsListener): () => void {
+  prefsListeners.add(listener);
+  return () => {
+    prefsListeners.delete(listener);
+  };
+}
+
+async function notifyVoiceDevicePrefsChanged(): Promise<void> {
+  if (prefsListeners.size === 0) {
+    return;
+  }
+  const prefs = await loadVoiceDevicePrefs();
+  prefsListeners.forEach((listener) => {
+    try {
+      listener(prefs);
+    } catch {
+      // listener errors must not break Settings saves
+    }
+  });
+}
+
 export function clampMicGain(value: number): number {
   if (!Number.isFinite(value)) {
     return MIC_GAIN_DEFAULT;
@@ -48,31 +74,36 @@ export async function loadVoiceDevicePrefs(): Promise<VoiceDevicePrefs> {
 export async function saveVoiceInputDeviceId(deviceId: string | null): Promise<void> {
   if (!deviceId?.trim()) {
     await AsyncStorage.removeItem(INPUT_KEY);
-    return;
+  } else {
+    await AsyncStorage.setItem(INPUT_KEY, deviceId.trim());
   }
-  await AsyncStorage.setItem(INPUT_KEY, deviceId.trim());
+  await notifyVoiceDevicePrefsChanged();
 }
 
 export async function saveVoiceOutputDeviceId(deviceId: string | null): Promise<void> {
   if (!deviceId?.trim()) {
     await AsyncStorage.removeItem(OUTPUT_KEY);
-    return;
+  } else {
+    await AsyncStorage.setItem(OUTPUT_KEY, deviceId.trim());
   }
-  await AsyncStorage.setItem(OUTPUT_KEY, deviceId.trim());
+  await notifyVoiceDevicePrefsChanged();
 }
 
 export async function saveVoiceVideoDeviceId(deviceId: string | null): Promise<void> {
   if (!deviceId?.trim()) {
     await AsyncStorage.removeItem(VIDEO_KEY);
-    return;
+  } else {
+    await AsyncStorage.setItem(VIDEO_KEY, deviceId.trim());
   }
-  await AsyncStorage.setItem(VIDEO_KEY, deviceId.trim());
+  await notifyVoiceDevicePrefsChanged();
 }
 
 export async function saveVoiceMicGain(gain: number): Promise<void> {
   await AsyncStorage.setItem(MIC_GAIN_KEY, String(clampMicGain(gain)));
+  await notifyVoiceDevicePrefsChanged();
 }
 
 export async function saveVoiceNoiseSuppression(enabled: boolean): Promise<void> {
   await AsyncStorage.setItem(NOISE_SUPPRESSION_KEY, enabled ? '1' : '0');
+  await notifyVoiceDevicePrefsChanged();
 }

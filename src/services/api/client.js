@@ -51,7 +51,10 @@ async function performRequest(path, { method = 'GET', body, token }) {
 }
 export async function apiRequest(path, options = {}) {
     const task = executeApiRequest(path, options);
-    if (options.skipLoading) {
+    const method = options.method ?? 'GET';
+    // Reads stay silent — screens own their loaders. Mutations use the global overlay unless opted out.
+    const skipLoading = options.skipLoading ?? method === 'GET';
+    if (skipLoading) {
         return task;
     }
     return withLoading(task);

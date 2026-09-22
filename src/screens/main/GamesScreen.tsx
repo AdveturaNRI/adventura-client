@@ -18,6 +18,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { GameFeedCard } from '@/components/games/GameFeedCard';
 import { GamesFiltersPanel } from '@/components/games/GamesFiltersPanel';
 import { AuthorsBar } from '@/components/authors/AuthorsBar';
+import { PartnersTicker } from '@/components/partners/PartnersTicker';
 import { MobileScreenHeader } from '@/components/navigation/MobileScreenHeader';
 import { useIsDesktopSidebarVisible, useIsDesktopWeb } from '@/components/navigation/DesktopThemeToggle';
 import { ScreenTransition } from '@/components/navigation/ScreenTransition';
@@ -685,7 +686,9 @@ export default function GamesScreen() {
             </View>
           )}
 
-          <AuthorsBar authors={authors} />
+          <AuthorsBar title="✨ Свежее от сообщества" authors={authors} />
+
+          <PartnersTicker />
 
           <View style={styles.toolbar}>
             <View style={styles.searchRow}>

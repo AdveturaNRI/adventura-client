@@ -12,6 +12,7 @@ import {
 
 import { ArtStudioPanel } from '@/components/art-studio';
 import { AuthorsBar } from '@/components/authors/AuthorsBar';
+import { PartnersTicker } from '@/components/partners/PartnersTicker';
 import { copyTextToClipboard } from '@/components/gm-toolkit/copyText';
 import { GmChatTargetPicker } from '@/components/gm-toolkit/GmChatTargetPicker';
 import { GmResultCard } from '@/components/gm-toolkit/GmResultCard';
@@ -384,6 +385,8 @@ export default function GeneratorsScreen() {
         )}
 
         <AuthorsBar authors={authors} />
+
+        <PartnersTicker />
 
         <View
           style={styles.notice}

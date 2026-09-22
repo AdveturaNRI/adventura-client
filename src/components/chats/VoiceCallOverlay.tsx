@@ -12,6 +12,8 @@ import {
   Text,
   useWindowDimensions,
   View,
+  type GestureResponderEvent,
+  type LayoutChangeEvent,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -42,6 +44,8 @@ type OverlayTile = {
   urgent?: boolean;
   badges?: RewardBadgeType[];
   frameId?: string | null;
+  /** Local playback gain 0…1 (remote only). */
+  volume?: number;
 };
 
 export type VoiceCallWaitingPeer = {
@@ -67,6 +71,8 @@ type Props = {
   waitingPeers?: VoiceCallWaitingPeer[];
   /** identity → urgent flag (sticky until sender clears) */
   urgentById?: Record<string, boolean>;
+  /** Local playback gain per remote identity (0…1). */
+  volumeById?: Record<string, number>;
   /** Chat to post dice rolls into (same conversation as the call). */
   conversationId?: string | null;
   diceSenderNickname?: string;
@@ -80,6 +86,7 @@ type Props = {
   onMinimize?: () => void;
   onExpand?: () => void;
   onUrgentRequest?: () => void;
+  onSetParticipantVolume?: (identity: string, volume: number) => void;
 };
 
 /** Survives expand/collapse while the call is up. */
@@ -235,30 +242,88 @@ function UrgentPulseRings({ size }: { size: number }) {
   );
 }
 
+function clamp01(value: number): number {
+  if (!Number.isFinite(value)) {
+    return 1;
+  }
+  return Math.min(1, Math.max(0, value));
+}
+
+function ParticipantVolumeSlider({
+  value,
+  onChange,
+}: {
+  value: number;
+  onChange: (next: number) => void;
+}) {
+  const trackWidthRef = useRef(1);
+
+  const applyFromEvent = (event: GestureResponderEvent) => {
+    const width = trackWidthRef.current || 1;
+    onChange(clamp01(event.nativeEvent.locationX / width));
+  };
+
+  const onTrackLayout = (event: LayoutChangeEvent) => {
+    trackWidthRef.current = Math.max(1, event.nativeEvent.layout.width);
+  };
+
+  const fill = Math.round(clamp01(value) * 100);
+  const iconName =
+    value < 0.02 ? 'volume-mute' : value < 0.45 ? 'volume-low' : 'volume-high';
+
+  return (
+    <View style={styles.volumeRow} accessibilityLabel={`Громкость ${fill}%`}>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={value < 0.02 ? 'Включить звук' : 'Выключить звук у себя'}
+        hitSlop={8}
+        onPress={() => onChange(value < 0.02 ? 1 : 0)}
+        style={({ pressed }) => [styles.volumeIconBtn, pressed && styles.pressed]}>
+        <Ionicons name={iconName} size={16} color="#F2F3F5" />
+      </Pressable>
+      <View
+        style={styles.volumeTrack}
+        onLayout={onTrackLayout}
+        onStartShouldSetResponder={() => true}
+        onMoveShouldSetResponder={() => true}
+        onResponderGrant={applyFromEvent}
+        onResponderMove={applyFromEvent}>
+        <View style={[styles.volumeFill, { width: `${fill}%` }]} />
+        <View
+          pointerEvents="none"
+          style={[styles.volumeThumb, { left: `${fill}%` }]}
+        />
+      </View>
+    </View>
+  );
+}
+
 function ParticipantTile({
   tile,
   avatarSize,
   tileWidth,
   videoHeight,
+  volumeOpen,
+  onToggleVolume,
+  onVolumeChange,
 }: {
   tile: OverlayTile;
   avatarSize: number;
   tileWidth: number;
   videoHeight: number | null;
+  volumeOpen?: boolean;
+  onToggleVolume?: () => void;
+  onVolumeChange?: (volume: number) => void;
 }) {
   const avatarOuter = avatarFrameOuterSize(avatarSize);
   const ringBox = avatarOuter + 8;
   const showVideo = Boolean(tile.cameraOn && tile.videoTrack && videoHeight);
+  const canAdjustVolume =
+    Boolean(onToggleVolume && onVolumeChange) && !tile.isLocal && !tile.waiting;
+  const volume = clamp01(tile.volume ?? 1);
 
-  return (
-    <View
-      style={[
-        styles.tile,
-        { width: tileWidth },
-        showVideo ? styles.tileVideo : null,
-        tile.waiting && styles.tileWaiting,
-        tile.urgent && styles.tileUrgent,
-      ]}>
+  const body = (
+    <>
       {showVideo ? (
         <View
           style={[
@@ -345,6 +410,44 @@ function ParticipantTile({
         <Text style={styles.tileHint}>подключение…</Text>
       ) : tile.waiting && !tile.urgent ? (
         <Text style={styles.tileHint}>ожидание</Text>
+      ) : null}
+    </>
+  );
+
+  return (
+    <View
+      style={[
+        styles.tile,
+        { width: tileWidth },
+        showVideo ? styles.tileVideo : null,
+        tile.waiting && styles.tileWaiting,
+        tile.urgent && styles.tileUrgent,
+        volumeOpen && styles.tileVolumeOpen,
+      ]}>
+      {canAdjustVolume ? (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={
+            volumeOpen
+              ? `Скрыть громкость ${tile.name}`
+              : `Громкость ${tile.name} у себя`
+          }
+          onPress={onToggleVolume}
+          style={({ pressed }) => [styles.tileHit, pressed && styles.pressed]}>
+          {body}
+          <View style={styles.volumeChip} pointerEvents="none">
+            <Ionicons
+              name={volume < 0.02 ? 'volume-mute' : 'volume-medium'}
+              size={12}
+              color={volume < 0.02 ? '#F23F43' : '#DCDDDE'}
+            />
+          </View>
+        </Pressable>
+      ) : (
+        body
+      )}
+      {canAdjustVolume && volumeOpen && onVolumeChange ? (
+        <ParticipantVolumeSlider value={volume} onChange={onVolumeChange} />
       ) : null}
     </View>
   );
@@ -456,6 +559,7 @@ export function VoiceCallOverlay({
   participants,
   waitingPeers = [],
   urgentById = {},
+  volumeById = {},
   conversationId = null,
   diceSenderNickname = 'Вы',
   onToggleMute,
@@ -467,6 +571,7 @@ export function VoiceCallOverlay({
   onMinimize,
   onExpand,
   onUrgentRequest,
+  onSetParticipantVolume,
 }: Props) {
   const insets = useSafeAreaInsets();
   const isDesktop = useIsDesktopWeb();
@@ -476,6 +581,7 @@ export function VoiceCallOverlay({
   const miniOffsetRef = useRef(savedMiniOffset);
   const miniSizeRef = useRef({ width: 280, height: 56 });
   const suppressExpandRef = useRef(false);
+  const [volumeOpenId, setVolumeOpenId] = useState<string | null>(null);
   const failed = status === 'error';
   const mediaReady = status === 'connected';
   const linking = status === 'connecting';
@@ -538,6 +644,7 @@ export function VoiceCallOverlay({
   useEffect(() => {
     if (!visible) {
       setDiceOpen(false);
+      setVolumeOpenId(null);
       savedMiniOffset = { x: 0, y: 0 };
       miniOffsetRef.current = savedMiniOffset;
       setMiniOffset(savedMiniOffset);
@@ -607,6 +714,7 @@ export function VoiceCallOverlay({
       badges: p.badges,
       frameId: p.avatarFrameId,
       urgent: Boolean(urgentById[p.identity]),
+      volume: p.isLocal ? undefined : clamp01(volumeById[p.identity] ?? 1),
     }));
     const liveIds = new Set(live.map((p) => p.key));
     for (const peer of waitingPeers) {
@@ -638,7 +746,19 @@ export function VoiceCallOverlay({
       }
       return a.name.localeCompare(b.name, 'ru');
     });
-  }, [participants, profileAvatarUrl, urgentById, waitingPeers]);
+  }, [participants, profileAvatarUrl, urgentById, volumeById, waitingPeers]);
+
+  useEffect(() => {
+    if (!volumeOpenId) {
+      return;
+    }
+    const stillThere = tiles.some(
+      (tile) => tile.key === volumeOpenId && !tile.isLocal && !tile.waiting,
+    );
+    if (!stillThere) {
+      setVolumeOpenId(null);
+    }
+  }, [tiles, volumeOpenId]);
 
   const liveCount = participants.length;
   const localUrgent = participants.some((p) => p.isLocal && Boolean(urgentById[p.identity]));
@@ -995,6 +1115,20 @@ export function VoiceCallOverlay({
                   avatarSize={layout.avatarSize}
                   tileWidth={layout.tileWidth}
                   videoHeight={layout.videoHeight}
+                  volumeOpen={volumeOpenId === tile.key}
+                  onToggleVolume={
+                    onSetParticipantVolume && !tile.isLocal && !tile.waiting
+                      ? () =>
+                          setVolumeOpenId((current) =>
+                            current === tile.key ? null : tile.key,
+                          )
+                      : undefined
+                  }
+                  onVolumeChange={
+                    onSetParticipantVolume && !tile.isLocal && !tile.waiting
+                      ? (volume) => onSetParticipantVolume(tile.key, volume)
+                      : undefined
+                  }
                 />
               ))}
             </View>
@@ -1389,6 +1523,7 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     backgroundColor: '#2B2D31',
     overflow: 'visible',
+    position: 'relative',
   },
   tileVideo: {
     paddingHorizontal: 6,
@@ -1516,6 +1651,70 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '700',
     marginTop: -4,
+  },
+  tileHit: {
+    position: 'relative',
+    alignItems: 'center',
+    gap: 8,
+    width: '100%',
+  },
+  tileVolumeOpen: {
+    paddingBottom: 4,
+  },
+  volumeChip: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(0, 0, 0, 0.55)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.12)',
+  },
+  volumeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    width: '100%',
+    marginTop: 4,
+    paddingHorizontal: 2,
+  },
+  volumeIconBtn: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.08)',
+  },
+  volumeTrack: {
+    flex: 1,
+    height: 28,
+    borderRadius: 999,
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.12)',
+  },
+  volumeFill: {
+    position: 'absolute',
+    left: 0,
+    top: 0,
+    bottom: 0,
+    borderRadius: 999,
+    backgroundColor: 'rgba(21, 122, 254, 0.85)',
+  },
+  volumeThumb: {
+    position: 'absolute',
+    top: 4,
+    width: 20,
+    height: 20,
+    marginLeft: -10,
+    borderRadius: 10,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 2,
+    borderColor: '#157AFE',
   },
   controls: {
     flexDirection: 'row',
