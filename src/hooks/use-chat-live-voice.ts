@@ -24,7 +24,7 @@ import {
 import { playMicToggleSound, playUrgentRequestAlert } from '@/utils/call-ringtone';
 import { localizeErrorMessage } from '@/utils/localizeError';
 import { loadVoiceDevicePrefs } from '@/utils/voice-device-settings';
-import { applyAudioOutputToElement } from '@/utils/voice-media-devices';
+import { applyAudioOutputToElement, stopMediaStream } from '@/utils/voice-media-devices';
 import { applyMicPipelineToRoom, isUsableMediaDeviceId } from '@/utils/voice-mic-pipeline';
 
 export type ChatLiveVoiceStatus = 'idle' | 'connecting' | 'connected' | 'error';
@@ -51,6 +51,11 @@ type UrgentPayload = {
   at: number;
 };
 
+type JoinLiveOptions = {
+  /** Mic stream grabbed in the same tap that started/accepted the call (iOS Safari). */
+  primedMic?: MediaStream | null;
+};
+
 type UseChatLiveVoiceResult = {
   status: ChatLiveVoiceStatus;
   error: string | null;
@@ -60,7 +65,7 @@ type UseChatLiveVoiceResult = {
   participants: ChatLiveVoiceParticipant[];
   /** identity → urgent flag (cleared only by sender toggle / leave) */
   urgentById: Record<string, boolean>;
-  join: (conversationIdOverride?: string) => Promise<void>;
+  join: (conversationIdOverride?: string, options?: JoinLiveOptions) => Promise<void>;
   leave: () => Promise<void>;
   toggleMute: () => Promise<void>;
   toggleDeafen: () => Promise<void>;
@@ -221,6 +226,13 @@ function voiceConnectErrorMessage(err: unknown): string {
   const raw = localizeErrorMessage(err, '');
   const lower = raw.toLowerCase();
   if (
+    /not allowed by the user agent|notallowederror|permission denied|secure context|getusermedia/i.test(
+      lower,
+    )
+  ) {
+    return 'Браузер заблокировал микрофон. На телефоне нужен HTTPS, и доступ надо разрешить сразу по нажатию «Позвонить» / «Ответить».';
+  }
+  if (
     /ice|webrtc|turn|timeout|timed out|network|failed to fetch|websocket|connection|econn|unreachable|offline|abort/.test(
       lower,
     )
@@ -320,16 +332,19 @@ export function useChatLiveVoice(conversationId: string | null): UseChatLiveVoic
     setError(null);
   }, [teardownRoom]);
 
-  const join = useCallback(async (conversationIdOverride?: string) => {
+  const join = useCallback(async (conversationIdOverride?: string, options?: JoinLiveOptions) => {
     const targetId = conversationIdOverride ?? conversationId;
+    const primedMic = options?.primedMic ?? null;
     if (!targetId || roomRef.current || joiningRef.current) {
+      stopMediaStream(primedMic);
       return;
     }
 
     if (isInsecureLanWeb()) {
+      stopMediaStream(primedMic);
       setStatus('error');
       setError(
-        'На телефоне нужен HTTPS: открой чат с localhost на компьютере или через туннель Expo',
+        'На телефоне нужен HTTPS: открой чат через туннель Expo (https://…) или с localhost на компьютере. По HTTP браузер блокирует микрофон.',
       );
       return;
     }
@@ -348,6 +363,7 @@ export function useChatLiveVoice(conversationId: string | null): UseChatLiveVoic
 
       const { url, token } = await createChatVoiceToken(targetId);
       if (intentionalLeaveRef.current) {
+        stopMediaStream(primedMic);
         return;
       }
 
@@ -542,7 +558,9 @@ export function useChatLiveVoice(conversationId: string | null): UseChatLiveVoic
         deviceId: isUsableMediaDeviceId(prefs.inputDeviceId) ? prefs.inputDeviceId : null,
         micGain: prefs.micGain,
         noiseSuppression: prefs.noiseSuppression,
+        primedStream: primedMic,
       });
+      // Ownership transferred to LiveKit (or track already ended) — don't stop here.
       await applyPreferredOutputToAllRemote();
       const micOn = mic.enabled && room.localParticipant.isMicrophoneEnabled;
       setMuted(!micOn);
@@ -552,13 +570,14 @@ export function useChatLiveVoice(conversationId: string | null): UseChatLiveVoic
       setStatus('connected');
       if (!micOn) {
         setError(
-          'Микрофон не включился: соединение с сервером есть, а медиа-канал не поднялся. Проверь разрешение мика или сеть — иногда нужен VPN.',
+          'Микрофон не включился. На iPhone нажми кнопку звонка ещё раз и сразу разреши доступ — браузер не даёт включить мик после долгого ожидания сети.',
         );
       } else {
         setError(null);
       }
       refreshParticipants();
     } catch (err) {
+      stopMediaStream(primedMic);
       if (connectTimedOut) {
         return;
       }

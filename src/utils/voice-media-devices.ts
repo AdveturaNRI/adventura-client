@@ -47,6 +47,58 @@ export async function ensureMicrophonePermission(): Promise<boolean> {
   }
 }
 
+/**
+ * Must run as the first media call inside a tap/click handler (before other awaits).
+ * iOS Safari drops user-activation after network awaits — late getUserMedia then throws
+ * "not allowed by the user agent or the platform in the current context".
+ */
+export async function primeMicrophoneAccess(): Promise<MediaStream | null> {
+  if (!canUseMediaDevices() || !navigator.mediaDevices.getUserMedia) {
+    return null;
+  }
+  if (typeof window !== 'undefined' && !window.isSecureContext) {
+    const host = window.location.hostname;
+    if (host !== 'localhost' && host !== '127.0.0.1') {
+      return null;
+    }
+  }
+
+  // Unlock Web Audio / autoplay policy on the same gesture (helps room.startAudio later).
+  try {
+    const AudioCtx =
+      window.AudioContext ||
+      (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+    if (AudioCtx) {
+      const ctx = new AudioCtx();
+      if (ctx.state === 'suspended') {
+        await ctx.resume().catch(() => undefined);
+      }
+      await ctx.close().catch(() => undefined);
+    }
+  } catch {
+    // non-fatal
+  }
+
+  try {
+    return await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+  } catch {
+    return null;
+  }
+}
+
+export function stopMediaStream(stream: MediaStream | null | undefined): void {
+  if (!stream) {
+    return;
+  }
+  for (const track of stream.getTracks()) {
+    try {
+      track.stop();
+    } catch {
+      // already stopped
+    }
+  }
+}
+
 export async function listAudioDevices(): Promise<{
   inputs: MediaDeviceOption[];
   outputs: MediaDeviceOption[];

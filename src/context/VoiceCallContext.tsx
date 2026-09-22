@@ -32,6 +32,7 @@ import {
 import type { CallInvitePayload } from '@/services/realtime/socket';
 import { startCallRingback, startCallRingtone, stopCallRingtone, playHangupSound } from '@/utils/call-ringtone';
 import { localizeErrorMessage } from '@/utils/localizeError';
+import { primeMicrophoneAccess, stopMediaStream } from '@/utils/voice-media-devices';
 
 /** Discord-like: stop showing unanswered invitees after this. */
 const RINGING_PEER_TIMEOUT_MS = 30_000;
@@ -231,6 +232,8 @@ export function VoiceCallProvider({ children }: { children: ReactNode }) {
 
   const enterCallFromInvite = useCallback(
     async (invite: PendingInvite) => {
+      // First await must be getUserMedia — iOS Safari drops the tap activation after network calls.
+      const primedMic = await primeMicrophoneAccess();
       const next: Session = {
         callId: invite.callId,
         conversationId: invite.conversationId,
@@ -248,8 +251,9 @@ export function VoiceCallProvider({ children }: { children: ReactNode }) {
       ringingStartedAtRef.current = null;
       try {
         await acceptChatVoiceCall(invite.conversationId, invite.callId);
-        await join(invite.conversationId);
+        await join(invite.conversationId, { primedMic });
       } catch (error) {
+        stopMediaStream(primedMic);
         await clearSession();
         toast.error(localizeErrorMessage(error, 'Не удалось принять звонок'));
       }
@@ -268,6 +272,7 @@ export function VoiceCallProvider({ children }: { children: ReactNode }) {
         toast.info('Сначала завершите текущий звонок');
         return;
       }
+      const primedMic = await primeMicrophoneAccess();
       try {
         const { callId, isGroup, ringing } = await inviteChatVoiceCall(conversationId);
         const ringingPeers =
@@ -290,8 +295,9 @@ export function VoiceCallProvider({ children }: { children: ReactNode }) {
         setMinimized(false);
         ringingStartedAtRef.current = ringingPeers.length > 0 ? Date.now() : null;
         startCallRingback();
-        await join(conversationId);
+        await join(conversationId, { primedMic });
       } catch (error) {
+        stopMediaStream(primedMic);
         stopCallRingtone();
         await leave();
         sessionRef.current = null;
@@ -314,6 +320,7 @@ export function VoiceCallProvider({ children }: { children: ReactNode }) {
         toast.info('Сначала завершите текущий звонок');
         return;
       }
+      const primedMic = await primeMicrophoneAccess();
       try {
         await joinChatVoiceCall(conversationId, callId);
         const next: Session = {
@@ -331,8 +338,9 @@ export function VoiceCallProvider({ children }: { children: ReactNode }) {
         setSession(next);
         setMinimized(false);
         ringingStartedAtRef.current = null;
-        await join(conversationId);
+        await join(conversationId, { primedMic });
       } catch (error) {
+        stopMediaStream(primedMic);
         await leave();
         sessionRef.current = null;
         setSession(null);
@@ -414,7 +422,13 @@ export function VoiceCallProvider({ children }: { children: ReactNode }) {
     if (!current) {
       return;
     }
-    await join(current.conversationId);
+    const primedMic = await primeMicrophoneAccess();
+    try {
+      await join(current.conversationId, { primedMic });
+    } catch (error) {
+      stopMediaStream(primedMic);
+      toast.error(localizeErrorMessage(error, 'Не удалось переподключиться'));
+    }
   }, [join]);
 
   const handleToggleCamera = useCallback(async () => {

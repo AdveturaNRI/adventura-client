@@ -227,10 +227,36 @@ function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise
 
 export async function applyMicPipelineToRoom(
   room: Room,
-  opts?: { deviceId?: string | null; micGain?: number; noiseSuppression?: boolean },
+  opts?: {
+    deviceId?: string | null;
+    micGain?: number;
+    noiseSuppression?: boolean;
+    /** Stream from primeMicrophoneAccess() during the user tap — avoids iOS NotAllowedError. */
+    primedStream?: MediaStream | null;
+  },
 ): Promise<{ usedKrisp: boolean; enabled: boolean }> {
   const micGain = clampMicGain(opts?.micGain ?? MIC_GAIN_DEFAULT);
   const noiseSuppression = opts?.noiseSuppression ?? NOISE_SUPPRESSION_DEFAULT;
+
+  const primedTrack = opts?.primedStream?.getAudioTracks()?.[0];
+  if (primedTrack && primedTrack.readyState !== 'ended') {
+    try {
+      await withTimeout(
+        room.localParticipant.publishTrack(primedTrack, {
+          source: Track.Source.Microphone,
+          name: 'microphone',
+        }),
+        MIC_PUBLISH_TIMEOUT_MS,
+        'mic_publish_timeout',
+      );
+      if (room.localParticipant.isMicrophoneEnabled) {
+        return await attachMicProcessor(room, micGain, noiseSuppression);
+      }
+    } catch {
+      // fall through to getUserMedia path
+    }
+  }
+
   const capture = buildMicCaptureOptions({
     deviceId: opts?.deviceId,
     micGain,
@@ -281,6 +307,14 @@ export async function applyMicPipelineToRoom(
     return { usedKrisp: false, enabled: false };
   }
 
+  return attachMicProcessor(room, micGain, noiseSuppression);
+}
+
+async function attachMicProcessor(
+  room: Room,
+  micGain: number,
+  noiseSuppression: boolean,
+): Promise<{ usedKrisp: boolean; enabled: boolean }> {
   // Krisp / GainNode живут в Web Audio — нативному WebRTC это не нужно.
   if (Platform.OS !== 'web') {
     return { usedKrisp: false, enabled: true };
