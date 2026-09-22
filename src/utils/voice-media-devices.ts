@@ -61,15 +61,21 @@ export async function listAudioDevices(): Promise<{
   let outputIndex = 0;
   for (const device of devices) {
     if (device.kind === 'audioinput') {
+      if (!device.deviceId) {
+        continue;
+      }
       inputs.push({
-        deviceId: device.deviceId || `input-${inputIndex}`,
+        deviceId: device.deviceId,
         label: labelFor(device, inputIndex),
         kind: 'audioinput',
       });
       inputIndex += 1;
     } else if (device.kind === 'audiooutput') {
+      if (!device.deviceId) {
+        continue;
+      }
       outputs.push({
-        deviceId: device.deviceId || `output-${outputIndex}`,
+        deviceId: device.deviceId,
         label: labelFor(device, outputIndex),
         kind: 'audiooutput',
       });
@@ -105,8 +111,11 @@ export async function listVideoDevices(): Promise<MediaDeviceOption[]> {
     if (device.kind !== 'videoinput') {
       continue;
     }
+    if (!device.deviceId) {
+      continue;
+    }
     cameras.push({
-      deviceId: device.deviceId || `camera-${index}`,
+      deviceId: device.deviceId,
       label: labelFor(device, index),
       kind: 'videoinput',
     });
@@ -175,14 +184,30 @@ export async function startMicrophoneTest(
     echoCancellation: true,
     noiseSuppression,
     autoGainControl: Math.abs(gainValue - 1) < 0.05,
-    ...(deviceId?.trim() ? { deviceId: { exact: deviceId.trim() } } : {}),
   };
+  if (deviceId?.trim() && !/^(input|output|camera)-\d+$/i.test(deviceId.trim())) {
+    // ideal, not exact — exact stale ids → OverconstrainedError "Invalid constraint" on phones
+    audioConstraints.deviceId = { ideal: deviceId.trim() };
+  }
   const constraints: MediaStreamConstraints = {
     audio: audioConstraints,
     video: false,
   };
 
-  const stream = await navigator.mediaDevices.getUserMedia(constraints);
+  let stream: MediaStream;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia(constraints);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    const overconstrained =
+      (error instanceof DOMException && error.name === 'OverconstrainedError') ||
+      /invalid constraint|overconstrained|could not start/i.test(message);
+    if (!overconstrained) {
+      throw error;
+    }
+    // Phone browsers often reject NS/AEC combo or a bad deviceId — bare mic still works.
+    stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+  }
   const ctx = new AudioCtx();
   if (ctx.state === 'suspended') {
     await ctx.resume().catch(() => undefined);

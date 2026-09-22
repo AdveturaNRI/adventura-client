@@ -25,7 +25,7 @@ import { playMicToggleSound, playUrgentRequestAlert } from '@/utils/call-rington
 import { localizeErrorMessage } from '@/utils/localizeError';
 import { loadVoiceDevicePrefs } from '@/utils/voice-device-settings';
 import { applyAudioOutputToElement } from '@/utils/voice-media-devices';
-import { applyMicPipelineToRoom } from '@/utils/voice-mic-pipeline';
+import { applyMicPipelineToRoom, isUsableMediaDeviceId } from '@/utils/voice-mic-pipeline';
 
 export type ChatLiveVoiceStatus = 'idle' | 'connecting' | 'connected' | 'error';
 
@@ -355,6 +355,15 @@ export function useChatLiveVoice(conversationId: string | null): UseChatLiveVoic
         adaptiveStream: true,
         dynacast: true,
         disconnectOnPageLeave: true,
+        // LiveKit defaults voiceIsolation: true — mobile Chrome/Safari reject it
+        // with OverconstrainedError ("Invalid constraint") right after mic permission.
+        audioCaptureDefaults: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+          voiceIsolation: false,
+          deviceId: { ideal: 'default' },
+        },
         videoCaptureDefaults: {
           facingMode: 'user',
           resolution: Platform.OS === 'web' ? VideoPresets.h720.resolution : VideoPresets.h540.resolution,
@@ -463,6 +472,11 @@ export function useChatLiveVoice(conversationId: string | null): UseChatLiveVoic
           );
         })
         .on(RoomEvent.MediaDevicesError, (err: Error) => {
+          // First mic attempt often fails on phones (voiceIsolation / exact deviceId);
+          // applyMicPipelineToRoom retries with safer constraints — don't flash English DOM errors.
+          if (/invalid constraint|overconstrained/i.test(err.message ?? '')) {
+            return;
+          }
           setError(localizeErrorMessage(err, 'Нет доступа к камере или микрофону'));
         });
 
@@ -509,23 +523,23 @@ export function useChatLiveVoice(conversationId: string | null): UseChatLiveVoic
 
       const prefs = await loadVoiceDevicePrefs();
       preferredOutputDeviceId = prefs.outputDeviceId;
-      if (prefs.inputDeviceId) {
+      if (isUsableMediaDeviceId(prefs.inputDeviceId)) {
         try {
-          await room.switchActiveDevice('audioinput', prefs.inputDeviceId);
+          await room.switchActiveDevice('audioinput', prefs.inputDeviceId!);
         } catch {
           // device may have been unplugged — fall back to default
         }
       }
-      if (prefs.outputDeviceId) {
+      if (isUsableMediaDeviceId(prefs.outputDeviceId)) {
         try {
-          await room.switchActiveDevice('audiooutput', prefs.outputDeviceId);
+          await room.switchActiveDevice('audiooutput', prefs.outputDeviceId!);
         } catch {
           // Safari / some Chromium builds reject sink switches
         }
       }
 
       const mic = await applyMicPipelineToRoom(room, {
-        deviceId: prefs.inputDeviceId,
+        deviceId: isUsableMediaDeviceId(prefs.inputDeviceId) ? prefs.inputDeviceId : null,
         micGain: prefs.micGain,
         noiseSuppression: prefs.noiseSuppression,
       });
@@ -580,7 +594,7 @@ export function useChatLiveVoice(conversationId: string | null): UseChatLiveVoic
       } else {
         const prefs = await loadVoiceDevicePrefs();
         await applyMicPipelineToRoom(room, {
-          deviceId: prefs.inputDeviceId,
+          deviceId: isUsableMediaDeviceId(prefs.inputDeviceId) ? prefs.inputDeviceId : null,
           micGain: prefs.micGain,
           noiseSuppression: prefs.noiseSuppression,
         });

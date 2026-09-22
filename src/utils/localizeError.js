@@ -37,6 +37,12 @@ function translateKnownErrorMessage(message) {
     if (isGenericFileTooLargeMessage(message)) {
         return getFileTooLargeMessage();
     }
+    if (/invalid constraint|overconstrained/i.test(message)) {
+        return 'Микрофон не принял настройки захвата. Попробуй ещё раз или выбери другой микрофон в настройках.';
+    }
+    if (/notallowederror|permission denied|permission dismissed/i.test(message)) {
+        return 'Нет доступа к микрофону. Разреши его в настройках браузера или приложения.';
+    }
     return null;
 }
 export function localizeErrorMessage(error, fallback = 'Не удалось выполнить запрос') {

@@ -14,6 +14,51 @@ import {
   NOISE_SUPPRESSION_DEFAULT,
 } from '@/utils/voice-device-settings';
 
+/** Real browser deviceId — not our synthetic `input-0` placeholders. */
+export function isUsableMediaDeviceId(deviceId?: string | null): boolean {
+  const id = deviceId?.trim();
+  if (!id) {
+    return false;
+  }
+  if (/^(input|output|camera)-\d+$/i.test(id)) {
+    return false;
+  }
+  return true;
+}
+
+function isMobileWebUa(): boolean {
+  if (Platform.OS !== 'web' || typeof navigator === 'undefined') {
+    return false;
+  }
+  const ua = navigator.userAgent ?? '';
+  const data = (
+    navigator as Navigator & { userAgentData?: { mobile?: boolean } }
+  ).userAgentData;
+  if (data?.mobile === true) {
+    return true;
+  }
+  return /Android|iPhone|iPad|iPod|Mobile|webOS|IEMobile|Opera Mini/i.test(ua);
+}
+
+/** Chromium desktop only — voiceIsolation is rejected on mobile Chrome/Safari. */
+function supportsVoiceIsolation(): boolean {
+  if (Platform.OS !== 'web' || typeof navigator === 'undefined') {
+    return false;
+  }
+  if (isMobileWebUa()) {
+    return false;
+  }
+  const ua = navigator.userAgent ?? '';
+  if (/Firefox/i.test(ua)) {
+    return false;
+  }
+  // Chrome iOS is WebKit and reports CriOS — not real Chromium capture.
+  if (/CriOS|FxiOS|EdgiOS/i.test(ua)) {
+    return false;
+  }
+  return /Chrome|Chromium|Edg/i.test(ua);
+}
+
 export function buildMicCaptureOptions(opts?: {
   deviceId?: string | null;
   micGain?: number;
@@ -23,18 +68,33 @@ export function buildMicCaptureOptions(opts?: {
   const noiseOn = opts?.noiseSuppression ?? NOISE_SUPPRESSION_DEFAULT;
   // When user boosts/cuts gain manually, turn AGC off so the slider actually moves level.
   const useAgc = Math.abs(gain - 1) < 0.05;
-  const options: AudioCaptureOptions = {
-    echoCancellation: true,
-    noiseSuppression: noiseOn,
-    autoGainControl: useAgc,
-    ...(opts?.deviceId?.trim() ? { deviceId: opts.deviceId.trim() } : {}),
-  };
-  // Chromium-only; omit elsewhere so getUserMedia doesn't reject the whole constraint set.
-  if (noiseOn && Platform.OS === 'web' && typeof navigator !== 'undefined') {
-    const ua = navigator.userAgent ?? '';
-    if (/Chrome|Chromium|Edg/i.test(ua) && !/Firefox|Safari\/\d/i.test(ua.replace(/Chrome.*$/, ''))) {
-      options.voiceIsolation = true;
-    }
+  const mobile = isMobileWebUa();
+
+  // Mobile browsers (esp. Safari / Chrome Android) reject exotic constraints with
+  // OverconstrainedError: "Invalid constraint". Keep the set minimal there.
+  const options: AudioCaptureOptions = mobile
+    ? {
+        echoCancellation: true,
+        noiseSuppression: noiseOn,
+        autoGainControl: true,
+        // LiveKit defaults voiceIsolation: true — must override or getUserMedia dies.
+        voiceIsolation: false,
+      }
+    : {
+        echoCancellation: true,
+        noiseSuppression: noiseOn,
+        autoGainControl: useAgc,
+        voiceIsolation: false,
+      };
+
+  if (isUsableMediaDeviceId(opts?.deviceId)) {
+    // Pass ideal, not a bare string — LiveKit turns strings into { exact }, which
+    // breaks when the saved desktop mic id isn't on this phone.
+    options.deviceId = { ideal: opts!.deviceId!.trim() };
+  }
+
+  if (!mobile && noiseOn && supportsVoiceIsolation()) {
+    options.voiceIsolation = true;
   }
   return options;
 }
@@ -198,20 +258,23 @@ export async function applyMicPipelineToRoom(
 
   let enabled = await tryEnable(capture);
   if (!enabled) {
-    const { voiceIsolation: _ignored, ...withoutIsolation } = capture;
-    enabled = await tryEnable(withoutIsolation);
+    const { voiceIsolation: _ignored, deviceId: _device, ...withoutExotic } = capture;
+    enabled = await tryEnable({
+      ...withoutExotic,
+      voiceIsolation: false,
+    });
   }
   if (!enabled && capture.deviceId) {
-    // Saved device may be gone / blocked — fall back to default mic.
-    const { deviceId: _device, voiceIsolation: _vi, ...defaults } = capture;
-    enabled = await tryEnable(defaults);
-  }
-  if (!enabled) {
     enabled = await tryEnable({
       echoCancellation: true,
       noiseSuppression: true,
       autoGainControl: true,
+      voiceIsolation: false,
     });
+  }
+  if (!enabled) {
+    // Last resort: bare mic, no processing flags.
+    enabled = await tryEnable({ voiceIsolation: false });
   }
 
   if (!enabled) {
