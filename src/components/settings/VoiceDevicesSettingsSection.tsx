@@ -588,10 +588,10 @@ export function VoiceDevicesSettingsSection() {
             <Text style={styles.accessTitle}>Доступ к микрофону</Text>
             <Text style={styles.accessHint}>
               {micAccess === 'granted'
-                ? 'Браузер разрешил микрофон для звонков'
+                ? 'Есть доступ к микрофону'
                 : micAccess === 'denied'
-                  ? 'Включите микрофон в настройках браузера для этого сайта'
-                  : 'Нажмите индикатор или «Проверить микрофон», чтобы разрешить'}
+                  ? 'Нужно разрешить в браузере'
+                  : 'Нажмите, чтобы разрешить'}
             </Text>
           </View>
           <Pressable
@@ -781,9 +781,7 @@ export function VoiceDevicesSettingsSection() {
                 </Pressable>
               )}
           </View>
-          <Text style={styles.meterHint}>
-            На телефоне зажми кнопку и сразу разреши доступ к микрофону во всплывающем окне.
-          </Text>
+          <Text style={styles.meterHint}>Если не открывается — попробуй Safari</Text>
         </View>
       </View>
     </View>

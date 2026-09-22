@@ -30,6 +30,8 @@ import {
   ownedAuraIdsFromPerks,
   ownedFrameIdsFromPerks,
   sanitizeBadges,
+  frameIdForBadges,
+  auraIdForBadges,
   lockedRewardToast,
   uniqueGoldTone,
   rewardUiTone,
@@ -539,24 +541,27 @@ export default function ProfileAppearanceScreen() {
     if (!profile) {
       return;
     }
-    setFrameId((profile.perks?.avatarFrameId as AvatarFrameId | null) ?? 'none');
-    setAuraId((profile.perks?.questionnaireAuraId as QuestionnaireAuraId | null) ?? 'none');
+    const badgeList = sanitizeBadges(profile.perks?.badges);
+    setFrameId(
+      (profile.perks?.avatarFrameId as AvatarFrameId | null) ??
+        frameIdForBadges(badgeList),
+    );
+    setAuraId(
+      (profile.perks?.questionnaireAuraId as QuestionnaireAuraId | null) ??
+        auraIdForBadges(badgeList),
+    );
     setVisibleBadges(sanitizeBadges(profile.perks?.visibleBadges ?? profile.perks?.badges));
   }, [profile]);
 
   const persist = useCallback(
-    async (
-      nextFrame: AvatarFrameId,
-      nextAura: QuestionnaireAuraId,
-      nextBadges: RewardBadgeType[],
-    ) => {
+    async (patch: {
+      avatarFrameId?: AvatarFrameId;
+      questionnaireAuraId?: QuestionnaireAuraId;
+      badgeTypes?: RewardBadgeType[];
+    }) => {
       setSaving(true);
       try {
-        await updateMyCosmetics({
-          avatarFrameId: nextFrame,
-          questionnaireAuraId: nextAura,
-          badgeTypes: nextBadges,
-        });
+        await updateMyCosmetics(patch);
         await refreshProfile();
       } catch (error) {
         toast.error(localizeErrorMessage(error, 'Не получилось сохранить оформление'));
@@ -573,7 +578,7 @@ export default function ProfileAppearanceScreen() {
       return;
     }
     setFrameId(next);
-    void persist(next, auraId, visibleBadges);
+    void persist({ avatarFrameId: next });
   };
 
   const pickAura = (next: QuestionnaireAuraId) => {
@@ -581,7 +586,7 @@ export default function ProfileAppearanceScreen() {
       return;
     }
     setAuraId(next);
-    void persist(frameId, next, visibleBadges);
+    void persist({ questionnaireAuraId: next });
   };
 
   const toggleBadge = (id: RewardBadgeType) => {
@@ -592,7 +597,7 @@ export default function ProfileAppearanceScreen() {
       ? visibleBadges.filter((item) => item !== id)
       : [...visibleBadges, id];
     setVisibleBadges(next);
-    void persist(frameId, auraId, next);
+    void persist({ badgeTypes: next });
   };
 
   if (!user) {

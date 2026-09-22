@@ -230,7 +230,7 @@ function voiceConnectErrorMessage(err: unknown): string {
       lower,
     )
   ) {
-    return 'Браузер заблокировал микрофон. Разреши доступ сразу по нажатию «Позвонить» / «Ответить».';
+    return 'Не удалось получить доступ к микрофону';
   }
   if (
     /ice|webrtc|turn|timeout|timed out|network|failed to fetch|websocket|connection|econn|unreachable|offline|abort/.test(
@@ -344,7 +344,7 @@ export function useChatLiveVoice(conversationId: string | null): UseChatLiveVoic
       stopMediaStream(primedMic);
       setStatus('error');
       setError(
-        'Браузер не даёт доступ к микрофону. Открой чат на компьютере или попробуй позже.',
+        'Не удалось получить доступ к микрофону',
       );
       return;
     }
@@ -569,9 +569,7 @@ export function useChatLiveVoice(conversationId: string | null): UseChatLiveVoic
       deafenedRef.current = false;
       setStatus('connected');
       if (!micOn) {
-        setError(
-          'Микрофон не включился. На iPhone нажми кнопку звонка ещё раз и сразу разреши доступ — браузер не даёт включить мик после долгого ожидания сети.',
-        );
+        setError('Не удалось получить доступ к микрофону');
       } else {
         setError(null);
       }
@@ -633,9 +631,7 @@ export function useChatLiveVoice(conversationId: string | null): UseChatLiveVoic
       playMicToggleSound(false);
       refreshParticipants();
       if (!finallyEnabled) {
-        setError(
-          'Микрофон не включился: соединение с сервером есть, а медиа-канал не поднялся. Проверь разрешение мика или сеть — иногда нужен VPN.',
-        );
+        setError('Не удалось включить микрофон');
       } else {
         setError(null);
       }

@@ -38,10 +38,10 @@ function translateKnownErrorMessage(message) {
         return getFileTooLargeMessage();
     }
     if (/invalid constraint|overconstrained/i.test(message)) {
-        return 'Микрофон не принял настройки захвата. Попробуй ещё раз или выбери другой микрофон в настройках.';
+        return 'Не удалось открыть микрофон';
     }
     if (/not allowed by the user agent|notallowederror|permission denied|permission dismissed/i.test(message)) {
-        return 'Браузер заблокировал микрофон. Разреши доступ сразу при нажатии «Позвонить» / «Ответить».';
+        return 'Не удалось получить доступ к микрофону';
     }
     return null;
 }

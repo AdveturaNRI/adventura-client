@@ -658,17 +658,23 @@ export function diceSkinIdsFromPerks(perks) {
 export function hasProfileCosmetics(badges) {
     return ownedFrameIdsForBadges(badges).length > 0 || ownedAuraIdsForBadges(badges).length > 0;
 }
-export function displayedFrameId(_badges, equipped) {
-    if (equipped == null || equipped === 'none') {
+export function displayedFrameId(badges, equipped) {
+    if (equipped === 'none') {
         return 'none';
     }
-    return isAvatarFrameId(equipped) ? equipped : 'none';
+    if (equipped != null && isAvatarFrameId(equipped)) {
+        return equipped;
+    }
+    return frameIdForBadges(sanitizeBadges(badges));
 }
-export function displayedAuraId(_badges, equipped) {
-    if (equipped == null || equipped === 'none') {
+export function displayedAuraId(badges, equipped) {
+    if (equipped === 'none') {
         return 'none';
     }
-    return isQuestionnaireAuraId(equipped) ? equipped : 'none';
+    if (equipped != null && isQuestionnaireAuraId(equipped)) {
+        return equipped;
+    }
+    return auraIdForBadges(sanitizeBadges(badges));
 }
 export function isExclusiveDiceSkin(id) {
     return DICE_SKINS[id].exclusive;

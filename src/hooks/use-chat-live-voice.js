@@ -257,7 +257,7 @@ export function useChatLiveVoice(conversationId) {
         }
         if (isInsecureLanWeb()) {
             setStatus('error');
-            setError('Браузер не даёт доступ к микрофону. Открой чат на компьютере или попробуй позже.');
+            setError('Не удалось получить доступ к микрофону');
             return;
         }
         joiningRef.current = true;
@@ -492,7 +492,7 @@ export function useChatLiveVoice(conversationId) {
             playMicToggleSound(false);
             refreshParticipants();
             if (!finallyEnabled) {
-                setError('Не удалось включить микрофон — проверь разрешение браузера');
+                setError('Не удалось включить микрофон');
             }
         }
         catch (err) {

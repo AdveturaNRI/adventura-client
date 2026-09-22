@@ -841,23 +841,29 @@ export function hasProfileCosmetics(badges: RewardBadgeType[]): boolean {
 }
 
 export function displayedFrameId(
-  _badges: RewardBadgeType[],
+  badges: RewardBadgeType[],
   equipped?: AvatarFrameId | string | null,
 ): AvatarFrameId {
-  if (equipped == null || equipped === 'none') {
+  if (equipped === 'none') {
     return 'none';
   }
-  return isAvatarFrameId(equipped) ? equipped : 'none';
+  if (equipped != null && isAvatarFrameId(equipped)) {
+    return equipped;
+  }
+  return frameIdForBadges(sanitizeBadges(badges));
 }
 
 export function displayedAuraId(
-  _badges: RewardBadgeType[],
+  badges: RewardBadgeType[],
   equipped?: QuestionnaireAuraId | string | null,
 ): QuestionnaireAuraId {
-  if (equipped == null || equipped === 'none') {
+  if (equipped === 'none') {
     return 'none';
   }
-  return isQuestionnaireAuraId(equipped) ? equipped : 'none';
+  if (equipped != null && isQuestionnaireAuraId(equipped)) {
+    return equipped;
+  }
+  return auraIdForBadges(sanitizeBadges(badges));
 }
 
 export function isExclusiveDiceSkin(id: DiceSkinId): boolean {

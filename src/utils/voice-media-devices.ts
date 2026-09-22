@@ -105,9 +105,7 @@ export function beginMicrophonePrimeFromGesture(): void {
       const message = error instanceof Error ? error.message : String(error);
       const name = error instanceof DOMException ? error.name : '';
       if (name === 'NotAllowedError' || /not allowed by the user agent|permission/i.test(message)) {
-        primedMicError = new Error(
-          'Браузер заблокировал микрофон. Если окно доступа не всплыло — в Safari: aA → Настройки сайта → Микрофон → Разрешить, затем обнови страницу и зажми кнопку снова.',
-        );
+        primedMicError = new Error('Не удалось получить доступ к микрофону');
       } else {
         primedMicError = error instanceof Error ? error : new Error(message);
       }
@@ -364,9 +362,7 @@ export async function startMicrophoneTest(
       const message = error instanceof Error ? error.message : String(error);
       const name = error instanceof DOMException ? error.name : '';
       if (name === 'NotAllowedError' || /not allowed by the user agent|permission/i.test(message)) {
-        throw new Error(
-          'Браузер заблокировал микрофон. На телефоне зажми «Проверить микрофон» и сразу разреши доступ — не из настроек системы после факта.',
-        );
+        throw new Error('Не удалось получить доступ к микрофону');
       }
       const overconstrained =
         name === 'OverconstrainedError' ||
@@ -379,9 +375,7 @@ export async function startMicrophoneTest(
   }
 
   if (!stream) {
-    throw new Error(
-      'Браузер заблокировал микрофон. На телефоне зажми «Проверить микрофон» и сразу разреши доступ во всплывающем окне.',
-    );
+    throw new Error('Не удалось получить доступ к микрофону');
   }
 
   const liveStream = stream;
