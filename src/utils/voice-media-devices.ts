@@ -51,39 +51,119 @@ export async function ensureMicrophonePermission(): Promise<boolean> {
  * Must run as the first media call inside a tap/click handler (before other awaits).
  * iOS Safari drops user-activation after network awaits — late getUserMedia then throws
  * "not allowed by the user agent or the platform in the current context".
+ *
+ * Prefer `beginMicrophonePrimeFromGesture()` from `onPressIn` so RN-web Pressable
+ * still has activation (onPress often fires too late on iOS).
  */
-export async function primeMicrophoneAccess(): Promise<MediaStream | null> {
+let primedMicInflight: Promise<MediaStream | null> | null = null;
+let primedMicReady: MediaStream | null = null;
+/** Last getUserMedia failure from a gesture prime (surfaces NotAllowedError instead of silent null). */
+let primedMicError: Error | null = null;
+
+export function beginMicrophonePrimeFromGesture(): void {
   if (!canUseMediaDevices() || !navigator.mediaDevices.getUserMedia) {
-    return null;
+    return;
+  }
+  if (primedMicInflight || primedMicReady) {
+    return;
   }
   if (typeof window !== 'undefined' && !window.isSecureContext) {
     const host = window.location.hostname;
     if (host !== 'localhost' && host !== '127.0.0.1') {
-      return null;
+      return;
     }
   }
 
-  // Unlock Web Audio / autoplay policy on the same gesture (helps room.startAudio later).
-  try {
-    const AudioCtx =
-      window.AudioContext ||
-      (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
-    if (AudioCtx) {
-      const ctx = new AudioCtx();
-      if (ctx.state === 'suspended') {
-        await ctx.resume().catch(() => undefined);
+  primedMicError = null;
+
+  // CRITICAL (iOS Safari): getUserMedia must start in the same sync turn as the tap.
+  // Any await before it (AudioContext.resume, network) drops user-activation → NotAllowedError.
+  const gumPromise = navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+
+  primedMicInflight = (async () => {
+    try {
+      const AudioCtx =
+        window.AudioContext ||
+        (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+      if (AudioCtx) {
+        const ctx = new AudioCtx();
+        if (ctx.state === 'suspended') {
+          void ctx.resume().catch(() => undefined);
+        }
+        void ctx.close().catch(() => undefined);
       }
-      await ctx.close().catch(() => undefined);
+    } catch {
+      // non-fatal — never block mic behind AudioContext
     }
-  } catch {
-    // non-fatal
-  }
 
-  try {
-    return await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
-  } catch {
+    try {
+      const stream = await gumPromise;
+      primedMicReady = stream;
+      primedMicError = null;
+      return stream;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const name = error instanceof DOMException ? error.name : '';
+      if (name === 'NotAllowedError' || /not allowed by the user agent|permission/i.test(message)) {
+        primedMicError = new Error(
+          'Браузер заблокировал микрофон. Если окно доступа не всплыло — в Safari: aA → Настройки сайта → Микрофон → Разрешить, затем обнови страницу и зажми кнопку снова.',
+        );
+      } else {
+        primedMicError = error instanceof Error ? error : new Error(message);
+      }
+      return null;
+    } finally {
+      primedMicInflight = null;
+    }
+  })();
+}
+
+/** Await the stream started in onPressIn, or start a new getUserMedia if none. */
+export async function takePrimedMicrophone(): Promise<MediaStream | null> {
+  if (primedMicReady) {
+    const stream = primedMicReady;
+    primedMicReady = null;
+    return stream;
+  }
+  if (primedMicInflight) {
+    const stream = await primedMicInflight;
+    primedMicReady = null;
+    if (!stream && primedMicError) {
+      const err = primedMicError;
+      primedMicError = null;
+      throw err;
+    }
+    return stream;
+  }
+  if (primedMicError) {
+    const err = primedMicError;
+    primedMicError = null;
+    throw err;
+  }
+  if (!canUseMediaDevices() || !navigator.mediaDevices.getUserMedia) {
     return null;
   }
+  beginMicrophonePrimeFromGesture();
+  if (primedMicInflight) {
+    const stream = await primedMicInflight;
+    primedMicReady = null;
+    if (!stream && primedMicError) {
+      const err = primedMicError;
+      primedMicError = null;
+      throw err;
+    }
+    return stream;
+  }
+  if (primedMicReady) {
+    const stream = primedMicReady;
+    primedMicReady = null;
+    return stream;
+  }
+  return null;
+}
+
+export async function primeMicrophoneAccess(): Promise<MediaStream | null> {
+  return takePrimedMicrophone();
 }
 
 export function stopMediaStream(stream: MediaStream | null | undefined): void {
@@ -97,6 +177,15 @@ export function stopMediaStream(stream: MediaStream | null | undefined): void {
       // already stopped
     }
   }
+}
+
+/** Drop an unused primed stream (e.g. user cancelled before join). */
+export function discardPrimedMicrophone(): void {
+  if (primedMicReady) {
+    stopMediaStream(primedMicReady);
+    primedMicReady = null;
+  }
+  primedMicError = null;
 }
 
 export async function listAudioDevices(): Promise<{
@@ -217,6 +306,7 @@ export async function startMicrophoneTest(
   micGain: number = 1,
   outputDeviceId?: string | null,
   noiseSuppression: boolean = true,
+  primedStream?: MediaStream | null,
 ): Promise<MicTestHandle> {
   if (!canUseMediaDevices() || !navigator.mediaDevices.getUserMedia) {
     throw new Error('Микрофон недоступен в этом браузере');
@@ -232,34 +322,69 @@ export async function startMicrophoneTest(
   const clampGain = (value: number) =>
     Math.min(2, Math.max(0, Number.isFinite(value) ? value : 1));
   let gainValue = clampGain(micGain);
-  const audioConstraints: MediaTrackConstraints = {
-    echoCancellation: true,
-    noiseSuppression,
-    autoGainControl: Math.abs(gainValue - 1) < 0.05,
-  };
-  if (deviceId?.trim() && !/^(input|output|camera)-\d+$/i.test(deviceId.trim())) {
-    // ideal, not exact — exact stale ids → OverconstrainedError "Invalid constraint" on phones
-    audioConstraints.deviceId = { ideal: deviceId.trim() };
-  }
-  const constraints: MediaStreamConstraints = {
-    audio: audioConstraints,
-    video: false,
-  };
 
-  let stream: MediaStream;
-  try {
-    stream = await navigator.mediaDevices.getUserMedia(constraints);
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    const overconstrained =
-      (error instanceof DOMException && error.name === 'OverconstrainedError') ||
-      /invalid constraint|overconstrained|could not start/i.test(message);
-    if (!overconstrained) {
-      throw error;
-    }
-    // Phone browsers often reject NS/AEC combo or a bad deviceId — bare mic still works.
-    stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+  let stream: MediaStream | null =
+    primedStream && primedStream.getAudioTracks().some((t) => t.readyState === 'live')
+      ? primedStream
+      : null;
+
+  if (!stream) {
+    // Prefer stream from beginMicrophonePrimeFromGesture() (onPressIn).
+    stream = await takePrimedMicrophone();
   }
+
+  if (!stream) {
+    const mobile =
+      typeof navigator !== 'undefined' &&
+      (/Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent ?? '') ||
+        (navigator as Navigator & { userAgentData?: { mobile?: boolean } }).userAgentData
+          ?.mobile === true);
+
+    const audioConstraints: MediaTrackConstraints = mobile
+      ? { echoCancellation: true }
+      : {
+          echoCancellation: true,
+          noiseSuppression,
+          autoGainControl: Math.abs(gainValue - 1) < 0.05,
+        };
+    if (
+      !mobile &&
+      deviceId?.trim() &&
+      !/^(input|output|camera)-\d+$/i.test(deviceId.trim())
+    ) {
+      audioConstraints.deviceId = { ideal: deviceId.trim() };
+    }
+
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({
+        audio: mobile ? true : audioConstraints,
+        video: false,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const name = error instanceof DOMException ? error.name : '';
+      if (name === 'NotAllowedError' || /not allowed by the user agent|permission/i.test(message)) {
+        throw new Error(
+          'Браузер заблокировал микрофон. На телефоне зажми «Проверить микрофон» и сразу разреши доступ — не из настроек системы после факта.',
+        );
+      }
+      const overconstrained =
+        name === 'OverconstrainedError' ||
+        /invalid constraint|overconstrained|could not start/i.test(message);
+      if (!overconstrained) {
+        throw error instanceof Error ? error : new Error(message);
+      }
+      stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+    }
+  }
+
+  if (!stream) {
+    throw new Error(
+      'Браузер заблокировал микрофон. На телефоне зажми «Проверить микрофон» и сразу разреши доступ во всплывающем окне.',
+    );
+  }
+
+  const liveStream = stream;
   const ctx = new AudioCtx();
   if (ctx.state === 'suspended') {
     await ctx.resume().catch(() => undefined);
@@ -284,7 +409,7 @@ export async function startMicrophoneTest(
 
   await applyOutputSink(outputDeviceId);
 
-  const source = ctx.createMediaStreamSource(stream);
+  const source = ctx.createMediaStreamSource(liveStream);
   const gainNode = ctx.createGain();
   // Meter/pipeline gain = what you'd send. Monitor is quieter on purpose.
   gainNode.gain.value = gainValue;
@@ -339,7 +464,7 @@ export async function startMicrophoneTest(
       } catch {
         // already gone
       }
-      for (const track of stream.getTracks()) {
+      for (const track of liveStream.getTracks()) {
         track.stop();
       }
       void ctx.close().catch(() => undefined);

@@ -71,6 +71,8 @@ type Props = {
   conversationId?: string | null;
   diceSenderNickname?: string;
   onToggleMute: () => void;
+  /** Web: start getUserMedia while finger is down (unmute / retry). */
+  onMicGesture?: () => void;
   onToggleDeafen: () => void;
   onToggleCamera?: () => void;
   onHangup: () => void;
@@ -457,6 +459,7 @@ export function VoiceCallOverlay({
   conversationId = null,
   diceSenderNickname = 'Вы',
   onToggleMute,
+  onMicGesture,
   onToggleDeafen,
   onToggleCamera,
   onHangup,
@@ -780,6 +783,7 @@ export function VoiceCallOverlay({
             accessibilityLabel={
               muted ? 'Включить микрофон (Ctrl+Shift+M)' : 'Выключить микрофон (Ctrl+Shift+M)'
             }
+            onPressIn={muted ? onMicGesture : undefined}
             onPress={onToggleMute}
             style={({ pressed }) => [
               pinToTop ? styles.miniCtrlCompact : styles.miniCtrl,
@@ -1001,6 +1005,7 @@ export function VoiceCallOverlay({
               <Pressable
                 accessibilityRole="button"
                 accessibilityLabel="Повторить"
+                onPressIn={onMicGesture}
                 onPress={onRetry}
                 style={({ pressed }) => [
                   styles.controlBtn,
@@ -1017,6 +1022,7 @@ export function VoiceCallOverlay({
                 muted ? 'Включить микрофон (Ctrl+Shift+M)' : 'Выключить микрофон (Ctrl+Shift+M)'
               }
               disabled={!mediaReady}
+              onPressIn={muted ? onMicGesture : undefined}
               onPress={onToggleMute}
               style={({ pressed }) => [
                 styles.controlBtn,

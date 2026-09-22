@@ -32,7 +32,11 @@ import {
 import type { CallInvitePayload } from '@/services/realtime/socket';
 import { startCallRingback, startCallRingtone, stopCallRingtone, playHangupSound } from '@/utils/call-ringtone';
 import { localizeErrorMessage } from '@/utils/localizeError';
-import { primeMicrophoneAccess, stopMediaStream } from '@/utils/voice-media-devices';
+import {
+  beginMicrophonePrimeFromGesture,
+  stopMediaStream,
+  takePrimedMicrophone,
+} from '@/utils/voice-media-devices';
 
 /** Discord-like: stop showing unanswered invitees after this. */
 const RINGING_PEER_TIMEOUT_MS = 30_000;
@@ -232,8 +236,8 @@ export function VoiceCallProvider({ children }: { children: ReactNode }) {
 
   const enterCallFromInvite = useCallback(
     async (invite: PendingInvite) => {
-      // First await must be getUserMedia — iOS Safari drops the tap activation after network calls.
-      const primedMic = await primeMicrophoneAccess();
+      // Prefer stream started in onPressIn; fall back to getUserMedia now.
+      const primedMic = await takePrimedMicrophone();
       const next: Session = {
         callId: invite.callId,
         conversationId: invite.conversationId,
@@ -272,7 +276,7 @@ export function VoiceCallProvider({ children }: { children: ReactNode }) {
         toast.info('Сначала завершите текущий звонок');
         return;
       }
-      const primedMic = await primeMicrophoneAccess();
+      const primedMic = await takePrimedMicrophone();
       try {
         const { callId, isGroup, ringing } = await inviteChatVoiceCall(conversationId);
         const ringingPeers =
@@ -320,7 +324,7 @@ export function VoiceCallProvider({ children }: { children: ReactNode }) {
         toast.info('Сначала завершите текущий звонок');
         return;
       }
-      const primedMic = await primeMicrophoneAccess();
+      const primedMic = await takePrimedMicrophone();
       try {
         await joinChatVoiceCall(conversationId, callId);
         const next: Session = {
@@ -422,7 +426,7 @@ export function VoiceCallProvider({ children }: { children: ReactNode }) {
     if (!current) {
       return;
     }
-    const primedMic = await primeMicrophoneAccess();
+    const primedMic = await takePrimedMicrophone();
     try {
       await join(current.conversationId, { primedMic });
     } catch (error) {
@@ -866,6 +870,7 @@ export function VoiceCallProvider({ children }: { children: ReactNode }) {
           waitingPeers={waitingPeers}
           urgentById={urgentById}
           onToggleMute={() => void toggleMute()}
+          onMicGesture={() => beginMicrophonePrimeFromGesture()}
           onToggleDeafen={() => void toggleDeafen()}
           onToggleCamera={() => void handleToggleCamera()}
           onHangup={() => void hangup()}
@@ -903,6 +908,7 @@ export function VoiceCallProvider({ children }: { children: ReactNode }) {
             return undefined;
           })()}
           onAccept={() => void acceptIncoming()}
+          onAcceptPressIn={() => beginMicrophonePrimeFromGesture()}
           onDecline={() => void declineIncoming()}
         />
       </View>

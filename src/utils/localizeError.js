@@ -41,7 +41,7 @@ function translateKnownErrorMessage(message) {
         return 'Микрофон не принял настройки захвата. Попробуй ещё раз или выбери другой микрофон в настройках.';
     }
     if (/not allowed by the user agent|notallowederror|permission denied|permission dismissed/i.test(message)) {
-        return 'Браузер заблокировал микрофон. На телефоне открой сайт по HTTPS и разреши доступ сразу при нажатии «Позвонить» / «Ответить».';
+        return 'Браузер заблокировал микрофон. Разреши доступ сразу при нажатии «Позвонить» / «Ответить».';
     }
     return null;
 }

@@ -116,6 +116,7 @@ import {
 import { setFocusedChatConversation } from '@/utils/chat-alerts';
 import { localizeErrorMessage } from '@/utils/localizeError';
 import { shouldSendChatOnEnter } from '@/utils/chat-enter-key';
+import { beginMicrophonePrimeFromGesture } from '@/utils/voice-media-devices';
 import {
   getCachedFileTooLargeMessage,
   getCachedUploadLimits,
@@ -2979,6 +2980,11 @@ export default function ChatThreadScreen() {
               voiceActiveHere ? 'Завершить звонок' : 'Позвонить'
             }
             hitSlop={8}
+            onPressIn={() => {
+              if (Platform.OS === 'web' && !voiceActiveHere) {
+                beginMicrophonePrimeFromGesture();
+              }
+            }}
             onPress={() => {
               if (!conversationId) {
                 return;
@@ -3001,6 +3007,7 @@ export default function ChatThreadScreen() {
                 return;
               }
               void (async () => {
+                // Mic prime already started in onPressIn — do not await network before takePrimedMicrophone inside startCall.
                 let ringingPeers =
                   isGroup
                     ? members
@@ -3019,25 +3026,26 @@ export default function ChatThreadScreen() {
                           },
                         ]
                       : [];
+                // Kick off the call immediately; fill ringing peers if we already have them.
+                // Loading members must not block the mic gesture — startCall takes primed mic first.
+                const callPromise = startCall(
+                  conversationId,
+                  title,
+                  conversation?.peer?.avatarUrl ?? null,
+                  {
+                    isGroup,
+                    ringingPeers,
+                  },
+                );
                 if (isGroup && ringingPeers.length === 0) {
                   try {
                     const loaded = await listChatMembers(conversationId);
                     setMembers(loaded);
-                    ringingPeers = loaded
-                      .filter((member) => member.id !== user?.id)
-                      .map((member) => ({
-                        userId: member.id,
-                        nickname: member.nickname,
-                        avatarUrl: member.avatarUrl,
-                      }));
                   } catch {
                     // invite response still carries ringing peers
                   }
                 }
-                await startCall(conversationId, title, conversation?.peer?.avatarUrl ?? null, {
-                  isGroup,
-                  ringingPeers,
-                });
+                await callPromise;
               })();
             }}
             style={[
@@ -3081,6 +3089,11 @@ export default function ChatThreadScreen() {
               accessibilityRole="button"
               accessibilityLabel="Войти в звонок"
               disabled={joiningOngoingVoice}
+              onPressIn={() => {
+                if (Platform.OS === 'web') {
+                  beginMicrophonePrimeFromGesture();
+                }
+              }}
               onPress={() => {
                 if (!conversationId || !ongoingVoiceCall) {
                   return;

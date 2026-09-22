@@ -9,6 +9,7 @@ import {
   View,
 } from 'react-native';
 import { useFocusEffect } from 'expo-router';
+import { Ionicons } from '@expo/vector-icons';
 
 import { SelectField, toast } from '@/components/ui';
 import { FontSize, Radius, Spacing, type ThemeColors } from '@/constants/theme';
@@ -29,15 +30,48 @@ import {
   clampMicGain,
 } from '@/utils/voice-device-settings';
 import {
+  beginMicrophonePrimeFromGesture,
   ensureCameraPermission,
   ensureMicrophonePermission,
   listAudioDevices,
   listVideoDevices,
   startMicrophoneTest,
   supportsAudioOutputSelection,
+  takePrimedMicrophone,
   type MediaDeviceOption,
   type MicTestHandle,
 } from '@/utils/voice-media-devices';
+
+type MicAccessStatus = 'granted' | 'denied' | 'prompt' | 'checking';
+
+async function readMicAccessStatus(): Promise<Exclude<MicAccessStatus, 'checking'>> {
+  if (Platform.OS !== 'web' || typeof navigator === 'undefined') {
+    return 'prompt';
+  }
+
+  try {
+    const permissions = navigator.permissions;
+    if (permissions?.query) {
+      const result = await permissions.query({ name: 'microphone' as PermissionName });
+      if (result.state === 'granted') return 'granted';
+      if (result.state === 'denied') return 'denied';
+      return 'prompt';
+    }
+  } catch {
+    // Permissions API may reject `microphone` on some browsers.
+  }
+
+  try {
+    const devices = await navigator.mediaDevices?.enumerateDevices?.();
+    if (devices?.some((d) => d.kind === 'audioinput' && d.label)) {
+      return 'granted';
+    }
+  } catch {
+    // ignore
+  }
+
+  return 'prompt';
+}
 
 function createStyles(colors: ThemeColors) {
   return StyleSheet.create({
@@ -54,6 +88,57 @@ function createStyles(colors: ThemeColors) {
     },
     fieldGap: {
       gap: Spacing.md,
+    },
+    accessRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: Spacing.md,
+    },
+    accessText: {
+      flex: 1,
+      minWidth: 0,
+      gap: 4,
+    },
+    accessTitle: {
+      fontSize: FontSize.caption,
+      fontWeight: '600',
+      color: colors.text,
+    },
+    accessHint: {
+      fontSize: FontSize.caption,
+      color: colors.textMuted,
+      lineHeight: FontSize.caption * 1.4,
+    },
+    accessBadge: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+      paddingHorizontal: 10,
+      paddingVertical: 6,
+      borderRadius: Radius.pill,
+    },
+    accessBadgeGranted: {
+      backgroundColor: 'rgba(52, 199, 89, 0.14)',
+    },
+    accessBadgeDenied: {
+      backgroundColor: 'rgba(255, 59, 48, 0.14)',
+    },
+    accessBadgePrompt: {
+      backgroundColor: 'rgba(21, 122, 254, 0.12)',
+    },
+    accessBadgeLabel: {
+      fontSize: FontSize.caption,
+      fontWeight: '700',
+    },
+    accessBadgeLabelGranted: {
+      color: colors.success,
+    },
+    accessBadgeLabelDenied: {
+      color: colors.destructive,
+    },
+    accessBadgeLabelPrompt: {
+      color: colors.primary,
     },
     meterWrap: {
       gap: 8,
@@ -201,7 +286,7 @@ export function VoiceDevicesSettingsSection() {
   const [noiseSuppression, setNoiseSuppression] = useState(NOISE_SUPPRESSION_DEFAULT);
   const [testing, setTesting] = useState(false);
   const [level, setLevel] = useState(0);
-  const [permissionDenied, setPermissionDenied] = useState(false);
+  const [micAccess, setMicAccess] = useState<MicAccessStatus>('checking');
   const [noiseEngineLabel, setNoiseEngineLabel] = useState('WebRTC');
   const testRef = useRef<MicTestHandle | null>(null);
   const rafRef = useRef<number | null>(null);
@@ -222,66 +307,22 @@ export function VoiceDevicesSettingsSection() {
     setLevel(0);
   }, []);
 
-  const beginTest = useCallback(
-    async (
-      nextInputId: string | null,
-      nextMicGain: number,
-      nextOutputId: string | null,
-      nextNoise: boolean,
-    ) => {
-      const gen = ++startGenRef.current;
-      if (rafRef.current != null && typeof cancelAnimationFrame === 'function') {
-        cancelAnimationFrame(rafRef.current);
-        rafRef.current = null;
-      }
-      testRef.current?.stop();
-      testRef.current = null;
-
-      try {
-        const handle = await startMicrophoneTest(
-          nextInputId,
-          nextMicGain,
-          nextOutputId,
-          nextNoise,
-        );
-        if (gen !== startGenRef.current) {
-          handle.stop();
-          return;
-        }
-        testRef.current = handle;
-        testingRef.current = true;
-        setTesting(true);
-        const loop = () => {
-          if (!testRef.current || gen !== startGenRef.current) {
-            return;
-          }
-          setLevel(testRef.current.getLevel());
-          rafRef.current = requestAnimationFrame(loop);
-        };
-        rafRef.current = requestAnimationFrame(loop);
-      } catch (error) {
-        if (gen !== startGenRef.current) {
-          return;
-        }
-        testingRef.current = false;
-        setTesting(false);
-        setLevel(0);
-        toast.error(localizeErrorMessage(error, 'Не удалось открыть микрофон'));
-      }
-    },
-    [],
-  );
-
-  const refreshDevices = useCallback(async () => {
+  const refreshDevices = useCallback(async (opts?: { requestPermission?: boolean }) => {
     if (Platform.OS !== 'web') {
       setLoading(false);
       return;
     }
     setLoading(true);
     try {
-      const granted = await ensureMicrophonePermission();
-      setPermissionDenied(!granted);
-      await ensureCameraPermission();
+      // iOS Safari: getUserMedia from useEffect (no tap) → NotAllowedError.
+      // Only ask when the user starts a mic test / explicitly refreshes.
+      if (opts?.requestPermission) {
+        const granted = await ensureMicrophonePermission();
+        setMicAccess(granted ? 'granted' : 'denied');
+        await ensureCameraPermission();
+      } else {
+        setMicAccess(await readMicAccessStatus());
+      }
       const prefs = await loadVoiceDevicePrefs();
       const [{ inputs: nextInputs, outputs: nextOutputs }, nextCameras] = await Promise.all([
         listAudioDevices(),
@@ -330,28 +371,107 @@ export function VoiceDevicesSettingsSection() {
     }
   }, []);
 
+  const beginTest = useCallback(
+    async (
+      nextInputId: string | null,
+      nextMicGain: number,
+      nextOutputId: string | null,
+      nextNoise: boolean,
+    ) => {
+      const gen = ++startGenRef.current;
+      if (rafRef.current != null && typeof cancelAnimationFrame === 'function') {
+        cancelAnimationFrame(rafRef.current);
+        rafRef.current = null;
+      }
+      testRef.current?.stop();
+      testRef.current = null;
+
+      try {
+        // Prefer mic started in onPressIn — iOS Safari rejects late getUserMedia from onPress.
+        const primed = await takePrimedMicrophone();
+        const handle = await startMicrophoneTest(
+          nextInputId,
+          nextMicGain,
+          nextOutputId,
+          nextNoise,
+          primed,
+        );
+        if (gen !== startGenRef.current) {
+          handle.stop();
+          return;
+        }
+        testRef.current = handle;
+        testingRef.current = true;
+        setTesting(true);
+        setMicAccess('granted');
+        // Mic already granted by the test stream — refresh labels and ask for camera once.
+        void ensureCameraPermission().then(() =>
+          refreshDevices({ requestPermission: false }),
+        );
+        const loop = () => {
+          if (!testRef.current || gen !== startGenRef.current) {
+            return;
+          }
+          setLevel(testRef.current.getLevel());
+          rafRef.current = requestAnimationFrame(loop);
+        };
+        rafRef.current = requestAnimationFrame(loop);
+      } catch (error) {
+        if (gen !== startGenRef.current) {
+          return;
+        }
+        testingRef.current = false;
+        setTesting(false);
+        setLevel(0);
+        const message = localizeErrorMessage(error, 'Не удалось открыть микрофон');
+        if (/микрофон|доступ|разреш|not allowed|permission/i.test(message)) {
+          setMicAccess('denied');
+        }
+        toast.error(message);
+      }
+    },
+    [refreshDevices],
+  );
+
   useEffect(() => {
-    void refreshDevices();
     if (Platform.OS !== 'web' || typeof navigator === 'undefined') {
+      void refreshDevices({ requestPermission: false });
       return;
     }
     const onChange = () => {
-      void refreshDevices();
+      void refreshDevices({ requestPermission: false });
     };
     navigator.mediaDevices?.addEventListener?.('devicechange', onChange);
+
+    let permissionStatus: PermissionStatus | null = null;
+    const onPermissionChange = () => {
+      void readMicAccessStatus().then(setMicAccess);
+    };
+    void navigator.permissions
+      ?.query?.({ name: 'microphone' as PermissionName })
+      .then((result) => {
+        permissionStatus = result;
+        onPermissionChange();
+        result.addEventListener('change', onPermissionChange);
+      })
+      .catch(() => undefined);
+
     return () => {
       navigator.mediaDevices?.removeEventListener?.('devicechange', onChange);
+      permissionStatus?.removeEventListener?.('change', onPermissionChange);
       stopTest();
     };
   }, [refreshDevices, stopTest]);
 
-  // Settings stays mounted in the stack — stop the mic test when leaving the screen.
+  // Ask for mic/camera when the user opens Settings (gesture from navigation on desktop).
+  // On iOS Safari a silent prompt may fail — then «Проверить микрофон» asks again on tap.
   useFocusEffect(
     useCallback(() => {
+      void refreshDevices({ requestPermission: true });
       return () => {
         stopTest();
       };
-    }, [stopTest]),
+    }, [refreshDevices, stopTest]),
   );
 
   const handleInputChange = useCallback(
@@ -409,6 +529,10 @@ export function VoiceDevicesSettingsSection() {
     await beginTest(inputId, micGain, outputId, noiseSuppression);
   }, [beginTest, inputId, micGain, noiseSuppression, outputId, stopTest]);
 
+  const handleRequestMicAccess = useCallback(() => {
+    void refreshDevices({ requestPermission: true });
+  }, [refreshDevices]);
+
   if (Platform.OS !== 'web') {
     return (
       <Text style={styles.unavailable}>
@@ -418,7 +542,7 @@ export function VoiceDevicesSettingsSection() {
     );
   }
 
-  if (loading) {
+  if (loading && micAccess === 'checking') {
     return (
       <View style={[styles.block, styles.blockFirst]}>
         <ActivityIndicator color={colors.primary} />
@@ -431,9 +555,62 @@ export function VoiceDevicesSettingsSection() {
   const cameraOptions = cameras.map((d) => ({ id: d.deviceId, label: d.label }));
   const gainPercent = Math.round(micGain * 100);
 
+  const accessBadge =
+    micAccess === 'granted'
+      ? {
+          label: 'Разрешён',
+          icon: 'checkmark-circle' as const,
+          color: colors.success,
+          badgeStyle: styles.accessBadgeGranted,
+          labelStyle: styles.accessBadgeLabelGranted,
+        }
+      : micAccess === 'denied'
+        ? {
+            label: 'Запрещён',
+            icon: 'close-circle' as const,
+            color: colors.destructive,
+            badgeStyle: styles.accessBadgeDenied,
+            labelStyle: styles.accessBadgeLabelDenied,
+          }
+        : {
+            label: 'Нужен доступ',
+            icon: 'alert-circle' as const,
+            color: colors.primary,
+            badgeStyle: styles.accessBadgePrompt,
+            labelStyle: styles.accessBadgeLabelPrompt,
+          };
+
   return (
     <View>
       <View style={[styles.block, styles.blockFirst, styles.fieldGap]}>
+        <View style={styles.accessRow}>
+          <View style={styles.accessText}>
+            <Text style={styles.accessTitle}>Доступ к микрофону</Text>
+            <Text style={styles.accessHint}>
+              {micAccess === 'granted'
+                ? 'Браузер разрешил микрофон для звонков'
+                : micAccess === 'denied'
+                  ? 'Включите микрофон в настройках браузера для этого сайта'
+                  : 'Нажмите индикатор или «Проверить микрофон», чтобы разрешить'}
+            </Text>
+          </View>
+          <Pressable
+            onPress={micAccess === 'granted' ? undefined : handleRequestMicAccess}
+            disabled={micAccess === 'granted' || loading}
+            accessibilityRole="button"
+            accessibilityLabel={`Доступ к микрофону: ${accessBadge.label}`}
+            style={({ pressed }) => [
+              styles.accessBadge,
+              accessBadge.badgeStyle,
+              pressed && micAccess !== 'granted' ? { opacity: 0.85 } : null,
+            ]}>
+            <Ionicons name={accessBadge.icon} size={14} color={accessBadge.color} />
+            <Text style={[styles.accessBadgeLabel, accessBadge.labelStyle]}>
+              {accessBadge.label}
+            </Text>
+          </Pressable>
+        </View>
+
         <SelectField
           label="Микрофон"
           placeholder="Выберите микрофон"
@@ -537,12 +714,6 @@ export function VoiceDevicesSettingsSection() {
             </View>
           ))}
         </View>
-
-        {permissionDenied ? (
-          <Text style={styles.meterHint}>
-            Нет доступа к микрофону. Разрешите его в настройках браузера для этого сайта.
-          </Text>
-        ) : null}
       </View>
 
       <View style={styles.block}>
@@ -556,21 +727,63 @@ export function VoiceDevicesSettingsSection() {
             <View style={[styles.meterFill, { width: `${Math.round(level * 100)}%` }]} />
           </View>
           <View style={styles.testRow}>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={testing ? 'Остановить проверку' : 'Проверить микрофон'}
-              onPress={() => void handleToggleTest()}
-              style={({ pressed }) => [
-                styles.testButton,
-                testing && styles.testButtonActive,
-                pressed && styles.testButtonPressed,
-              ]}>
-              <Text
-                style={[styles.testButtonLabel, testing && styles.testButtonLabelActive]}>
-                {testing ? 'Стоп' : 'Проверить микрофон'}
-              </Text>
-            </Pressable>
+            {Platform.OS === 'web'
+              ? createElement(
+                  'button',
+                  {
+                    type: 'button',
+                    'aria-label': testing ? 'Остановить проверку' : 'Проверить микрофон',
+                    onPointerDown: () => {
+                      if (!testingRef.current) {
+                        beginMicrophonePrimeFromGesture();
+                      }
+                    },
+                    onClick: (event: { preventDefault: () => void }) => {
+                      event.preventDefault();
+                      void handleToggleTest();
+                    },
+                    style: {
+                      border: 'none',
+                      borderRadius: 12,
+                      paddingTop: 12,
+                      paddingBottom: 12,
+                      paddingLeft: 16,
+                      paddingRight: 16,
+                      backgroundColor: testing ? colors.destructive : colors.primary,
+                      color: '#FFFFFF',
+                      fontSize: 15,
+                      fontWeight: '700',
+                      cursor: 'pointer',
+                      width: '100%',
+                    },
+                  },
+                  testing ? 'Стоп' : 'Проверить микрофон',
+                )
+              : (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={testing ? 'Остановить проверку' : 'Проверить микрофон'}
+                  onPressIn={() => {
+                    if (!testingRef.current) {
+                      beginMicrophonePrimeFromGesture();
+                    }
+                  }}
+                  onPress={() => void handleToggleTest()}
+                  style={({ pressed }) => [
+                    styles.testButton,
+                    testing && styles.testButtonActive,
+                    pressed && styles.testButtonPressed,
+                  ]}>
+                  <Text
+                    style={[styles.testButtonLabel, testing && styles.testButtonLabelActive]}>
+                    {testing ? 'Стоп' : 'Проверить микрофон'}
+                  </Text>
+                </Pressable>
+              )}
           </View>
+          <Text style={styles.meterHint}>
+            На телефоне зажми кнопку и сразу разреши доступ к микрофону во всплывающем окне.
+          </Text>
         </View>
       </View>
     </View>

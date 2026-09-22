@@ -257,7 +257,7 @@ export function useChatLiveVoice(conversationId) {
         }
         if (isInsecureLanWeb()) {
             setStatus('error');
-            setError('На телефоне нужен HTTPS: открой чат с localhost на компьютере или через туннель Expo');
+            setError('Браузер не даёт доступ к микрофону. Открой чат на компьютере или попробуй позже.');
             return;
         }
         joiningRef.current = true;

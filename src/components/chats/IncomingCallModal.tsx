@@ -11,6 +11,8 @@ type Props = {
   callerAvatarUrl: string | null;
   subtitle?: string;
   onAccept: () => void;
+  /** Start getUserMedia while the finger is still down (iOS / RN-web). */
+  onAcceptPressIn?: () => void;
   onDecline: () => void;
 };
 
@@ -20,6 +22,7 @@ export function IncomingCallModal({
   callerAvatarUrl,
   subtitle,
   onAccept,
+  onAcceptPressIn,
   onDecline,
 }: Props) {
   const colors = useTheme();
@@ -70,6 +73,7 @@ export function IncomingCallModal({
               <Pressable
                 accessibilityRole="button"
                 accessibilityLabel="Принять"
+                onPressIn={onAcceptPressIn}
                 onPress={onAccept}
                 style={({ pressed }) => [
                   styles.circleBtn,

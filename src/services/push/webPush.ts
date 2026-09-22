@@ -75,11 +75,11 @@ export function isWebPushSupported(): boolean {
 export function webPushBlockHint(reason: WebPushBlockReason): string | null {
   switch (reason) {
     case 'insecure':
-      return 'Пуши работают только по HTTPS или localhost. Сейчас страница открыта по обычному http — открой защищённый адрес.';
+      return 'Уведомления сейчас недоступны.';
     case 'firebase_unconfigured':
-      return 'В этом билде не задан Firebase (EXPO_PUBLIC_FIREBASE_*). Браузер пуши умеет — не хватает конфига приложения.';
+      return 'Уведомления сейчас недоступны.';
     case 'unsupported':
-      return 'Этот браузер не поддерживает веб-пуши.';
+      return 'Этот браузер не поддерживает уведомления.';
     default:
       return null;
   }

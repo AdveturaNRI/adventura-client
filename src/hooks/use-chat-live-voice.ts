@@ -24,7 +24,7 @@ import {
 import { playMicToggleSound, playUrgentRequestAlert } from '@/utils/call-ringtone';
 import { localizeErrorMessage } from '@/utils/localizeError';
 import { loadVoiceDevicePrefs } from '@/utils/voice-device-settings';
-import { applyAudioOutputToElement, stopMediaStream } from '@/utils/voice-media-devices';
+import { applyAudioOutputToElement, stopMediaStream, takePrimedMicrophone } from '@/utils/voice-media-devices';
 import { applyMicPipelineToRoom, isUsableMediaDeviceId } from '@/utils/voice-mic-pipeline';
 
 export type ChatLiveVoiceStatus = 'idle' | 'connecting' | 'connected' | 'error';
@@ -230,7 +230,7 @@ function voiceConnectErrorMessage(err: unknown): string {
       lower,
     )
   ) {
-    return 'Браузер заблокировал микрофон. На телефоне нужен HTTPS, и доступ надо разрешить сразу по нажатию «Позвонить» / «Ответить».';
+    return 'Браузер заблокировал микрофон. Разреши доступ сразу по нажатию «Позвонить» / «Ответить».';
   }
   if (
     /ice|webrtc|turn|timeout|timed out|network|failed to fetch|websocket|connection|econn|unreachable|offline|abort/.test(
@@ -344,7 +344,7 @@ export function useChatLiveVoice(conversationId: string | null): UseChatLiveVoic
       stopMediaStream(primedMic);
       setStatus('error');
       setError(
-        'На телефоне нужен HTTPS: открой чат через туннель Expo (https://…) или с localhost на компьютере. По HTTP браузер блокирует микрофон.',
+        'Браузер не даёт доступ к микрофону. Открой чат на компьютере или попробуй позже.',
       );
       return;
     }
@@ -612,11 +612,16 @@ export function useChatLiveVoice(conversationId: string | null): UseChatLiveVoic
         await room.localParticipant.setMicrophoneEnabled(true);
       } else {
         const prefs = await loadVoiceDevicePrefs();
-        await applyMicPipelineToRoom(room, {
+        const primed = await takePrimedMicrophone();
+        const result = await applyMicPipelineToRoom(room, {
           deviceId: isUsableMediaDeviceId(prefs.inputDeviceId) ? prefs.inputDeviceId : null,
           micGain: prefs.micGain,
           noiseSuppression: prefs.noiseSuppression,
+          primedStream: primed,
         });
+        if (!result.enabled) {
+          stopMediaStream(primed);
+        }
       }
 
       const enabled = room.localParticipant.isMicrophoneEnabled;
