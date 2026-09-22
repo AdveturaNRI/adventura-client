@@ -27,10 +27,11 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { MobileBackButton } from '@/components/navigation/MobileBackButton';
 import { resolveChatReturnHref } from '@/components/navigation/navigate-back';
-import { NameWithBadges } from '@/components/rewards/RewardBadge';
 import { UserAvatar } from '@/components/navigation/UserAvatar';
 import { useIsDesktopSidebarVisible, useIsDesktopWeb } from '@/components/navigation/DesktopThemeToggle';
 import { ScreenTransition } from '@/components/navigation/ScreenTransition';
+import { avatarFrameOuterSize } from '@/components/rewards/AvatarFrame';
+import { NameWithBadges } from '@/components/rewards/RewardBadge';
 import { BlockUserDialog } from '@/components/chats/BlockUserDialog';
 import { ChatAlbumGrid } from '@/components/chats/ChatAlbumGrid';
 import { ChatBackgroundLayer } from '@/components/chats/ChatBackgroundLayer';
@@ -524,9 +525,12 @@ function createStyles(colors: ThemeColors, bottomPad: number, isDark: boolean) {
       zIndex: 2,
     },
     headerAvatarWrap: {
-      width: 40,
-      height: 40,
+      width: avatarFrameOuterSize(36),
+      height: avatarFrameOuterSize(36),
       flexShrink: 0,
+      alignItems: 'center',
+      justifyContent: 'center',
+      overflow: 'visible',
     },
     headerAvatar: {
       width: 40,
@@ -590,19 +594,20 @@ function createStyles(colors: ThemeColors, bottomPad: number, isDark: boolean) {
       maxWidth: '100%',
     },
     authorAvatarCol: {
-      width: 30,
+      width: avatarFrameOuterSize(30),
       marginRight: 8,
       alignItems: 'center',
       justifyContent: 'flex-end',
       alignSelf: 'flex-end',
       paddingBottom: 2,
+      overflow: 'visible',
     },
     authorAvatarButton: {
-      borderRadius: 15,
+      overflow: 'visible',
     },
     authorAvatarSpacer: {
-      width: 30,
-      height: 30,
+      width: avatarFrameOuterSize(30),
+      height: avatarFrameOuterSize(30),
     },
     headerMenuButton: {
       width: 36,
@@ -1961,7 +1966,6 @@ export default function ChatThreadScreen() {
   const title = isGroup
     ? conversation?.title?.trim() || 'Группа'
     : conversation?.peer?.nickname ?? 'Чат';
-  const peerInitial = [...title.trim()][0]?.toUpperCase() ?? '?';
   const statusLabel = isGroup
     ? `${conversation?.memberCount ?? members.length} участников`
     : conversation?.peer
@@ -2939,22 +2943,21 @@ export default function ChatThreadScreen() {
               pressed && styles.headerPeerPressed,
             ]}>
             <View style={styles.headerAvatarWrap}>
-              <View style={styles.headerAvatar}>
-                {!isGroup && conversation?.peer?.avatarUrl ? (
-                  <Image
-                    source={{ uri: conversation.peer.avatarUrl }}
-                    style={styles.headerAvatarImage}
-                  />
-                ) : (
+              {isGroup ? (
+                <View style={styles.headerAvatar}>
                   <View style={styles.headerAvatarFill}>
-                    {isGroup ? (
-                      <Ionicons name="people" size={18} color={colors.onPrimary} />
-                    ) : (
-                      <Text style={styles.headerAvatarInitial}>{peerInitial}</Text>
-                    )}
+                    <Ionicons name="people" size={18} color={colors.onPrimary} />
                   </View>
-                )}
-              </View>
+                </View>
+              ) : (
+                <UserAvatar
+                  nickname={conversation?.peer?.nickname ?? title}
+                  avatarUrl={conversation?.peer?.avatarUrl}
+                  size={36}
+                  badges={conversation?.peer?.badges}
+                  frameId={conversation?.peer?.avatarFrameId}
+                />
+              )}
             </View>
             <View style={styles.headerText}>
               <Text style={styles.headerTitle} numberOfLines={1}>
