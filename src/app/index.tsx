@@ -6,7 +6,7 @@ import { useAuth } from '@/context/AuthContext';
 import { useTheme } from '@/hooks/use-theme';
 
 export default function Index() {
-  const { isAuthenticated, isLoading } = useAuth();
+  const { isLoading } = useAuth();
   const colors = useTheme();
 
   if (isLoading) {
@@ -17,11 +17,7 @@ export default function Index() {
     );
   }
 
-  if (isAuthenticated) {
-    return <Redirect href={MAIN_APP_ENTRY} />;
-  }
-
-  return <Redirect href="/auth/login" />;
+  return <Redirect href={MAIN_APP_ENTRY} />;
 }
 
 const styles = StyleSheet.create({

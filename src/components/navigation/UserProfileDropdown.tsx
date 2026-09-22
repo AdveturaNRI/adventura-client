@@ -102,7 +102,16 @@ export function UserProfileDropdown() {
   const [anchor, setAnchor] = useState<AnchorRect | null>(null);
 
   if (!user) {
-    return null;
+    return (
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel="Войти"
+        onPress={() => router.push('/auth/login')}
+        style={({ pressed }) => [styles.trigger, pressed && styles.triggerPressed]}>
+        <Ionicons name="log-in-outline" size={20} color={colors.primary} />
+        <Text style={[styles.nickname, { color: colors.primary }]}>Войти</Text>
+      </Pressable>
+    );
   }
 
   const openMenu = () => {
@@ -124,7 +133,7 @@ export function UserProfileDropdown() {
   const handleSignOut = async () => {
     closeMenu();
     await signOut();
-    router.replace('/auth/login');
+    router.replace('/games');
   };
 
   const menuStyle =

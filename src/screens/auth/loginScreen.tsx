@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
-import { Link, useRouter } from 'expo-router';
+import { Link, useLocalSearchParams, useRouter } from 'expo-router';
 
 import { AuthScreenLayout } from '@/components/auth/AuthScreenLayout';
 import {
@@ -13,7 +13,7 @@ import {
   Switcher,
 } from '@/components/ui';
 import { Spacing, type ThemeColors } from '@/constants/theme';
-import { MAIN_APP_ENTRY } from '@/components/ui/navigation/navbar.config';
+import { resolvePostLoginHref } from '@/constants/auth-routes';
 import { useAuth } from '@/context/AuthContext';
 import { useThemedStyles } from '@/hooks/use-themed-styles';
 import { getEmailError } from '@/utils/validateAuth';
@@ -47,6 +47,8 @@ function createStyles(_colors: ThemeColors) {
 
 export default function LoginScreen() {
   const router = useRouter();
+  const params = useLocalSearchParams<{ next?: string | string[] }>();
+  const nextParam = Array.isArray(params.next) ? params.next[0] : params.next;
   const { signIn, signInAsGuest } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -77,7 +79,7 @@ export default function LoginScreen() {
       setEmail('');
       setPassword('');
       setErrors({});
-      router.replace(MAIN_APP_ENTRY);
+      router.replace(resolvePostLoginHref(nextParam));
     }
   };
 
@@ -88,9 +90,13 @@ export default function LoginScreen() {
 
     setIsGuestSubmitting(true);
 
-    await signInAsGuest();
+    const ok = await signInAsGuest();
 
     setIsGuestSubmitting(false);
+
+    if (ok) {
+      router.replace(resolvePostLoginHref(nextParam));
+    }
   };
 
   return (

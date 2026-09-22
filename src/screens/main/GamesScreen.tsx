@@ -27,6 +27,7 @@ import {
 import { toast } from '@/components/ui';
 import { FontSize, Radius, Spacing, type ThemeColors } from '@/constants/theme';
 import { useProfile } from '@/context/ProfileContext';
+import { useRequireAuth } from '@/hooks/use-require-auth';
 import { useTheme } from '@/hooks/use-theme';
 import { useThemedStyles } from '@/hooks/use-themed-styles';
 import {
@@ -325,6 +326,7 @@ export default function GamesScreen() {
   const showCompactNav = !hasDesktopSidebar;
   const styles = useThemedStyles((theme) => createLocalStyles(theme, isDesktopWeb));
   const { profile } = useProfile();
+  const requireAuth = useRequireAuth();
   const viewerTimezone = profile?.timezone?.trim() || DEFAULT_TIMEZONE;
 
   const [items, setItems] = useState<GameListItem[]>([]);
@@ -566,10 +568,16 @@ export default function GamesScreen() {
     [router],
   );
 
-  const openApply = useCallback((item: GameListItem) => {
-    setApplyTarget(item);
-    setApplyMessage('');
-  }, []);
+  const openApply = useCallback(
+    (item: GameListItem) => {
+      if (!requireAuth(`/games/${item.id}`)) {
+        return;
+      }
+      setApplyTarget(item);
+      setApplyMessage('');
+    },
+    [requireAuth],
+  );
 
   const closeApply = useCallback(() => {
     if (busyGameId) {

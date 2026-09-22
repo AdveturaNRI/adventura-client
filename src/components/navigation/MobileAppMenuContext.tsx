@@ -31,6 +31,7 @@ import {
   type MobileAppMenuItem,
 } from '@/components/ui/navigation/navbar.config';
 import { Radius, Spacing, type ThemeColors } from '@/constants/theme';
+import { useAuth } from '@/context/AuthContext';
 import { useRealtimeOptional } from '@/context/RealtimeContext';
 import { useTheme } from '@/hooks/use-theme';
 import { useThemedStyles } from '@/hooks/use-themed-styles';
@@ -266,6 +267,7 @@ function MobileAppMenuModal({
 export function MobileAppMenuProvider({ children }: { children: ReactNode }) {
   const router = useRouter();
   const segments = useSegments();
+  const { isAuthenticated } = useAuth();
   const [isOpen, setIsOpen] = useState(false);
 
   const activeKey = useMemo(() => resolveActiveRoute(segments), [segments]);
@@ -281,9 +283,9 @@ export function MobileAppMenuProvider({ children }: { children: ReactNode }) {
         return;
       }
 
-      navigateMainTab(router, item.key);
+      navigateMainTab(router, item.key, { isAuthenticated });
     },
-    [activeKey, close, router],
+    [activeKey, close, isAuthenticated, router],
   );
 
   useEffect(() => {

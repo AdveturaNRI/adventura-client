@@ -10,6 +10,7 @@ import {
 } from '@/components/ui/navigation/navbar.config';
 import { NavbarIcon } from '@/components/ui/navigation/NavbarIcon';
 import { FontSize, Spacing, type ThemeColors } from '@/constants/theme';
+import { useAuth } from '@/context/AuthContext';
 import { useRealtimeOptional } from '@/context/RealtimeContext';
 import { useThemedStyles } from '@/hooks/use-themed-styles';
 import { formatUnreadBadge } from '@/utils/unread-badge';
@@ -85,6 +86,7 @@ export function MainDesktopSidebar() {
   const insets = useSafeAreaInsets();
   const styles = useThemedStyles(createStyles);
   const realtime = useRealtimeOptional();
+  const { isAuthenticated } = useAuth();
   const unreadChats = realtime?.unreadChats ?? 0;
 
   const activeKey = MAIN_NAVBAR_ITEMS.find((item) =>
@@ -110,7 +112,7 @@ export function MainDesktopSidebar() {
                 accessibilityState={{ selected: isActive }}
                 onPress={() => {
                   if (!isActive) {
-                    navigateMainTab(router, item.key);
+                    navigateMainTab(router, item.key, { isAuthenticated });
                   }
                 }}
                 style={({ pressed }) => [

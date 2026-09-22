@@ -20,6 +20,7 @@ import { MobileBackButton } from '@/components/navigation/MobileBackButton';
 import { ScreenTransition } from '@/components/navigation/ScreenTransition';
 import { toast } from '@/components/ui';
 import { FontSize, Spacing, type ThemeColors } from '@/constants/theme';
+import { useRequireAuth } from '@/hooks/use-require-auth';
 import { useTheme } from '@/hooks/use-theme';
 import { useThemedStyles } from '@/hooks/use-themed-styles';
 import { openGameChat } from '@/services/chats/chatsApi';
@@ -219,6 +220,7 @@ export default function GameDetailScreen() {
   const styles = useThemedStyles((theme) =>
     createStyles(theme, topPadding, insets.bottom, isDesktopWeb),
   );
+  const requireAuth = useRequireAuth();
 
   const [item, setItem] = useState<GameListItem | null>(null);
   const [loading, setLoading] = useState(true);
@@ -284,6 +286,9 @@ export default function GameDetailScreen() {
     if (!item || busy) {
       return;
     }
+    if (!requireAuth(`/games/${item.id}`)) {
+      return;
+    }
     setBusy(true);
     try {
       const conversation = await openGameChat(item.id);
@@ -299,12 +304,18 @@ export default function GameDetailScreen() {
     } finally {
       setBusy(false);
     }
-  }, [busy, item, router]);
+  }, [busy, item, requireAuth, router]);
 
   const openApply = useCallback(() => {
+    if (!item) {
+      return;
+    }
+    if (!requireAuth(`/games/${item.id}`)) {
+      return;
+    }
     setApplyMessage('');
     setApplyOpen(true);
-  }, []);
+  }, [item, requireAuth]);
 
   const closeApply = useCallback(() => {
     if (busy) {
