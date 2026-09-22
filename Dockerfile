@@ -5,8 +5,12 @@ ARG EXPO_PUBLIC_API_URL=https://api.adventu.ru/api
 # Optional bake-in for Metrika HTML checkers. Runtime still reads admin
 # /api/config/public; set this on image build so ym(ID) appears in index.html.
 ARG EXPO_PUBLIC_YANDEX_METRIKA_ID=112799671
+ARG EXPO_PUBLIC_VK_APP_ID=
+ARG EXPO_PUBLIC_YANDEX_CLIENT_ID=
 ENV EXPO_PUBLIC_API_URL=$EXPO_PUBLIC_API_URL
 ENV EXPO_PUBLIC_YANDEX_METRIKA_ID=$EXPO_PUBLIC_YANDEX_METRIKA_ID
+ENV EXPO_PUBLIC_VK_APP_ID=$EXPO_PUBLIC_VK_APP_ID
+ENV EXPO_PUBLIC_YANDEX_CLIENT_ID=$EXPO_PUBLIC_YANDEX_CLIENT_ID
 ENV CI=1
 
 COPY package.json package-lock.json .npmrc ./

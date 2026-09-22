@@ -1,5 +1,5 @@
 import { apiRequest } from '@/services/api/client';
-import type { AuthResponse, NicknameResponse } from '@/services/api/types';
+import type { AuthResponse, AuthUser, NicknameResponse } from '@/services/api/types';
 
 type RegisterPayload = {
   email: string;
@@ -12,6 +12,20 @@ type RegisterPayload = {
 type LoginPayload = {
   email: string;
   password: string;
+};
+
+type VkOAuthPayload = {
+  accessToken?: string;
+  silentToken?: string;
+  uuid?: string;
+  acquisitionSource?: string;
+  anonymousId?: string;
+};
+
+type YandexOAuthPayload = {
+  accessToken: string;
+  acquisitionSource?: string;
+  anonymousId?: string;
 };
 
 export function registerUser(payload: RegisterPayload) {
@@ -27,6 +41,45 @@ export function loginUser(payload: LoginPayload) {
     method: 'POST',
     body: payload,
     skipAuthRefresh: true,
+  });
+}
+
+export function loginWithVk(payload: VkOAuthPayload) {
+  return apiRequest<AuthResponse>('/auth/oauth/vk', {
+    method: 'POST',
+    body: payload,
+    skipAuthRefresh: true,
+  });
+}
+
+export function loginWithYandex(payload: YandexOAuthPayload) {
+  return apiRequest<AuthResponse>('/auth/oauth/yandex', {
+    method: 'POST',
+    body: payload,
+    skipAuthRefresh: true,
+  });
+}
+
+export function linkVkAccount(token: string, payload: VkOAuthPayload) {
+  return apiRequest<AuthUser>('/auth/oauth/vk/link', {
+    method: 'POST',
+    body: payload,
+    token,
+  });
+}
+
+export function linkYandexAccount(token: string, payload: YandexOAuthPayload) {
+  return apiRequest<AuthUser>('/auth/oauth/yandex/link', {
+    method: 'POST',
+    body: payload,
+    token,
+  });
+}
+
+export function unlinkOauthAccount(token: string, provider: 'vk' | 'yandex') {
+  return apiRequest<AuthUser>(`/auth/oauth/${provider}`, {
+    method: 'DELETE',
+    token,
   });
 }
 

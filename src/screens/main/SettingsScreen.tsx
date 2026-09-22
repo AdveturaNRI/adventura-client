@@ -20,9 +20,14 @@ import { ChatBackgroundPickerSheet } from '@/components/chats/ChatBackgroundPick
 import { VoiceDevicesSettingsSection } from '@/components/settings/VoiceDevicesSettingsSection';
 import { toast } from '@/components/ui';
 import { FontSize, Spacing, type ThemeColors } from '@/constants/theme';
+import { useAuth } from '@/context/AuthContext';
 import { usePushPrompt } from '@/context/PushPromptContext';
 import { useTheme } from '@/hooks/use-theme';
 import { useThemedStyles } from '@/hooks/use-themed-styles';
+import {
+  isOauthWebAvailable,
+  useOauthPublicConfig,
+} from '@/services/auth/oauth-web';
 import {
   deleteNotificationSound,
   uploadNotificationSound,
@@ -242,6 +247,9 @@ export default function SettingsScreen() {
   const colors = useTheme();
   const hasDesktopSidebar = useIsDesktopSidebarVisible();
   const showCompactNav = !hasDesktopSidebar;
+  const { user, linkVk, linkYandex, unlinkOauth } = useAuth();
+  const [oauthBusy, setOauthBusy] = useState(false);
+  const { vkAppId, yandexClientId, loaded: oauthLoaded } = useOauthPublicConfig();
   const {
     showSettingsAlert,
     dismissSettingsAlert,
@@ -563,6 +571,81 @@ export default function SettingsScreen() {
             <ThemeToggle />
           </View>
         </View>
+
+        {isOauthWebAvailable() &&
+        oauthLoaded &&
+        (vkAppId || yandexClientId) &&
+        !user?.isGuest ? (
+          <View style={styles.section}>
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionHeaderTitle}>Привязанные аккаунты</Text>
+            </View>
+            {vkAppId ? (
+              <View style={[styles.row, styles.rowBorder]}>
+                <View style={styles.rowText}>
+                  <Text style={styles.rowTitle}>VK ID</Text>
+                  <Text style={styles.rowSubtitle}>
+                    {user?.linkedProviders?.includes('vk')
+                      ? 'Привязан'
+                      : 'Не привязан'}
+                  </Text>
+                </View>
+                <Pressable
+                  style={styles.secondaryButton}
+                  disabled={oauthBusy}
+                  onPress={async () => {
+                    setOauthBusy(true);
+                    try {
+                      if (user?.linkedProviders?.includes('vk')) {
+                        await unlinkOauth('vk');
+                      } else {
+                        await linkVk();
+                      }
+                    } finally {
+                      setOauthBusy(false);
+                    }
+                  }}>
+                  <Text style={styles.secondaryButtonLabel}>
+                    {user?.linkedProviders?.includes('vk') ? 'Отвязать' : 'Привязать'}
+                  </Text>
+                </Pressable>
+              </View>
+            ) : null}
+            {yandexClientId ? (
+              <View style={[styles.row, styles.rowBorder]}>
+                <View style={styles.rowText}>
+                  <Text style={styles.rowTitle}>Яндекс ID</Text>
+                  <Text style={styles.rowSubtitle}>
+                    {user?.linkedProviders?.includes('yandex')
+                      ? 'Привязан'
+                      : 'Не привязан'}
+                  </Text>
+                </View>
+                <Pressable
+                  style={styles.secondaryButton}
+                  disabled={oauthBusy}
+                  onPress={async () => {
+                    setOauthBusy(true);
+                    try {
+                      if (user?.linkedProviders?.includes('yandex')) {
+                        await unlinkOauth('yandex');
+                      } else {
+                        await linkYandex();
+                      }
+                    } finally {
+                      setOauthBusy(false);
+                    }
+                  }}>
+                  <Text style={styles.secondaryButtonLabel}>
+                    {user?.linkedProviders?.includes('yandex')
+                      ? 'Отвязать'
+                      : 'Привязать'}
+                  </Text>
+                </Pressable>
+              </View>
+            ) : null}
+          </View>
+        ) : null}
 
         <View style={styles.section}>
           <Pressable

@@ -3,6 +3,7 @@ import { Pressable, StyleSheet, View } from 'react-native';
 import { Link, useRouter } from 'expo-router';
 
 import { AuthScreenLayout } from '@/components/auth/AuthScreenLayout';
+import { OauthButtons } from '@/components/auth/OauthButtons';
 import {
   Button,
   Caption,
@@ -188,6 +189,11 @@ export default function RegisterScreen() {
       <Button
         label={isSubmitting ? 'Создаём...' : 'Зарегистрироваться'}
         onPress={handleSubmit}
+      />
+
+      <OauthButtons
+        disabled={isSubmitting}
+        onSuccess={() => router.replace('/')}
       />
 
       <View style={styles.footer}>

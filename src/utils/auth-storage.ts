@@ -34,6 +34,9 @@ export async function getStoredUser(): Promise<AuthUser | null> {
     nickname: parsed.nickname,
     isGuest: Boolean(parsed.isGuest),
     emailVerified: Boolean(parsed.emailVerified),
+    linkedProviders: Array.isArray(parsed.linkedProviders)
+      ? (parsed.linkedProviders as AuthUser['linkedProviders'])
+      : [],
   };
 }
 
