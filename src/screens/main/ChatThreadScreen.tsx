@@ -60,6 +60,7 @@ import { AddGroupMembersDialog } from '@/components/chats/AddGroupMembersDialog'
 import { contactsFromConversations } from '@/components/chats/CreateGroupDialog';
 import { GroupMembersSheet } from '@/components/chats/GroupMembersSheet';
 import { RenameGroupDialog } from '@/components/chats/RenameGroupDialog';
+import { copyTextToClipboard } from '@/components/gm-toolkit/copyText';
 import { toast } from '@/components/ui';
 import { FontSize, Radius, Spacing } from '@/constants/theme';
 import type { ThemeColors } from '@/constants/theme';
@@ -2462,6 +2463,28 @@ export default function ChatThreadScreen() {
     setSelectedIds([message.id]);
   }, []);
 
+  const getMessageCopyText = useCallback((message: ChatMessage) => {
+    if (message.kind === 'dice_roll') {
+      const payload = parseDiceRollPayload(message.body);
+      return payload ? diceRollPreviewText(payload) : (message.body?.trim() || '');
+    }
+    return message.body?.trim() || '';
+  }, []);
+
+  const handleCopyMessage = useCallback(async (message: ChatMessage) => {
+    const text = getMessageCopyText(message);
+    if (!text) {
+      return;
+    }
+    setActionMessage(null);
+    try {
+      await copyTextToClipboard(text);
+      toast.success('Скопировано');
+    } catch {
+      toast.error('Не удалось скопировать');
+    }
+  }, [getMessageCopyText]);
+
   const scrollToMessage = useCallback((messageId: string) => {
     const index = timelineRef.current.findIndex(
       (item) => item.type === 'message' && item.id === messageId,
@@ -4209,6 +4232,12 @@ export default function ChatThreadScreen() {
         <ChatMessageActionsSheet
           visible={Boolean(actionMessage)}
           onClose={() => setActionMessage(null)}
+          allowCopy={Boolean(actionMessage && getMessageCopyText(actionMessage))}
+          onCopy={() => {
+            if (actionMessage) {
+              void handleCopyMessage(actionMessage);
+            }
+          }}
           onReply={() => {
             if (actionMessage) {
               handleStartReply(actionMessage);
