@@ -17,6 +17,7 @@ import { Ionicons } from '@expo/vector-icons';
 
 import { GameFeedCard } from '@/components/games/GameFeedCard';
 import { GamesFiltersPanel } from '@/components/games/GamesFiltersPanel';
+import { AuthorsBar } from '@/components/authors/AuthorsBar';
 import { MobileScreenHeader } from '@/components/navigation/MobileScreenHeader';
 import { useIsDesktopSidebarVisible, useIsDesktopWeb } from '@/components/navigation/DesktopThemeToggle';
 import { ScreenTransition } from '@/components/navigation/ScreenTransition';
@@ -26,6 +27,7 @@ import {
 } from '@/components/navigation/ScrollToTopButton';
 import { toast } from '@/components/ui';
 import { FontSize, Radius, Spacing, type ThemeColors } from '@/constants/theme';
+import { useAuthors } from '@/context/AuthorsContext';
 import { useProfile } from '@/context/ProfileContext';
 import { useRequireAuth } from '@/hooks/use-require-auth';
 import { useTheme } from '@/hooks/use-theme';
@@ -326,6 +328,7 @@ export default function GamesScreen() {
   const showCompactNav = !hasDesktopSidebar;
   const styles = useThemedStyles((theme) => createLocalStyles(theme, isDesktopWeb));
   const { profile } = useProfile();
+  const { authors } = useAuthors();
   const requireAuth = useRequireAuth();
   const viewerTimezone = profile?.timezone?.trim() || DEFAULT_TIMEZONE;
 
@@ -681,6 +684,8 @@ export default function GamesScreen() {
               <Text style={styles.pageSubtitle}>{pageSubtitle}</Text>
             </View>
           )}
+
+          <AuthorsBar authors={authors} />
 
           <View style={styles.toolbar}>
             <View style={styles.searchRow}>

@@ -9,7 +9,7 @@ ENV EXPO_PUBLIC_API_URL=$EXPO_PUBLIC_API_URL
 ENV EXPO_PUBLIC_YANDEX_METRIKA_ID=$EXPO_PUBLIC_YANDEX_METRIKA_ID
 ENV CI=1
 
-COPY package.json package-lock.json ./
+COPY package.json package-lock.json .npmrc ./
 COPY patches ./patches
 COPY scripts ./scripts
 COPY public ./public

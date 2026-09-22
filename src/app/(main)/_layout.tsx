@@ -25,6 +25,7 @@ function MainStack() {
       <Stack.Screen name="settings" />
       <Stack.Screen name="questionnaire" />
       <Stack.Screen name="master-room" />
+      <Stack.Screen name="author-cabinet" />
       <Stack.Screen name="my-clubs" />
       <Stack.Screen name="clubs-create" />
       <Stack.Screen name="clubs/[id]" />
@@ -34,6 +35,7 @@ function MainStack() {
       <Stack.Screen name="games-manage" />
       <Stack.Screen name="games/[id]" />
       <Stack.Screen name="users/[id]" />
+      <Stack.Screen name="authors" />
       <Stack.Screen name="rewards-lab" />
       <Stack.Screen name="profile-appearance" />
     </Stack>

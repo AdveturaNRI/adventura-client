@@ -3,7 +3,7 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { AppLogo } from '@/components/navigation/AppLogo';
-import { navigateMainTab } from '@/components/navigation/navigate-main-tab';
+import { navigateMainTabFromNav } from '@/components/navigation/navigate-main-tab';
 import {
   MAIN_APP_ENTRY,
   MAIN_NAVBAR_ITEMS,
@@ -111,9 +111,7 @@ export function MainDesktopSidebar() {
                 accessibilityRole="tab"
                 accessibilityState={{ selected: isActive }}
                 onPress={() => {
-                  if (!isActive) {
-                    navigateMainTab(router, item.key, { isAuthenticated });
-                  }
+                  navigateMainTabFromNav(router, item.key, pathname, { isAuthenticated });
                 }}
                 style={({ pressed }) => [
                   styles.navItem,

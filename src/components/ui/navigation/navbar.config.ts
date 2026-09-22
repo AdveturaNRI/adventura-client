@@ -18,6 +18,7 @@ export const NAVBAR_ITEMS: NavbarItem[] = [
   { key: 'wanderers', label: 'Странники', icon: 'wanderers' },
   { key: 'games', label: 'Игры', icon: 'games' },
   { key: 'characters', label: 'Персонажи', icon: 'characters' },
+  { key: 'authors', label: 'Публикации', icon: 'authors' },
   { key: 'clubs', label: 'Клубы', icon: 'clubs' },
   { key: 'dice', label: 'Дайсы', icon: 'dice' },
   { key: 'generators', label: 'Генераторы', icon: 'generators' },
@@ -55,6 +56,12 @@ export const MOBILE_APP_MENU_ITEMS: MobileAppMenuItem[] = [
     label: 'Персонажи',
     icon: 'characters',
     subtitle: 'Листы персонажей по системам',
+  },
+  {
+    key: 'authors',
+    label: 'Публикации',
+    icon: 'authors',
+    subtitle: 'Работы художников, медиа и авторов',
   },
   {
     key: 'clubs',
