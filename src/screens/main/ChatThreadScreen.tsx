@@ -1485,6 +1485,8 @@ export default function ChatThreadScreen() {
   const composerFieldWrapRef = useRef<View>(null);
   const composerInputRef = useRef<TextInput>(null);
   const selectionRef = useRef({ start: 0, end: 0 });
+  /** Игнор ложного onChangeText('') при blur при открытии эмодзи (iOS multiline / RN Web). */
+  const suppressComposerClearRef = useRef(false);
   const heldDiceMessagesRef = useRef(new Map<string, ChatMessage>());
   const [heldDiceIds, setHeldDiceIds] = useState<string[]>([]);
   const diceAnimQueueRef = useRef<ChatDiceOverlayRequest[]>([]);
@@ -1719,11 +1721,19 @@ export default function ChatThreadScreen() {
   }, []);
 
   const openEmojiPanel = useCallback(() => {
+    // Сначала ставим флаги — blur/keyboardDidHide могут прислать пустой onChangeText.
+    suppressComposerClearRef.current = true;
+    emojiPanelOpenRef.current = true;
     if (Platform.OS !== 'web') {
       Keyboard.dismiss();
       composerInputRef.current?.blur();
     }
     setEmojiPanelOpen(true);
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        suppressComposerClearRef.current = false;
+      });
+    });
   }, []);
 
   const closeEmojiPanel = useCallback((focusInput = false) => {
@@ -3916,6 +3926,13 @@ export default function ChatThreadScreen() {
                       style={styles.input}
                       value={draft}
                       onChangeText={(value) => {
+                        if (
+                          suppressComposerClearRef.current &&
+                          value === '' &&
+                          draftRef.current.length > 0
+                        ) {
+                          return;
+                        }
                         draftRef.current = value;
                         setDraft(value);
                       }}
@@ -3939,7 +3956,15 @@ export default function ChatThreadScreen() {
                     accessibilityRole="button"
                     accessibilityLabel={emojiPanelOpen ? 'Скрыть эмодзи' : 'Эмодзи'}
                     accessibilityState={{ selected: emojiPanelOpen }}
+                    onPressIn={() => {
+                      // Blur инпута часто приходит раньше onPress и шлёт пустой onChangeText.
+                      suppressComposerClearRef.current = true;
+                    }}
                     onPress={toggleEmojiPanel}
+                    // @ts-expect-error RN Web: не забирать фокус у поля ввода
+                    onMouseDown={(event: { preventDefault?: () => void }) => {
+                      event.preventDefault?.();
+                    }}
                     style={[styles.iconButton, emojiPanelOpen ? styles.iconButtonActive : null]}>
                     <Ionicons
                       name={emojiPanelOpen ? 'happy' : 'happy-outline'}

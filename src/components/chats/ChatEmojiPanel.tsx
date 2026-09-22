@@ -198,6 +198,10 @@ export function ChatEmojiPanel({ onSelect }: ChatEmojiPanelProps) {
             accessibilityRole="button"
             accessibilityLabel={`Эмодзи ${emoji}`}
             onPress={() => onSelect(emoji)}
+            // @ts-expect-error RN Web: клик не должен blur'ить composer
+            onMouseDown={(event: { preventDefault?: () => void }) => {
+              event.preventDefault?.();
+            }}
             style={({ pressed }) => [
               styles.emojiButton,
               pressed ? styles.emojiButtonPressed : null,
