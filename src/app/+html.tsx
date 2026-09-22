@@ -69,52 +69,64 @@ body {
   margin-right: auto !important;
 }
 
-/* In-app toasts: Safari/Chrome paint <button>/Pressable white and kill dark contrast. */
-.adventura-toast,
+/*
+ * In-app toasts: Safari/Chrome paint Pressable as white <button> and ignore RN colors.
+ * Colors come from CSS vars set on .adventura-toast by ToastBanner (theme), not data-theme.
+ */
+.adventura-toast {
+  -webkit-appearance: none !important;
+  appearance: none !important;
+  background-image: none !important;
+  background: var(--adventura-toast-bg, #1c1c1e) !important;
+  background-color: var(--adventura-toast-bg, #1c1c1e) !important;
+  border-color: var(--adventura-toast-border, #38383a) !important;
+  color: var(--adventura-toast-fg, #ffffff) !important;
+}
+
 .adventura-toast [role="button"],
 .adventura-toast button {
   -webkit-appearance: none !important;
   appearance: none !important;
+  background: transparent !important;
+  background-color: transparent !important;
   background-image: none !important;
   color: inherit !important;
+  border: none !important;
+  box-shadow: none !important;
 }
 
-html[data-theme="dark"] .adventura-toast {
-  background: #1c1c1e !important;
-  background-color: #1c1c1e !important;
-  border-color: #38383a !important;
-  color: #ffffff !important;
+.adventura-toast-title {
+  color: var(--adventura-toast-fg, #ffffff) !important;
 }
 
-html[data-theme="dark"] .adventura-toast-title {
-  color: #ffffff !important;
+.adventura-toast-message {
+  color: var(--adventura-toast-muted, #c7c7cc) !important;
 }
 
-html[data-theme="dark"] .adventura-toast-message {
-  color: #c7c7cc !important;
+.adventura-toast-action {
+  background: var(--adventura-toast-action-bg, rgba(21, 122, 254, 0.22)) !important;
 }
 
-html[data-theme="dark"] .adventura-toast-action {
-  background: rgba(21, 122, 254, 0.22) !important;
-}
-
-html[data-theme="dark"] .adventura-toast-action-label {
-  color: #84b9ff !important;
+.adventura-toast-action-label {
+  color: var(--adventura-toast-action-fg, #84b9ff) !important;
 }
 
 html[data-theme="light"] .adventura-toast {
-  background: #ffffff !important;
-  background-color: #ffffff !important;
-  border-color: #e8e8e8 !important;
-  color: #000000 !important;
+  --adventura-toast-bg: #ffffff;
+  --adventura-toast-fg: #000000;
+  --adventura-toast-muted: #4c4c4c;
+  --adventura-toast-border: #e8e8e8;
+  --adventura-toast-action-bg: rgba(21, 122, 254, 0.12);
+  --adventura-toast-action-fg: #157afe;
 }
 
-html[data-theme="light"] .adventura-toast-title {
-  color: #000000 !important;
-}
-
-html[data-theme="light"] .adventura-toast-message {
-  color: #4c4c4c !important;
+html[data-theme="dark"] .adventura-toast {
+  --adventura-toast-bg: #1c1c1e;
+  --adventura-toast-fg: #ffffff;
+  --adventura-toast-muted: #c7c7cc;
+  --adventura-toast-border: #38383a;
+  --adventura-toast-action-bg: rgba(21, 122, 254, 0.22);
+  --adventura-toast-action-fg: #84b9ff;
 }
 `;
 

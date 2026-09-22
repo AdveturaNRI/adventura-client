@@ -289,20 +289,29 @@ export function ToastBanner({ text1, text2, onPress, variant, props }: ToastBann
     </>
   );
 
-  const webCardReset =
+  // Web: CSS vars on the card → +html !important rules. Don't rely on html[data-theme] alone
+  // (Safari paints Pressable white; RN color then reads as white-on-white).
+  const webThemeVars =
     Platform.OS === 'web'
       ? ({
+          ['--adventura-toast-bg']: colors.surface,
+          ['--adventura-toast-fg']: colors.text,
+          ['--adventura-toast-muted']: colors.textSecondary,
+          ['--adventura-toast-border']: colors.border,
+          ['--adventura-toast-action-bg']: isDark
+            ? 'rgba(21, 122, 254, 0.22)'
+            : 'rgba(21, 122, 254, 0.12)',
+          ['--adventura-toast-action-fg']: isDark ? colors.primaryLight : colors.primary,
           backgroundColor: colors.surface,
-          // RN-web maps both; Safari UA stylesheet still wins without CSS class + !important.
           background: colors.surface,
           color: colors.text,
           borderColor: colors.border,
-        } as object)
+        } as Record<string, string>)
       : null;
 
   const cardStyle = [
     styles.card,
-    webCardReset,
+    webThemeVars,
     {
       backgroundColor: colors.surface,
       borderColor: colors.border,
@@ -317,10 +326,9 @@ export function ToastBanner({ text1, text2, onPress, variant, props }: ToastBann
 
   return (
     <View pointerEvents="box-none" style={[styles.outer, getAlignmentStyle(alignment, styles)]}>
-      {/* Фон на View + CSS class: Safari красит Pressable/button в белый. */}
       <View
         {...(Platform.OS === 'web' ? ({ className: 'adventura-toast' } as object) : null)}
-        style={[...cardStyle, { backgroundColor: colors.surface }]}>
+        style={cardStyle}>
         {isInteractive ? (
           <Pressable
             accessibilityRole="button"
