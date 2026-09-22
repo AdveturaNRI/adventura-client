@@ -34,6 +34,7 @@ import { startCallRingback, startCallRingtone, stopCallRingtone, playHangupSound
 import { localizeErrorMessage } from '@/utils/localizeError';
 import {
   beginMicrophonePrimeFromGesture,
+  discardPrimedMicrophone,
   stopMediaStream,
   takePrimedMicrophone,
 } from '@/utils/voice-media-devices';
@@ -154,6 +155,14 @@ export function VoiceCallProvider({ children }: { children: ReactNode }) {
   const [minimized, setMinimized] = useState(false);
   const ringingStartedAtRef = useRef<number | null>(null);
   const switchingCallRef = useRef(false);
+
+  // Drop any leftover gesture-primed mic from a previous session / cancelled tap.
+  useEffect(() => {
+    discardPrimedMicrophone();
+    return () => {
+      discardPrimedMicrophone();
+    };
+  }, []);
 
   const liveConversationId =
     session && (session.phase === 'outgoing' || session.phase === 'active')
@@ -395,6 +404,7 @@ export function VoiceCallProvider({ children }: { children: ReactNode }) {
   }, [clearPendingInvite, clearSession, enterCallFromInvite]);
 
   const declineIncoming = useCallback(async () => {
+    discardPrimedMicrophone();
     const parked = pendingInviteRef.current;
     const current = sessionRef.current;
 
@@ -512,6 +522,31 @@ export function VoiceCallProvider({ children }: { children: ReactNode }) {
           startCallRingback();
         }
         return;
+      }
+
+      // Answered / declined on another device of this account — stop local ring.
+      const answeredElsewhere =
+        (event.type === 'accepted' || event.type === 'declined') &&
+        Boolean(user?.id) &&
+        event.payload.byUserId === user?.id;
+      if (answeredElsewhere) {
+        if (parked && parked.callId === event.payload.callId) {
+          clearPendingInvite();
+          stopCallRingtone();
+          if (current?.phase === 'outgoing') {
+            startCallRingback();
+          }
+          return;
+        }
+        if (current?.phase === 'incoming' && current.callId === event.payload.callId) {
+          stopCallRingtone();
+          clearPendingInvite();
+          ringingStartedAtRef.current = null;
+          setMinimized(false);
+          sessionRef.current = null;
+          setSession(null);
+          return;
+        }
       }
 
       if (!current || event.payload.callId !== current.callId) {

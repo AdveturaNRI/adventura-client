@@ -395,13 +395,17 @@ function createStyles(
       flex: 1,
       minHeight: 0,
       width: '100%',
-      overflow: 'visible',
     },
-    listContent: {
-      gap: Spacing.xl + Spacing.md,
+    listScrollContent: {
+      flexGrow: 1,
+      alignItems: 'center',
       paddingBottom: Spacing.xl,
-      overflow: 'visible',
-      ...(isDesktopWeb ? { alignItems: 'stretch' as const } : null),
+    },
+    listInner: {
+      width: '100%',
+      maxWidth: isDesktopWeb ? DESKTOP_DECK_MAX_WIDTH : undefined,
+      paddingHorizontal: isDesktopWeb ? Spacing.xl : isMobileNative ? Spacing.md : Spacing.lg,
+      gap: Spacing.xl + Spacing.md,
     },
     listRow: {
       flexDirection: isDesktopWeb ? 'row' : 'column',
@@ -1127,12 +1131,13 @@ export function WandererDeck({
 
     return (
       <View style={styles.root}>
-        <View style={styles.inner}>
-          {renderHeader(subtitle)}
-          <ScrollView
-            style={styles.listScroll}
-            contentContainerStyle={styles.listContent}
-            showsVerticalScrollIndicator={false}>
+        {/* ScrollView spans the full content pane so wheel works on side margins too. */}
+        <ScrollView
+          style={styles.listScroll}
+          contentContainerStyle={styles.listScrollContent}
+          showsVerticalScrollIndicator={false}>
+          <View style={styles.listInner}>
+            {renderHeader(subtitle)}
             {items.map((item) => {
               const cardProps = wandererCardToUserCardProps(item);
               const listDeckSize = isDesktopWeb ? deckSize : mobileListDeckSize;
@@ -1194,8 +1199,8 @@ export function WandererDeck({
                 </AnalyticsImpression>
               );
             })}
-          </ScrollView>
-        </View>
+          </View>
+        </ScrollView>
 
         <Modal
           visible={cardMenuTarget != null}
