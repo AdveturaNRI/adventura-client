@@ -31,9 +31,15 @@ function createStyles(colors: ThemeColors) {
       borderColor: colors.borderLight,
       shadowColor: colors.shadow,
       shadowOffset: { width: 0, height: 4 },
-      shadowOpacity: 0.1,
-      shadowRadius: 12,
+      shadowOpacity: 0.14,
+      shadowRadius: 14,
       elevation: 4,
+      ...(Platform.OS === 'web'
+        ? ({
+            backdropFilter: 'blur(12px)',
+            WebkitBackdropFilter: 'blur(12px)',
+          } as object)
+        : null),
     },
     pressed: {
       opacity: 0.85,

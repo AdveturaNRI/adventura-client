@@ -4,6 +4,7 @@ import { Linking, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Button } from '@/components/ui';
 import type { AuthorPost } from '@/data/authors/types';
 import { FontSize, Radius, Spacing, type ThemeColors } from '@/constants/theme';
+import { useRequireAuth } from '@/hooks/use-require-auth';
 import { useTheme } from '@/hooks/use-theme';
 import { useThemedStyles } from '@/hooks/use-themed-styles';
 import { formatAuthorPrice } from '@/utils/authors-format';
@@ -101,6 +102,7 @@ function createStyles(colors: ThemeColors) {
 export function AuthorPostPurchase({ post, compact = false }: AuthorPostPurchaseProps) {
   const colors = useTheme();
   const styles = useThemedStyles(createStyles);
+  const requireAuth = useRequireAuth();
 
   if (!post.isForSale || post.price == null) {
     return null;
@@ -110,6 +112,9 @@ export function AuthorPostPurchase({ post, compact = false }: AuthorPostPurchase
   const canBuy = Boolean(post.purchaseUrl?.trim());
 
   const openPurchase = () => {
+    if (!requireAuth()) {
+      return;
+    }
     if (post.purchaseUrl) {
       void Linking.openURL(post.purchaseUrl);
     }

@@ -48,6 +48,9 @@ function handleMenuPress(key: string, router: ReturnType<typeof useRouter>, exte
     case 'my-clubs':
       router.push('/my-clubs');
       return;
+    case 'music-library':
+      router.push('/music-library');
+      return;
     case 'profile':
       router.push('/questionnaire');
       return;

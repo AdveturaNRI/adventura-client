@@ -194,15 +194,6 @@ function CornerSwipeBlock({
     enterTranslateY.value = withSpring(0, ENTER_SPRING);
   }, [enterOpacity, enterScale, enterTranslateY]);
 
-  const clearOutgoing = useCallback(() => {
-    isExiting.value = false;
-    enterOpacity.value = 1;
-    enterScale.value = 1;
-    enterTranslateY.value = 0;
-    setOutgoingCard(null);
-    setGesturesEnabled(true);
-  }, [enterOpacity, enterScale, enterTranslateY, isExiting]);
-
   const isFirstMount = useRef(true);
   const shouldPlayEnter = useRef(false);
   const pendingDismiss = useRef<{
@@ -212,24 +203,53 @@ function CornerSwipeBlock({
     currentX: number;
   } | null>(null);
   const lastDismissToken = useRef<number | null>(null);
+  const resetKeyRef = useRef(resetKey);
+  resetKeyRef.current = resetKey;
+  const dismissOriginKeyRef = useRef<string | number | null>(null);
+  // Keep latest callbacks in refs so dismiss layout effect doesn't re-fire
+  // when parent rebuilds onDismiss after setIsReacting / list updates.
+  const onDismissRef = useRef(onDismiss);
+  onDismissRef.current = onDismiss;
+  const onSwipeLeftRef = useRef(onSwipeLeft);
+  onSwipeLeftRef.current = onSwipeLeft;
+  const onSwipeRightRef = useRef(onSwipeRight);
+  onSwipeRightRef.current = onSwipeRight;
+  const leftActionRef = useRef(leftAction);
+  leftActionRef.current = leftAction;
+  const rightActionRef = useRef(rightAction);
+  rightActionRef.current = rightAction;
+
+  const clearOutgoing = useCallback(() => {
+    isExiting.value = false;
+    // If the parent never advanced (reaction no-op / still in flight), drop the
+    // pending enter flag so we don't later animate the same card as "new".
+    if (dismissOriginKeyRef.current === resetKeyRef.current) {
+      shouldPlayEnter.current = false;
+    }
+    enterOpacity.value = 1;
+    enterScale.value = 1;
+    enterTranslateY.value = 0;
+    setOutgoingCard(null);
+    setGesturesEnabled(true);
+  }, [enterOpacity, enterScale, enterTranslateY, isExiting]);
 
   const fireDismissCallbacks = useCallback(
     (direction: 'left' | 'right', triggeredLeft: boolean, triggeredRight: boolean) => {
-      if (triggeredLeft && leftAction?.onPress) {
-        leftAction.onPress();
+      if (triggeredLeft && leftActionRef.current?.onPress) {
+        leftActionRef.current.onPress();
       }
-      if (triggeredRight && rightAction?.onPress) {
-        rightAction.onPress();
+      if (triggeredRight && rightActionRef.current?.onPress) {
+        rightActionRef.current.onPress();
       }
-      if (direction === 'right' && onSwipeRight) {
-        onSwipeRight();
+      if (direction === 'right') {
+        onSwipeRightRef.current?.();
       }
-      if (direction === 'left' && onSwipeLeft) {
-        onSwipeLeft();
+      if (direction === 'left') {
+        onSwipeLeftRef.current?.();
       }
-      onDismiss?.(direction);
+      onDismissRef.current?.(direction);
     },
-    [leftAction, onDismiss, onSwipeLeft, onSwipeRight, rightAction],
+    [],
   );
 
   useEffect(() => {
@@ -241,6 +261,12 @@ function CornerSwipeBlock({
 
     if (shouldPlayEnter.current) {
       shouldPlayEnter.current = false;
+      // Start enter only after the parent swapped resetKey (new card).
+      // Zeroing opacity earlier punches a hole onto the deck preview and
+      // briefly shows the next person before the old one settles again.
+      enterOpacity.value = 0;
+      enterScale.value = 0.96;
+      enterTranslateY.value = 8;
       playEnterAnimation();
       return;
     }
@@ -265,7 +291,7 @@ function CornerSwipeBlock({
       return;
     }
 
-    const { direction, triggeredLeft, triggeredRight, currentX } = pendingDismiss.current;
+    const { direction, currentX } = pendingDismiss.current;
     pendingDismiss.current = null;
 
     const targetX = direction === 'left' ? -flyOutDistance : flyOutDistance;
@@ -274,14 +300,11 @@ function CornerSwipeBlock({
     exitTranslateX.value = currentX;
     exitOpacity.value = 1;
 
-    enterOpacity.value = 0;
-    enterScale.value = 0.96;
-    enterTranslateY.value = 8;
+    // Keep the front card opaque under the outgoing layer until resetKey
+    // changes — otherwise the stack preview flashes through as a "new" user.
     translateX.value = restX;
     startX.value = restX;
     shouldPlayEnter.current = true;
-
-    fireDismissCallbacks(direction, triggeredLeft, triggeredRight);
 
     exitTranslateX.value = withSpring(targetX, DISMISS_SPRING, (finished) => {
       if (finished) {
@@ -291,12 +314,8 @@ function CornerSwipeBlock({
     exitOpacity.value = withTiming(0, { duration: 240 });
   }, [
     clearOutgoing,
-    enterOpacity,
-    enterScale,
-    enterTranslateY,
     exitOpacity,
     exitTranslateX,
-    fireDismissCallbacks,
     flyOutDistance,
     isExiting,
     outgoingCard,
@@ -317,10 +336,14 @@ function CornerSwipeBlock({
       }
 
       setGesturesEnabled(false);
+      dismissOriginKeyRef.current = resetKeyRef.current;
       pendingDismiss.current = { direction, triggeredLeft, triggeredRight, currentX };
+      // Notify parent first so feed can drop the card in the same turn as the
+      // outgoing snapshot — enter animation then keys off the new resetKey.
+      fireDismissCallbacks(direction, triggeredLeft, triggeredRight);
       setOutgoingCard(childrenRef.current);
     },
-    [outgoingCard],
+    [fireDismissCallbacks, outgoingCard],
   );
 
   useEffect(() => {

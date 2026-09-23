@@ -3,6 +3,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   ScrollView,
+  useWindowDimensions,
   View,
   type LayoutChangeEvent,
 } from 'react-native';
@@ -10,6 +11,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { AuthScreenBackground } from './AuthBackgroundSlideshow';
 import {
+  AUTH_COMPACT_HEIGHT,
   createAuthScreenLayoutStyles,
   type AuthScreenLayoutProps,
 } from './auth-screen-layout.styles';
@@ -18,10 +20,14 @@ import { ScreenTransition } from '@/components/navigation/ScreenTransition';
 import { Spacing } from '@/constants/theme';
 import { useThemedStyles } from '@/hooks/use-themed-styles';
 
-const VERTICAL_PADDING = 0;
+const VERTICAL_PADDING = Spacing.md;
 
 export function AuthScreenLayout({ children, contentStyle }: AuthScreenLayoutProps) {
-  const styles = useThemedStyles(createAuthScreenLayoutStyles);
+  const { height: windowHeight } = useWindowDimensions();
+  const compact = windowHeight < AUTH_COMPACT_HEIGHT;
+  const styles = useThemedStyles((colors) =>
+    createAuthScreenLayoutStyles(colors, false, compact),
+  );
   const [viewportHeight, setViewportHeight] = useState(0);
   const [contentHeight, setContentHeight] = useState(0);
 
@@ -33,7 +39,8 @@ export function AuthScreenLayout({ children, contentStyle }: AuthScreenLayoutPro
   const edgePadding = fitsOnScreen
     ? Math.max(VERTICAL_PADDING, (viewportHeight - contentHeight) / 2)
     : VERTICAL_PADDING;
-  const bottomPadding = fitsOnScreen ? edgePadding : 0;
+  const bottomPadding = fitsOnScreen ? edgePadding : Spacing.lg;
+  const logoHeight = compact ? 36 : 40;
 
   const handleViewportLayout = (event: LayoutChangeEvent) => {
     setViewportHeight(event.nativeEvent.layout.height);
@@ -46,7 +53,7 @@ export function AuthScreenLayout({ children, contentStyle }: AuthScreenLayoutPro
   const card = (
     <View style={[styles.card, contentStyle]}>
       <View style={styles.logoWrap}>
-        <AppLogo align="center" height={48} href={null} />
+        <AppLogo align="center" height={logoHeight} href={null} />
       </View>
       {children}
     </View>

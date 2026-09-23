@@ -563,6 +563,7 @@ export function WandererDeck({
   const [feedUndoIds, setFeedUndoIds] = useState<string[]>([]);
   const [dismissRequest, setDismissRequest] = useState<SwipeDismissRequest | null>(null);
   const [isReacting, setIsReacting] = useState(false);
+  const isReactingRef = useRef(false);
   const [cardMenuTarget, setCardMenuTarget] = useState<WandererCardItem | null>(null);
   const [cardMenuAnchor, setCardMenuAnchor] = useState<{
     x: number;
@@ -578,6 +579,7 @@ export function WandererDeck({
     setReactionHistory([]);
     setFeedUndoIds([]);
     setDismissRequest(null);
+    isReactingRef.current = false;
     setIsReacting(false);
     setCardMenuTarget(null);
     setCardMenuAnchor(null);
@@ -596,6 +598,8 @@ export function WandererDeck({
   const total = items.length;
   const isEmptyFiltered = total === 0;
   const currentItem = items[index] ?? null;
+  const currentItemRef = useRef(currentItem);
+  currentItemRef.current = currentItem;
   const nextItem = items[index + 1] ?? null;
   const isFinished = !isEmptyFiltered && index >= total;
 
@@ -645,9 +649,9 @@ export function WandererDeck({
         toastMode?: 'added' | 'moved' | 'none';
       },
     ): Promise<boolean> => {
-      const target = options?.item ?? currentItem;
+      const target = options?.item ?? currentItemRef.current;
 
-      if (!target || isReacting) {
+      if (!target || isReactingRef.current) {
         return false;
       }
 
@@ -661,6 +665,7 @@ export function WandererDeck({
         (bucket === 'feed' ? 'added' : bucket === 'favorites' || bucket === 'skipped' ? 'moved' : 'none');
       const advanceCard = options?.advanceCard ?? false;
 
+      isReactingRef.current = true;
       setIsReacting(true);
 
       // В ленте сразу убираем карточку — иначе анимация входа дважды
@@ -697,33 +702,36 @@ export function WandererDeck({
         setDismissRequest(null);
         return false;
       } finally {
+        isReactingRef.current = false;
         setIsReacting(false);
       }
     },
-    [advance, bucket, currentItem, isReacting, onReactionCleared, onReactionSaved],
+    [advance, bucket, onReactionCleared, onReactionSaved],
   );
 
   const handleDismiss = useCallback(
     async (direction: 'left' | 'right') => {
       const type = direction === 'right' ? 'favorite' : 'skipped';
-      await persistReaction(type);
+      // Capture before optimistic remove — currentItemRef may already advance.
+      const item = currentItemRef.current ?? undefined;
+      await persistReaction(type, { item });
     },
     [persistReaction],
   );
 
   const requestDismiss = useCallback(
     (direction: 'left' | 'right') => {
-      if (isReacting) {
+      if (isReactingRef.current) {
         return;
       }
 
       setDismissRequest({ direction, token: Date.now() });
     },
-    [isReacting],
+    [],
   );
 
   const handleUndo = useCallback(async () => {
-    if (isReacting) {
+    if (isReactingRef.current) {
       return;
     }
 
@@ -735,6 +743,7 @@ export function WandererDeck({
       const itemId = feedUndoIds[feedUndoIds.length - 1];
       const clearedType = reactionHistory[reactionHistory.length - 1];
 
+      isReactingRef.current = true;
       setIsReacting(true);
 
       try {
@@ -749,6 +758,7 @@ export function WandererDeck({
       } catch (error) {
         toast.error(localizeErrorMessage(error, 'Не удалось отменить'));
       } finally {
+        isReactingRef.current = false;
         setIsReacting(false);
       }
 
@@ -768,6 +778,7 @@ export function WandererDeck({
           ? 'skipped'
           : reactionHistory[reactionHistory.length - 1];
 
+    isReactingRef.current = true;
     setIsReacting(true);
 
     try {
@@ -785,9 +796,10 @@ export function WandererDeck({
     } catch (error) {
       toast.error(localizeErrorMessage(error, 'Не удалось отменить'));
     } finally {
+      isReactingRef.current = false;
       setIsReacting(false);
     }
-  }, [bucket, feedUndoIds, history, isReacting, items, onReactionCleared, reactionHistory]);
+  }, [bucket, feedUndoIds, history, items, onReactionCleared, reactionHistory]);
 
   const handleRestart = useCallback(() => {
     setIndex(0);
@@ -799,9 +811,9 @@ export function WandererDeck({
   }, [onRestart]);
 
   const handleRemoveFromList = useCallback(async (item?: WandererCardItem) => {
-    const target = item ?? currentItem;
+    const target = item ?? currentItemRef.current;
 
-    if (!target || isReacting || (bucket !== 'favorites' && bucket !== 'skipped')) {
+    if (!target || isReactingRef.current || (bucket !== 'favorites' && bucket !== 'skipped')) {
       return;
     }
 
@@ -812,6 +824,7 @@ export function WandererDeck({
 
     const clearedType: WandererReactionType = bucket === 'favorites' ? 'favorite' : 'skipped';
 
+    isReactingRef.current = true;
     setIsReacting(true);
 
     try {
@@ -829,13 +842,14 @@ export function WandererDeck({
         ),
       );
     } finally {
+      isReactingRef.current = false;
       setIsReacting(false);
     }
-  }, [bucket, currentItem, isReacting, onReactionCleared]);
+  }, [bucket, onReactionCleared]);
 
   const handleChat = useCallback(
     async (item?: WandererCardItem) => {
-      const target = item ?? currentItem;
+      const target = item ?? currentItemRef.current;
       if (!target) {
         return;
       }
@@ -847,16 +861,17 @@ export function WandererDeck({
         toast.error(localizeErrorMessage(error, 'Не удалось открыть чат'));
       }
     },
-    [currentItem, router],
+    [router],
   );
 
   const handleUnblock = useCallback(
     async (item?: WandererCardItem) => {
-      const target = item ?? currentItem;
-      if (!target?.blockedByMe || isReacting) {
+      const target = item ?? currentItemRef.current;
+      if (!target?.blockedByMe || isReactingRef.current) {
         return;
       }
 
+      isReactingRef.current = true;
       setIsReacting(true);
       try {
         await unblockPeerByUserId(target.id);
@@ -865,10 +880,11 @@ export function WandererDeck({
       } catch (error) {
         toast.error(localizeErrorMessage(error, 'Не удалось разблокировать'));
       } finally {
+        isReactingRef.current = false;
         setIsReacting(false);
       }
     },
-    [currentItem, isReacting, onUnblocked],
+    [onUnblocked],
   );
 
   const feedLikeButton = (

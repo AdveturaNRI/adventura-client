@@ -7,6 +7,7 @@ export type MenuIconKey =
   | 'master'
   | 'author'
   | 'clubs'
+  | 'music'
   | 'telegram'
   | 'support'
   | 'developer';
@@ -97,6 +98,12 @@ export const PROFILE_MENU_SECTIONS: ProfileMenuSectionSpec[] = [
         label: 'Мои клубы',
         subtitle: 'Площадки на карте: адрес, расписание, галерея',
         icon: 'clubs',
+      },
+      {
+        key: 'music-library',
+        label: 'Музыка',
+        subtitle: 'Треки и плейлисты для атмосферы за столом',
+        icon: 'music',
       },
     ],
   },

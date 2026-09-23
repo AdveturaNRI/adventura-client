@@ -12,6 +12,7 @@ import {
 import { toast } from '@/components/ui';
 import { useAuth } from '@/context/AuthContext';
 import { filterPostsByCategory } from '@/data/authors/helpers';
+import { useRequireAuth } from '@/hooks/use-require-auth';
 import type {
   Author,
   AuthorPost,
@@ -89,6 +90,7 @@ function mergePosts(list: AuthorPost[], incoming: AuthorPost[]): AuthorPost[] {
 
 export function AuthorsProvider({ children }: { children: ReactNode }) {
   const { isAuthenticated } = useAuth();
+  const requireAuth = useRequireAuth();
   const [authors, setAuthors] = useState<Author[]>([]);
   const [posts, setPosts] = useState<AuthorPost[]>([]);
   const [myAuthorId, setMyAuthorId] = useState<string | null>(null);
@@ -98,15 +100,6 @@ export function AuthorsProvider({ children }: { children: ReactNode }) {
   const loadedOnceRef = useRef(false);
 
   const refresh = useCallback(async () => {
-    if (!isAuthenticated) {
-      setAuthors([]);
-      setPosts([]);
-      setMyAuthorId(null);
-      setIsLoading(false);
-      setError(null);
-      return;
-    }
-
     const showInitial = !loadedOnceRef.current;
     if (showInitial) {
       setIsLoading(true);
@@ -118,11 +111,11 @@ export function AuthorsProvider({ children }: { children: ReactNode }) {
       const [authorsList, postsList, me] = await Promise.all([
         listAuthors(),
         listAuthorPosts('all'),
-        getMyAuthor(),
+        isAuthenticated ? getMyAuthor().catch(() => null) : Promise.resolve(null),
       ]);
-      setAuthors(upsertAuthor(authorsList, me));
+      setAuthors(me ? upsertAuthor(authorsList, me) : authorsList);
       setPosts(postsList);
-      setMyAuthorId(me.id);
+      setMyAuthorId(me?.id ?? null);
       setError(null);
       loadedOnceRef.current = true;
     } catch (err) {
@@ -205,41 +198,48 @@ export function AuthorsProvider({ children }: { children: ReactNode }) {
     [ensureAuthor, posts],
   );
 
-  const toggleLike = useCallback(async (postId: string) => {
-    let snapshot: AuthorPost | undefined;
-    setPosts((current) =>
-      current.map((post) => {
-        if (post.id !== postId) {
-          return post;
-        }
-        snapshot = post;
-        const liked = !post.liked;
-        return {
-          ...post,
-          liked,
-          likes: Math.max(0, post.likes + (liked ? 1 : -1)),
-        };
-      }),
-    );
-
-    try {
-      const result = await toggleAuthorPostLike(postId);
-      setPosts((current) =>
-        current.map((post) =>
-          post.id === postId
-            ? { ...post, liked: result.liked, likes: result.likes }
-            : post,
-        ),
-      );
-    } catch (err) {
-      if (snapshot) {
-        setPosts((current) =>
-          current.map((post) => (post.id === postId ? snapshot! : post)),
-        );
+  const toggleLike = useCallback(
+    async (postId: string) => {
+      if (!requireAuth()) {
+        return;
       }
-      toast.error(localizeErrorMessage(err, 'Не удалось обновить лайк'));
-    }
-  }, []);
+
+      let snapshot: AuthorPost | undefined;
+      setPosts((current) =>
+        current.map((post) => {
+          if (post.id !== postId) {
+            return post;
+          }
+          snapshot = post;
+          const liked = !post.liked;
+          return {
+            ...post,
+            liked,
+            likes: Math.max(0, post.likes + (liked ? 1 : -1)),
+          };
+        }),
+      );
+
+      try {
+        const result = await toggleAuthorPostLike(postId);
+        setPosts((current) =>
+          current.map((post) =>
+            post.id === postId
+              ? { ...post, liked: result.liked, likes: result.likes }
+              : post,
+          ),
+        );
+      } catch (err) {
+        if (snapshot) {
+          setPosts((current) =>
+            current.map((post) => (post.id === postId ? snapshot! : post)),
+          );
+        }
+        toast.error(localizeErrorMessage(err, 'Не удалось обновить лайк'));
+      }
+    },
+    [requireAuth],
+  );
 
   const incrementViews = useCallback(async (postId: string) => {
     setPosts((current) =>

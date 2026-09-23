@@ -29,6 +29,7 @@ import { useAuthors } from '@/context/AuthorsContext';
 import { filterPostsByCategory } from '@/data/authors/helpers';
 import type { Author, AuthorPost, CreativityCategoryFilter } from '@/data/authors/types';
 import { FontSize, Spacing, type ThemeColors } from '@/constants/theme';
+import { useRequireAuth } from '@/hooks/use-require-auth';
 import { useTheme } from '@/hooks/use-theme';
 import { useThemedStyles } from '@/hooks/use-themed-styles';
 
@@ -132,6 +133,7 @@ export default function AuthorsScreen() {
   const showCompactNav = !hasDesktopSidebar;
   const styles = useThemedStyles((theme) => createLocalStyles(theme, isDesktopWeb));
   const { authors, posts, toggleLike, isLoading, error, refresh } = useAuthors();
+  const requireAuth = useRequireAuth();
 
   const [filter, setFilter] = useState<CreativityCategoryFilter>('all');
   const [showScrollTop, setShowScrollTop] = useState(false);
@@ -187,7 +189,14 @@ export default function AuthorsScreen() {
 
             <PartnersTicker />
 
-            <BecomeAuthorBanner onBecomeAuthor={() => router.push('/author-cabinet')} />
+            <BecomeAuthorBanner
+              onBecomeAuthor={() => {
+                if (!requireAuth('/author-cabinet')) {
+                  return;
+                }
+                router.push('/author-cabinet');
+              }}
+            />
 
             <AuthorFilters value={filter} onChange={setFilter} />
 
