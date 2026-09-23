@@ -5,6 +5,11 @@ import { Platform } from 'react-native';
 import type { ChatLiveVoiceStatus, RoomDataHandler } from '@/hooks/use-chat-live-voice';
 import { getMusicTrack } from '@/services/music/musicApi';
 import { unlockWebMediaPlayback } from '@/utils/unlock-web-media';
+import {
+  createWebMediaGain,
+  getExpoAudioPlayerMedia,
+  type WebMediaGainHandle,
+} from '@/utils/web-media-gain';
 
 export const CALL_MUSIC_TOPIC = 'adventura.music';
 
@@ -29,8 +34,23 @@ export type CallMusicSnapshot = {
   playing: boolean;
   positionSec: number;
   globalVolume: number;
+  /** Playback clock — bump only when play/pause/seek/track/volume/bard presence change. */
   at: number;
 };
+
+/** Fields that advance the playback clock (`at`). Queue-only edits must not touch it. */
+function patchTouchesPlayback(patch: Partial<CallMusicSnapshot>): boolean {
+  return (
+    patch.playing !== undefined ||
+    patch.positionSec !== undefined ||
+    patch.trackId !== undefined ||
+    patch.playUrl !== undefined ||
+    patch.currentEntryId !== undefined ||
+    patch.globalVolume !== undefined ||
+    patch.bardPresent !== undefined ||
+    patch.trackTitle !== undefined
+  );
+}
 
 type MusicWirePayload =
   | {
@@ -168,6 +188,8 @@ export type UseCallSharedMusicOptions = {
 
 export type UseCallSharedMusicResult = {
   snapshot: CallMusicSnapshot;
+  /** Shared intent or actual local player — drives play/pause icon. */
+  isPlaying: boolean;
   livePositionSec: number;
   durationSec: number;
   localVolume: number;
@@ -222,24 +244,49 @@ export function useCallSharedMusic({
   const loadGenRef = useRef(0);
   const applyingRemoteRef = useRef(false);
   const loadedKeyRef = useRef<string | null>(null);
+  const toggleInFlightRef = useRef(false);
+  const statusPlayingRef = useRef(false);
+  const mediaGainRef = useRef<WebMediaGainHandle | null>(null);
 
   const player = useAudioPlayer(null, { updateInterval: 250 });
   const status = useAudioPlayerStatus(player);
+  statusPlayingRef.current = Boolean(status.playing);
 
   const effectiveVolume =
     clamp01(localVolume) * clamp01(snapshot.globalVolume) * (deafened ? 0 : 1);
+
+  const syncMediaGainGraph = useCallback(() => {
+    if (Platform.OS !== 'web') {
+      return;
+    }
+    const media = getExpoAudioPlayerMedia(player);
+    if (!media) {
+      return;
+    }
+    if (!mediaGainRef.current) {
+      mediaGainRef.current = createWebMediaGain(media);
+    } else {
+      mediaGainRef.current.rebind(media);
+    }
+  }, [player]);
 
   const applyPlayerVolume = useCallback(() => {
     const next =
       clamp01(localVolumeRef.current) *
       clamp01(snapshotRef.current.globalVolume) *
       (deafenedRef.current ? 0 : 1);
+    // Safari ignores HTMLMediaElement.volume — GainNode is the real attenuator.
+    // Keep element at unity so we don't double-attenuate on Chrome.
     try {
-      player.volume = next;
+      player.volume = Platform.OS === 'web' ? 1 : next;
     } catch {
-      // iOS Safari may ignore programmatic volume
+      // ignore
     }
-  }, [player]);
+    if (Platform.OS === 'web') {
+      syncMediaGainGraph();
+      mediaGainRef.current?.setGain(next);
+    }
+  }, [player, syncMediaGainGraph]);
 
   const tryPlay = useCallback(() => {
     if (deafenedRef.current) {
@@ -342,6 +389,8 @@ export function useCallSharedMusic({
         }
         player.replace(playUrl);
         loadedKeyRef.current = loadKey;
+        // replace() builds a new HTMLAudioElement — rewire GainNode before play.
+        syncMediaGainGraph();
         const lagSec = Math.max(0, (Date.now() - at) / 1000);
         const seekTo = Math.max(0, positionSec + (shouldPlay ? lagSec : 0));
         await new Promise((resolve) => setTimeout(resolve, 40));
@@ -367,7 +416,7 @@ export function useCallSharedMusic({
         // source swap failed — leave idle
       }
     },
-    [applyPlayerVolume, player, tryPlay],
+    [applyPlayerVolume, player, syncMediaGainGraph, tryPlay],
   );
 
   const applyRemoteState = useCallback(
@@ -487,10 +536,13 @@ export function useCallSharedMusic({
         return;
       }
       const now = Date.now();
+      const bumpPlaybackAt = patchTouchesPlayback(patch);
       const next: CallMusicSnapshot = {
         ...snapshotRef.current,
         ...patch,
-        at: now,
+        // Queue-only commits (enqueue) must not advance `at`, or a peer with
+        // stale playing:false will wipe play/pause for everyone via takePlayback.
+        at: bumpPlaybackAt ? now : snapshotRef.current.at,
         queueAt: opts?.bumpQueue ? now : (patch.queueAt ?? snapshotRef.current.queueAt),
       };
       if (!next.bardPresent) {
@@ -502,6 +554,7 @@ export function useCallSharedMusic({
         next.playUrl = null;
         next.playing = false;
         next.positionSec = 0;
+        next.at = now;
       }
       snapshotRef.current = next;
       setSnapshot(next);
@@ -512,6 +565,8 @@ export function useCallSharedMusic({
 
   const reset = useCallback(() => {
     stopLocalPlayback();
+    mediaGainRef.current?.dispose();
+    mediaGainRef.current = null;
     snapshotRef.current = EMPTY_SNAPSHOT;
     setSnapshot(EMPTY_SNAPSHOT);
     setLocalVolumeState(1);
@@ -523,6 +578,13 @@ export function useCallSharedMusic({
       reset();
     }
   }, [enabled, reset]);
+
+  useEffect(() => {
+    return () => {
+      mediaGainRef.current?.dispose();
+      mediaGainRef.current = null;
+    };
+  }, []);
 
   useEffect(() => {
     if (!enabled || liveStatus !== 'connected') {
@@ -631,9 +693,26 @@ export function useCallSharedMusic({
         durationSec: duration,
       };
       const queue = [...snapshotRef.current.queue, entry];
+      // Controller: add + start immediately (old play-from-library behaviour).
+      if (canControlRef.current) {
+        await commitLocal(
+          {
+            queue,
+            currentEntryId: entry.entryId,
+            trackId: entry.trackId,
+            trackTitle: entry.title,
+            playUrl: entry.playUrl,
+            playing: true,
+            positionSec: 0,
+          },
+          { bumpQueue: true },
+        );
+        await loadFromPlayUrl(entry.trackId, entry.playUrl, true, 0, Date.now());
+        return;
+      }
       await commitLocal({ queue }, { allowAnyone: true, bumpQueue: true });
     },
-    [commitLocal],
+    [commitLocal, loadFromPlayUrl],
   );
 
   const removeQueueEntry = useCallback(
@@ -726,17 +805,29 @@ export function useCallSharedMusic({
     ) {
       return;
     }
-    const playing = !snapshotRef.current.playing;
-    const positionSec = readLocalPosition();
-    await commitLocal({ playing, positionSec });
-    if (playing) {
-      tryPlay();
-    } else {
-      try {
-        player.pause();
-      } catch {
-        // ignore
+    if (toggleInFlightRef.current) {
+      return;
+    }
+    toggleInFlightRef.current = true;
+    try {
+      // Prefer actual element state when it disagrees with the shared flag
+      // (stale remote wipe / double-tap), so the button and toggle stay aligned.
+      const currentlyPlaying =
+        snapshotRef.current.playing || statusPlayingRef.current;
+      const playing = !currentlyPlaying;
+      const positionSec = readLocalPosition();
+      await commitLocal({ playing, positionSec });
+      if (playing) {
+        tryPlay();
+      } else {
+        try {
+          player.pause();
+        } catch {
+          // ignore
+        }
       }
+    } finally {
+      toggleInFlightRef.current = false;
     }
   }, [commitLocal, player, readLocalPosition, tryPlay]);
 
@@ -850,6 +941,21 @@ export function useCallSharedMusic({
     tryPlay,
   ]);
 
+  // Shared flag says pause but element still running (stale wipe) — stop local audio.
+  useEffect(() => {
+    if (!enabled || applyingRemoteRef.current) {
+      return;
+    }
+    if (snapshot.playing || !status.playing) {
+      return;
+    }
+    try {
+      player.pause();
+    } catch {
+      // ignore
+    }
+  }, [enabled, player, snapshot.playing, status.playing]);
+
   // When track ends for the controller, advance to the next queue item.
   useEffect(() => {
     if (applyingRemoteRef.current || !canControlRef.current) {
@@ -905,8 +1011,12 @@ export function useCallSharedMusic({
       : snapshot.queue.find((item) => item.entryId === snapshot.currentEntryId)?.durationSec ||
         0;
 
+  // Icon follows shared intent, but if the element is already audible show pause.
+  const isPlaying = Boolean(snapshot.playing) || Boolean(status.playing);
+
   return {
     snapshot,
+    isPlaying,
     livePositionSec,
     durationSec,
     localVolume,

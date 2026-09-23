@@ -464,11 +464,14 @@ function ParticipantVolumeDock({
   onChange,
   orientation,
   participantName,
+  caption,
 }: {
   value: number;
   onChange: (next: number) => void;
   orientation: 'horizontal' | 'vertical';
   participantName: string;
+  /** Visible Discord-style label above the slider. */
+  caption?: string;
 }) {
   const trackSizeRef = useRef({ width: 1, height: 1 });
   const [dragging, setDragging] = useState(false);
@@ -541,10 +544,18 @@ function ParticipantVolumeDock({
   return (
     <Animated.View
       pointerEvents="box-none"
-      accessibilityLabel={`Громкость ${participantName} у себя: ${fill}%`}
+      accessibilityLabel={
+        caption
+          ? `${caption}: ${fill}%`
+          : `Громкость ${participantName}: ${fill}%`
+      }
+      {...(Platform.OS === 'web' && caption
+        ? ({ title: caption } as object)
+        : null)}
       style={[
         styles.volumeDock,
         isVertical ? styles.volumeDockVertical : styles.volumeDockHorizontal,
+        caption ? styles.volumeDockWithCaption : null,
         {
           opacity: appear,
           transform: [
@@ -570,11 +581,25 @@ function ParticipantVolumeDock({
           ],
         },
       ]}>
+      {caption ? (
+        <Text style={styles.volumeCaption} numberOfLines={1}>
+          {caption}
+        </Text>
+      ) : null}
+      <View
+        style={[
+          styles.volumeDockControls,
+          isVertical ? styles.volumeDockControlsVertical : styles.volumeDockControlsHorizontal,
+        ]}>
       <Pressable
         accessibilityRole="button"
-        accessibilityLabel={muted ? 'Включить звук у себя' : 'Выключить звук у себя'}
+        accessibilityLabel={muted ? 'Включить звук' : 'Выключить звук'}
+        accessibilityHint="Только у тебя"
         hitSlop={6}
         onPress={toggleMute}
+        {...(Platform.OS === 'web'
+          ? ({ title: muted ? 'Включить звук' : 'Выключить звук' } as object)
+          : null)}
         style={({ pressed }) => [
           styles.volumeMuteBtn,
           muted && styles.volumeMuteBtnActive,
@@ -634,6 +659,7 @@ function ParticipantVolumeDock({
         numberOfLines={1}>
         {muted ? 'выкл' : `${fill}%`}
       </Text>
+      </View>
     </Animated.View>
   );
 }
@@ -669,6 +695,10 @@ function ParticipantTile({
   // Narrow tiles: vertical dock on the side; wide / video: horizontal under media.
   const volumeOrientation: 'horizontal' | 'vertical' =
     !showVideo && tileWidth < 168 ? 'vertical' : 'horizontal';
+  const volumeCaption = tile.isBard ? 'Громкость у тебя' : 'Громкость пользователя';
+  const volumeChipTip = tile.isBard
+    ? 'Громкость у тебя'
+    : `Громкость · ${tile.name}`;
 
   const openMenu = () => {
     onOpenMenu?.();
@@ -759,6 +789,7 @@ function ParticipantTile({
                     onChange={onVolumeChange}
                     orientation="horizontal"
                     participantName={tile.name}
+                    caption={volumeCaption}
                   />
                 </View>
               ) : null}
@@ -874,6 +905,7 @@ function ParticipantTile({
                     onChange={onVolumeChange}
                     orientation="vertical"
                     participantName={tile.name}
+                    caption={volumeCaption}
                   />
                 </View>
               ) : null}
@@ -886,11 +918,19 @@ function ParticipantTile({
               accessibilityLabel={
                 volumeOpen
                   ? `Скрыть громкость ${tile.name}`
-                  : `Громкость ${tile.name} у себя`
+                  : volumeChipTip
+              }
+              accessibilityHint={
+                tile.isBard
+                  ? 'Только у тебя, на остальных не влияет'
+                  : 'Только у тебя, собеседник себя не слышит тише'
               }
               accessibilityState={{ expanded: Boolean(volumeOpen) }}
               hitSlop={6}
               onPress={onToggleVolume}
+              {...(Platform.OS === 'web'
+                ? ({ title: volumeChipTip } as object)
+                : null)}
               style={({ pressed }) => [
                 styles.volumeChip,
                 mutedLocally && styles.volumeChipMuted,
@@ -932,6 +972,7 @@ function ParticipantTile({
             onChange={onVolumeChange}
             orientation="horizontal"
             participantName={tile.name}
+            caption={volumeCaption}
           />
         ) : null}
       </View>
@@ -2436,12 +2477,33 @@ const styles = StyleSheet.create({
       default: {},
     }),
   },
+  volumeDockWithCaption: {
+    flexDirection: 'column',
+    alignItems: 'stretch',
+    gap: 6,
+  },
+  volumeCaption: {
+    color: '#B5BAC1',
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  volumeDockControls: {
+    alignItems: 'center',
+    gap: 8,
+  },
+  volumeDockControlsHorizontal: {
+    flexDirection: 'row',
+    width: '100%',
+  },
+  volumeDockControlsVertical: {
+    flexDirection: 'column',
+  },
   volumeDockHorizontal: {
     width: '100%',
   },
   volumeDockVertical: {
     flexDirection: 'column',
-    width: 44,
+    width: 52,
     paddingVertical: 10,
     paddingHorizontal: 8,
     gap: 10,

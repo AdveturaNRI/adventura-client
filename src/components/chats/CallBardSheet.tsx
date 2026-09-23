@@ -5,6 +5,7 @@ import {
   ActivityIndicator,
   Modal,
   PanResponder,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -377,10 +378,18 @@ export function CallBardSheet({
     <Pressable
       key={track.id}
       accessibilityRole="button"
-      accessibilityLabel={`Добавить ${track.title} в очередь`}
+      accessibilityLabel={
+        canControl
+          ? `Добавить и включить ${track.title}`
+          : `Добавить ${track.title} в очередь`
+      }
       onPress={() => onEnqueueTrack(track.id, track.title, track.durationSec ?? null)}
       style={({ pressed }) => [styles.row, pressed && styles.pressed]}>
-      <Ionicons name="add-circle-outline" size={18} color="#84B9FF" />
+      <Ionicons
+        name={canControl ? 'play-circle-outline' : 'add-circle-outline'}
+        size={18}
+        color="#84B9FF"
+      />
       <Text style={styles.rowTitle} numberOfLines={1}>
         {track.title}
       </Text>
@@ -478,29 +487,40 @@ export function CallBardSheet({
             )}
 
             {canControl ? (
-              <View style={styles.volRow}>
-                <Ionicons name="volume-medium" size={16} color="#84B9FF" />
+              <View style={styles.volBlock}>
+                <Text style={styles.volCaption}>Громкость для всех</Text>
+                <Text style={styles.volHint}>Слышно каждому в звонке</Text>
                 <View
-                  style={styles.volTrack}
-                  onLayout={handleVolLayout}
-                  {...volPan.panHandlers}
-                  accessibilityRole="adjustable"
-                  accessibilityLabel="Громкость для всех"
-                  accessibilityValue={{
-                    min: 1,
-                    max: 100,
-                    now: displayVolPercent,
-                    text: `${displayVolPercent}%`,
-                  }}>
-                  <View style={styles.rail}>
-                    <View style={[styles.railFill, { width: `${volRatio * 100}%` }]} />
+                  style={styles.volRow}
+                  {...(Platform.OS === 'web'
+                    ? ({ title: 'Громкость для всех' } as object)
+                    : null)}>
+                  <Ionicons name="volume-medium" size={16} color="#84B9FF" />
+                  <View
+                    style={styles.volTrack}
+                    onLayout={handleVolLayout}
+                    {...volPan.panHandlers}
+                    accessibilityRole="adjustable"
+                    accessibilityLabel="Громкость для всех"
+                    accessibilityHint="Меняет громкость Барда у всех участников"
+                    accessibilityValue={{
+                      min: 1,
+                      max: 100,
+                      now: displayVolPercent,
+                      text: `${displayVolPercent}%`,
+                    }}>
+                    <View style={styles.rail}>
+                      <View style={[styles.railFill, { width: `${volRatio * 100}%` }]} />
+                    </View>
+                    <View style={[styles.thumb, { left: volThumbLeft }]} pointerEvents="none" />
                   </View>
-                  <View style={[styles.thumb, { left: volThumbLeft }]} pointerEvents="none" />
+                  <Text style={styles.volValue}>{displayVolPercent}</Text>
                 </View>
-                <Text style={styles.volValue}>{displayVolPercent}</Text>
               </View>
             ) : (
-              <Text style={styles.hint}>Добавляй из своей библиотеки. Плейбек — у ведущего.</Text>
+              <Text style={styles.hint}>
+                Свою громкость Барда крути на его плитке. Включить трек может ведущий.
+              </Text>
             )}
           </View>
 
@@ -858,6 +878,19 @@ const styles = StyleSheet.create({
     fontVariant: ['tabular-nums'],
     minWidth: 58,
     textAlign: 'right',
+  },
+  volBlock: {
+    gap: 6,
+  },
+  volCaption: {
+    color: '#F2F3F5',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  volHint: {
+    color: '#949BA4',
+    fontSize: 11,
+    marginTop: -2,
   },
   volRow: {
     flexDirection: 'row',
