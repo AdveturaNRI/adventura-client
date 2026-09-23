@@ -223,8 +223,8 @@ export default function WanderersScreen() {
   );
 
   const filtersSignature = useMemo(
-    () => `${JSON.stringify(filters)}|${searchActive ? trimmedNicknameQuery : ''}`,
-    [filters, searchActive, trimmedNicknameQuery],
+    () => `${JSON.stringify(filters)}|search:${searchActive ? '1' : '0'}`,
+    [filters, searchActive],
   );
 
   const deckItems = searchActive ? searchResults : filteredItems;
@@ -408,58 +408,11 @@ export default function WanderersScreen() {
     />
   ) : null;
 
-  if (searchActive) {
-    if (isSearching && searchResults.length === 0 && !searchError) {
-      return (
-        <ScreenTransition animateOnFocus>
-          <View style={styles.container}>
-            {pageHeader}
-            {filtersPanel}
-            <View style={[styles.stateWrap, { flex: 1, justifyContent: 'center' }]}>
-              <ActivityIndicator color={colors.primary} size="large" />
-            </View>
-          </View>
-        </ScreenTransition>
-      );
-    }
+  // Keep one tree while typing in search — swapping spinner/deck remounts the input and steals focus.
+  const showBucketLoading = isLoading && !searchActive && items.length === 0;
+  const showBucketError = Boolean(errorMessage) && items.length === 0 && !searchActive;
 
-    if (searchError && searchResults.length === 0) {
-      return (
-        <ScreenTransition animateOnFocus>
-          <View style={styles.container}>
-            {pageHeader}
-            {filtersPanel}
-            <Text style={styles.stateText}>{searchError}</Text>
-          </View>
-        </ScreenTransition>
-      );
-    }
-
-    return (
-      <ScreenTransition animateOnFocus>
-        <WandererDeck
-          items={deckItems}
-          bucket={bucket}
-          searchActive
-          filtersSignature={filtersSignature}
-          feedSourceEmpty={deckItems.length === 0}
-          filtersSlot={filtersPanel}
-          onRestart={handleRestart}
-          onReactionSaved={handleReactionSaved}
-          onReactionCleared={handleReactionCleared}
-          onUnblocked={(targetUserId) => {
-            setSearchResults((prev) =>
-              prev.map((item) =>
-                item.id === targetUserId ? { ...item, blockedByMe: false } : item,
-              ),
-            );
-          }}
-        />
-      </ScreenTransition>
-    );
-  }
-
-  if (isLoading) {
+  if (showBucketLoading) {
     return (
       <ScreenTransition animateOnFocus>
         <View style={styles.container}>
@@ -473,7 +426,7 @@ export default function WanderersScreen() {
     );
   }
 
-  if (errorMessage && items.length === 0) {
+  if (showBucketError) {
     return (
       <ScreenTransition animateOnFocus>
         <View style={styles.container}>
@@ -485,22 +438,35 @@ export default function WanderersScreen() {
     );
   }
 
-  const sourceEmpty = visibleItems.length === 0;
+  const sourceEmpty = searchActive
+    ? !isSearching && searchResults.length === 0
+    : visibleItems.length === 0;
 
   return (
     <ScreenTransition animateOnFocus>
       <WandererDeck
-        items={filteredItems}
+        items={deckItems}
         bucket={bucket}
+        searchActive={searchActive}
+        contentLoading={searchActive && isSearching && searchResults.length === 0}
+        contentError={searchActive ? searchError : null}
         filtersSignature={filtersSignature}
         feedSourceEmpty={sourceEmpty}
         filtersSlot={filtersPanel}
         onRestart={handleRestart}
         onReactionSaved={handleReactionSaved}
         onReactionCleared={handleReactionCleared}
-        onBrowseSkipped={handleBrowseSkipped}
-        onBrowseRestored={handleBrowseRestored}
+        onBrowseSkipped={searchActive ? undefined : handleBrowseSkipped}
+        onBrowseRestored={searchActive ? undefined : handleBrowseRestored}
         onUnblocked={(targetUserId) => {
+          if (searchActive) {
+            setSearchResults((prev) =>
+              prev.map((item) =>
+                item.id === targetUserId ? { ...item, blockedByMe: false } : item,
+              ),
+            );
+            return;
+          }
           setItems((prev) =>
             prev.map((item) =>
               item.id === targetUserId ? { ...item, blockedByMe: false } : item,

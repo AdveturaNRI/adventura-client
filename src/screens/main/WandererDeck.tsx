@@ -1,6 +1,7 @@
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useCallback, useEffect, useMemo, useRef, useState, type ComponentProps, type ReactNode } from 'react';
 import {
+  ActivityIndicator,
   Modal,
   Platform,
   Pressable,
@@ -175,6 +176,9 @@ type WandererDeckProps = {
   bucket: WandererBucket;
   /** Nickname search results — list layout with feed actions. */
   searchActive?: boolean;
+  /** Keep header/search mounted while a nickname request is in flight. */
+  contentLoading?: boolean;
+  contentError?: string | null;
   filtersSignature?: string;
   feedSourceEmpty?: boolean;
   filtersSlot?: ReactNode;
@@ -499,6 +503,8 @@ export function WandererDeck({
   items,
   bucket,
   searchActive = false,
+  contentLoading = false,
+  contentError = null,
   filtersSignature = '',
   feedSourceEmpty = false,
   filtersSlot,
@@ -1251,6 +1257,32 @@ export function WandererDeck({
     );
   };
 
+  if (contentLoading) {
+    return (
+      <View style={styles.root}>
+        <View style={styles.inner}>
+          {renderHeader(subtitle)}
+          <View style={styles.emptyWrap}>
+            <ActivityIndicator color={colors.primary} size="large" />
+          </View>
+        </View>
+      </View>
+    );
+  }
+
+  if (contentError && isEmptyFiltered) {
+    return (
+      <View style={styles.root}>
+        <View style={styles.inner}>
+          {renderHeader(subtitle)}
+          <View style={styles.emptyWrap}>
+            <Text style={styles.emptyTitle}>{contentError}</Text>
+          </View>
+        </View>
+      </View>
+    );
+  }
+
   if (isEmptyFiltered) {
     return (
       <View style={styles.root}>
@@ -1289,13 +1321,14 @@ export function WandererDeck({
 
     return (
       <View style={styles.root}>
+        <View style={styles.inner}>{renderHeader(subtitle)}</View>
         {/* ScrollView spans the full content pane so wheel works on side margins too. */}
         <ScrollView
           style={styles.listScroll}
           contentContainerStyle={styles.listScrollContent}
+          keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}>
           <View style={styles.listInner}>
-            {renderHeader(subtitle)}
             {items.map((item) => {
               const cardProps = wandererCardToUserCardProps(item);
               const listDeckSize = isDesktopWeb ? deckSize : mobileListDeckSize;

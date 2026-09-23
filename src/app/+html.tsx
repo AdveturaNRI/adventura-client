@@ -289,9 +289,9 @@ export default function Root({ children }: PropsWithChildren) {
           content="width=device-width, initial-scale=1, shrink-to-fit=no, viewport-fit=cover"
         />
         <meta name="theme-color" content="#208AEF" />
-        <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png" />
-        <link rel="icon" type="image/png" sizes="48x48" href="/favicon.png" />
-        <link rel="shortcut icon" href="/favicon.png" />
+        <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png?v=d20-white" />
+        <link rel="icon" type="image/png" sizes="48x48" href="/favicon.png?v=d20-white" />
+        <link rel="shortcut icon" href="/favicon.png?v=d20-white" />
         <link rel="manifest" href="/manifest.json" />
         <link rel="apple-touch-icon" href="/icons/icon-192.png" />
         <ScrollViewStyleReset />
