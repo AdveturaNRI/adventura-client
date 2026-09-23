@@ -60,7 +60,7 @@ export function ClubsBlockView({ block, skin, clubs, loading, onCta, onOpenClub 
               onPress={() => onOpenClub(club.id)}
               style={{
                 flexGrow: 1,
-                flexBasis: `${Math.floor(100 / cols) - 2}%`,
+                flexBasis: cols === 1 ? '100%' : `${Math.floor(100 / cols) - 2}%`,
                 maxWidth: cols === 1 ? '100%' : undefined,
               }}>
               <MarketingCard skin={skin} style={styles.card}>

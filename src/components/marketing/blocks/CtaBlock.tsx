@@ -4,8 +4,9 @@ import {
   CoverImage,
   MarketingButton,
   MarketingSection,
+  useMarketingBreakpoint,
 } from '@/components/marketing/shared';
-import { MarketingType, type ResolvedMarketingSkin } from '@/components/marketing/theme';
+import { MarketingLayout, MarketingType, type ResolvedMarketingSkin } from '@/components/marketing/theme';
 import type { CtaBlock } from '@/components/marketing/types';
 
 type Props = {
@@ -15,25 +16,40 @@ type Props = {
 };
 
 export function CtaBlockView({ block, skin, onCta }: Props) {
+  const { isMobile } = useMarketingBreakpoint();
   const key = block.id ?? 'cta';
   return (
     <MarketingSection skin={skin}>
-      <View style={[styles.banner, { borderColor: skin.border }]}>
+      <View
+        style={[
+          styles.banner,
+          isMobile && styles.bannerMobile,
+          { borderColor: skin.border },
+        ]}>
         {block.imageUrl ? (
           <CoverImage uri={block.imageUrl} style={StyleSheet.absoluteFillObject} />
         ) : (
           <View style={[StyleSheet.absoluteFillObject, { backgroundColor: skin.surfaceElevated }]} />
         )}
         <View style={[StyleSheet.absoluteFillObject, { backgroundColor: 'rgba(11,17,27,0.72)' }]} />
-        <View style={styles.content}>
-          <Text style={[MarketingType.section, { color: skin.text, textAlign: 'center' }]}>
+        <View style={[styles.content, isMobile && styles.contentMobile]}>
+          <Text
+            style={[
+              isMobile ? MarketingType.sectionMobile : MarketingType.section,
+              { color: skin.text, textAlign: 'center' },
+            ]}>
             {block.title || 'Готов к новым приключениям?'}
           </Text>
           {block.description ? (
             <Text
               style={[
-                MarketingType.bodyLg,
-                { color: skin.textSecondary, textAlign: 'center', marginTop: 10, maxWidth: 640 },
+                isMobile ? MarketingType.body : MarketingType.bodyLg,
+                {
+                  color: skin.textSecondary,
+                  textAlign: 'center',
+                  marginTop: 10,
+                  maxWidth: 640,
+                },
               ]}>
               {block.description}
             </Text>
@@ -69,11 +85,19 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
     justifyContent: 'center',
   },
+  bannerMobile: {
+    borderRadius: MarketingLayout.radiusSm,
+    minHeight: 0,
+  },
   content: {
     paddingVertical: 48,
     paddingHorizontal: 24,
     alignItems: 'center',
     gap: 8,
+  },
+  contentMobile: {
+    paddingVertical: 28,
+    paddingHorizontal: 16,
   },
   actions: {
     flexDirection: 'row',

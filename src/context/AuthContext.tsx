@@ -49,10 +49,7 @@ import {
   setYandexMetrikaUserId,
 } from '@/services/analytics/yandex-metrika';
 import { markOfferPushAfterAuth } from '@/services/push/pushAttention';
-import {
-  bindMarketingTouches,
-  getMarketingAnonymousId,
-} from '@/services/marketing/attribution';
+import { getMarketingAnonymousId } from '@/services/marketing/attribution';
 
 function resolveAcquisitionSource(): string {
   if (Platform.OS !== 'web') {
@@ -195,10 +192,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (!response.user.isGuest) {
         await markOfferPushAfterAuth();
       }
-      const anonymousId = await getMarketingAnonymousId().catch(() => null);
-      if (anonymousId) {
-        void bindMarketingTouches(response.accessToken, anonymousId);
-      }
       setToken(response.accessToken);
       setUser(response.user);
       trackUserSessionStarted('password');
@@ -223,10 +216,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       );
       if (!response.user.isGuest) {
         await markOfferPushAfterAuth();
-      }
-      const anonymousId = await getMarketingAnonymousId().catch(() => null);
-      if (anonymousId) {
-        void bindMarketingTouches(response.accessToken, anonymousId);
       }
       setToken(response.accessToken);
       setUser(response.user);
@@ -355,10 +344,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           response.user,
         );
         await markOfferPushAfterAuth();
-        // Бэкап: сервер тоже биндит по anonymousId в /auth/register.
-        if (anonymousId) {
-          void bindMarketingTouches(response.accessToken, anonymousId);
-        }
         setToken(response.accessToken);
         setUser(response.user);
         setRedirectToQuestionnaire(true);

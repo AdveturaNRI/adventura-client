@@ -1,5 +1,5 @@
-import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { Stack, useLocalSearchParams, useRouter } from "expo-router";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Linking,
@@ -9,29 +9,32 @@ import {
   StyleSheet,
   Text,
   View,
-} from 'react-native';
+} from "react-native";
 
 import {
   LandingRenderer,
   resolveMarketingSkin,
-} from '@/components/marketing/LandingRenderer';
+} from "@/components/marketing/LandingRenderer";
 import type {
   MarketingClubCard,
   MarketingGameCard,
   MarketingLandingBlock,
-} from '@/components/marketing/types';
-import { apiRequest } from '@/services/api/client';
-import { hitYandexMetrika, reachYandexMetrikaGoal } from '@/services/analytics/yandex-metrika';
+} from "@/components/marketing/types";
+import { apiRequest } from "@/services/api/client";
+import {
+  hitYandexMetrika,
+  reachYandexMetrikaGoal,
+} from "@/services/analytics/yandex-metrika";
 import {
   getMarketingAnonymousId,
   parseMarketingQuery,
   recordMarketingConversion,
   recordMarketingTouch,
-} from '@/services/marketing/attribution';
+} from "@/services/marketing/attribution";
 import {
   getPublishedLanding,
   type MarketingLanding,
-} from '@/services/marketing/landings';
+} from "@/services/marketing/landings";
 
 const landingViewSent = new Set<string>();
 const ctaClickSent = new Set<string>();
@@ -46,70 +49,94 @@ function normalizeBlocks(blocks: unknown): MarketingLandingBlock[] {
 }
 
 function canOpenInternal(url: string): boolean {
-  return url.trim().startsWith('/');
+  return url.trim().startsWith("/");
 }
 
 function canOpenExternal(url: string): boolean {
-  return /^https:\/\//i.test(url.trim()) || url.trim().startsWith('mailto:');
+  return /^https:\/\//i.test(url.trim()) || url.trim().startsWith("mailto:");
 }
 
 function applyWebSeo(landing: MarketingLanding): void {
-  if (Platform.OS !== 'web' || typeof document === 'undefined') return;
+  if (Platform.OS !== "web" || typeof document === "undefined") return;
 
   const title = landing.seo?.title?.trim() || landing.name;
-  const description = landing.seo?.description?.trim() || landing.description?.trim() || '';
-  const image = landing.seo?.image?.trim() || '';
-  const robots = landing.seo?.robots?.trim() || '';
-  const canonical = landing.seo?.canonical?.trim() || '';
+  const description =
+    landing.seo?.description?.trim() || landing.description?.trim() || "";
+  const image = landing.seo?.image?.trim() || "";
+  const robots = landing.seo?.robots?.trim() || "";
+  const canonical = landing.seo?.canonical?.trim() || "";
 
   document.title = title;
 
-  const upsertMeta = (selector: string, attrs: Record<string, string>, content: string) => {
+  const upsertMeta = (
+    selector: string,
+    attrs: Record<string, string>,
+    content: string,
+  ) => {
     const nextContent = content.trim();
     if (!nextContent) {
-      document.querySelector(selector)?.parentNode?.removeChild(document.querySelector(selector)!);
+      document
+        .querySelector(selector)
+        ?.parentNode?.removeChild(document.querySelector(selector)!);
       return;
     }
     let meta = document.querySelector<HTMLMetaElement>(selector);
     if (!meta) {
-      meta = document.createElement('meta');
-      for (const [key, value] of Object.entries(attrs)) meta.setAttribute(key, value);
+      meta = document.createElement("meta");
+      for (const [key, value] of Object.entries(attrs))
+        meta.setAttribute(key, value);
       document.head.appendChild(meta);
     }
-    meta.setAttribute('content', nextContent);
+    meta.setAttribute("content", nextContent);
   };
 
-  upsertMeta('meta[name="description"]', { name: 'description' }, description);
-  upsertMeta('meta[property="og:title"]', { property: 'og:title' }, title);
-  upsertMeta('meta[property="og:description"]', { property: 'og:description' }, description);
-  upsertMeta('meta[property="og:image"]', { property: 'og:image' }, image);
-  upsertMeta('meta[name="robots"]', { name: 'robots' }, robots);
+  upsertMeta('meta[name="description"]', { name: "description" }, description);
+  upsertMeta('meta[property="og:title"]', { property: "og:title" }, title);
+  upsertMeta(
+    'meta[property="og:description"]',
+    { property: "og:description" },
+    description,
+  );
+  upsertMeta('meta[property="og:image"]', { property: "og:image" }, image);
+  upsertMeta('meta[name="robots"]', { name: "robots" }, robots);
 
   if (canonical) {
     let link = document.querySelector<HTMLLinkElement>('link[rel="canonical"]');
     if (!link) {
-      link = document.createElement('link');
-      link.rel = 'canonical';
+      link = document.createElement("link");
+      link.rel = "canonical";
       document.head.appendChild(link);
     }
     link.href = canonical;
   }
 }
 
-async function fetchMarketingGames(limit: number): Promise<MarketingGameCard[]> {
+async function fetchMarketingGames(
+  limit: number,
+): Promise<MarketingGameCard[]> {
   const params = new URLSearchParams({ limit: String(limit) });
-  return apiRequest<MarketingGameCard[]>(`/marketing/feeds/games?${params.toString()}`, {
-    skipAuthRefresh: true,
-    skipLoading: true,
-  });
+  return apiRequest<MarketingGameCard[]>(
+    `/marketing/feeds/games?${params.toString()}`,
+    {
+      skipAuth: true,
+      skipAuthRefresh: true,
+      skipLoading: true,
+    },
+  );
 }
 
-async function fetchMarketingClubs(limit: number): Promise<MarketingClubCard[]> {
+async function fetchMarketingClubs(
+  limit: number,
+): Promise<MarketingClubCard[]> {
   const params = new URLSearchParams({ limit: String(limit) });
-  return apiRequest<MarketingClubCard[]>(`/marketing/feeds/clubs?${params.toString()}`, {
-    skipAuthRefresh: true,
-    skipLoading: true,
-  });
+  return apiRequest<MarketingClubCard[]>(
+    `/marketing/feeds/clubs?${params.toString()}`,
+    {
+      skipAuth: true,
+      skipAuthRefresh: true,
+      skipLoading: true,
+    },
+  );
 }
 
 export default function PublicLandingRoute() {
@@ -118,29 +145,29 @@ export default function PublicLandingRoute() {
   const router = useRouter();
 
   const landingSlug = useMemo(() => {
-    if (typeof slug === 'string') return slug;
-    if (Array.isArray(slug)) return slug[0] ?? '';
-    return '';
+    if (typeof slug === "string") return slug;
+    if (Array.isArray(slug)) return slug[0] ?? "";
+    return "";
   }, [slug]);
 
   const marketingQueryKey = useMemo(() => {
     try {
-      if (Platform.OS === 'web' && typeof window !== 'undefined') {
-        return window.location.search || '';
+      if (Platform.OS === "web" && typeof window !== "undefined") {
+        return window.location.search || "";
       }
     } catch {
       // ignore
     }
     const keys = [
-      'utm_source',
-      'utm_medium',
-      'utm_campaign',
-      'utm_content',
-      'utm_term',
-      'yclid',
-      'adv_variant',
+      "utm_source",
+      "utm_medium",
+      "utm_campaign",
+      "utm_content",
+      "utm_term",
+      "yclid",
+      "adv_variant",
     ] as const;
-    return keys.map((k) => `${k}=${String(params[k] ?? '')}`).join('&');
+    return keys.map((k) => `${k}=${String(params[k] ?? "")}`).join("&");
   }, [
     params.utm_source,
     params.utm_medium,
@@ -153,8 +180,10 @@ export default function PublicLandingRoute() {
 
   const marketingQuery = useMemo(() => {
     try {
-      if (Platform.OS === 'web' && typeof window !== 'undefined') {
-        return parseMarketingQuery(new URLSearchParams(window.location.search || ''));
+      if (Platform.OS === "web" && typeof window !== "undefined") {
+        return parseMarketingQuery(
+          new URLSearchParams(window.location.search || ""),
+        );
       }
     } catch {
       // ignore
@@ -164,7 +193,7 @@ export default function PublicLandingRoute() {
   }, [marketingQueryKey]);
 
   const [landing, setLanding] = useState<MarketingLanding | null>(null);
-  const [error, setError] = useState('');
+  const [error, setError] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [games, setGames] = useState<MarketingGameCard[] | null>(null);
   const [clubs, setClubs] = useState<MarketingClubCard[] | null>(null);
@@ -188,7 +217,7 @@ export default function PublicLandingRoute() {
     // Fetch landing + attribution; sync flags before async work.
     // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional load lifecycle
     setIsLoading(true);
-    setError('');
+    setError("");
     setLanding(null);
 
     const query = marketingQuery;
@@ -202,26 +231,31 @@ export default function PublicLandingRoute() {
         ]);
         if (cancelled) return;
         setLanding(landingPayload);
+        const variantKey = query.adv_variant?.trim() || "direct";
+        const touchKey = `touch:${anonymousId}:${landingSlug}:${variantKey}:${dayKey()}`;
         await recordMarketingTouch({
           anonymousId,
           query,
           landingSlug: String(landingSlug),
+          idempotencyKey: touchKey,
         });
-        const key = `landing_view:${anonymousId}:${landingSlug}:${dayKey()}`;
+        const key = `landing_view:${anonymousId}:${landingSlug}:${variantKey}:${dayKey()}`;
         if (!landingViewSent.has(key)) {
           landingViewSent.add(key);
           void recordMarketingConversion({
-            type: 'LANDING_VIEW',
+            type: "LANDING_VIEW",
             anonymousId,
             landingSlug: String(landingSlug),
             variantId: query.adv_variant?.trim() || null,
             idempotencyKey: key,
           });
-          hitYandexMetrika('landing_view', { slug: landingSlug });
+          hitYandexMetrika("landing_view", { slug: landingSlug });
         }
       } catch (e) {
         if (!cancelled) {
-          setError(e instanceof Error ? e.message : 'Не удалось загрузить лендинг');
+          setError(
+            e instanceof Error ? e.message : "Не удалось загрузить лендинг",
+          );
         }
       } finally {
         if (!cancelled) setIsLoading(false);
@@ -239,8 +273,8 @@ export default function PublicLandingRoute() {
   }, [landing]);
 
   useEffect(() => {
-    const needsGames = blocks.some((b) => b.type === 'gameFeed');
-    const needsClubs = blocks.some((b) => b.type === 'clubFeed');
+    const needsGames = blocks.some((b) => b.type === "gameFeed");
+    const needsClubs = blocks.some((b) => b.type === "clubFeed");
     if (!needsGames && !needsClubs) return;
 
     let cancelled = false;
@@ -249,12 +283,16 @@ export default function PublicLandingRoute() {
     void (async () => {
       try {
         const gameLimit =
-          blocks.find((b) => b.type === 'gameFeed' && 'limit' in b)?.limit || 4;
+          blocks.find((b) => b.type === "gameFeed" && "limit" in b)?.limit || 4;
         const clubLimit =
-          blocks.find((b) => b.type === 'clubFeed' && 'limit' in b)?.limit || 4;
+          blocks.find((b) => b.type === "clubFeed" && "limit" in b)?.limit || 4;
         const [g, c] = await Promise.all([
-          needsGames ? fetchMarketingGames(Number(gameLimit) || 4) : Promise.resolve(null),
-          needsClubs ? fetchMarketingClubs(Number(clubLimit) || 4) : Promise.resolve(null),
+          needsGames
+            ? fetchMarketingGames(Number(gameLimit) || 4)
+            : Promise.resolve(null),
+          needsClubs
+            ? fetchMarketingClubs(Number(clubLimit) || 4)
+            : Promise.resolve(null),
         ]);
         if (cancelled) return;
         if (g) setGames(g);
@@ -281,17 +319,18 @@ export default function PublicLandingRoute() {
     void (async () => {
       try {
         const anonymousId = await getMarketingAnonymousId();
-        const key = `cta:${anonymousId}:${landingSlug}:${blockKey}:${dayKey()}`;
+        const variantKey = queryRef.current.variantId || "direct";
+        const key = `cta:${anonymousId}:${landingSlug}:${variantKey}:${blockKey}:${dayKey()}`;
         if (!ctaClickSent.has(key)) {
           ctaClickSent.add(key);
           void recordMarketingConversion({
-            type: 'CTA_CLICK',
+            type: "CTA_CLICK",
             anonymousId,
             landingSlug: String(landingSlug),
             variantId: queryRef.current.variantId,
             idempotencyKey: key,
           });
-          reachYandexMetrikaGoal('landing_cta_click');
+          reachYandexMetrikaGoal("landing_cta_click");
         }
       } catch {
         // ignore analytics failures
@@ -319,8 +358,10 @@ export default function PublicLandingRoute() {
     return (
       <View style={[styles.center, { backgroundColor: skin.pageBackground }]}>
         <Text style={[styles.errorTitle, { color: skin.text }]}>{error}</Text>
-        <Pressable onPress={() => router.replace('/' as never)}>
-          <Text style={{ color: skin.accentColor, fontWeight: '700' }}>На главную</Text>
+        <Pressable onPress={() => router.replace("/" as never)}>
+          <Text style={{ color: skin.accentColor, fontWeight: "700" }}>
+            На главную
+          </Text>
         </Pressable>
       </View>
     );
@@ -345,7 +386,8 @@ export default function PublicLandingRoute() {
       />
       <ScrollView
         style={{ flex: 1, backgroundColor: skin.pageBackground }}
-        contentContainerStyle={{ flexGrow: 1 }}>
+        contentContainerStyle={{ flexGrow: 1 }}
+      >
         <LandingRenderer
           theme={landing.content?.theme}
           blocks={blocks}
@@ -353,8 +395,12 @@ export default function PublicLandingRoute() {
           clubs={clubs}
           feedsLoading={feedsLoading}
           onCta={openCta}
-          onOpenGame={(id) => router.push(`/games/${encodeURIComponent(id)}` as never)}
-          onOpenClub={(id) => router.push(`/clubs/${encodeURIComponent(id)}` as never)}
+          onOpenGame={(id) =>
+            router.push(`/games/${encodeURIComponent(id)}` as never)
+          }
+          onOpenClub={(id) =>
+            router.push(`/clubs/${encodeURIComponent(id)}` as never)
+          }
         />
       </ScrollView>
     </>
@@ -364,14 +410,14 @@ export default function PublicLandingRoute() {
 const styles = StyleSheet.create({
   center: {
     flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
+    alignItems: "center",
+    justifyContent: "center",
     gap: 12,
     padding: 24,
   },
   errorTitle: {
     fontSize: 18,
-    fontWeight: '700',
-    textAlign: 'center',
+    fontWeight: "700",
+    textAlign: "center",
   },
 });

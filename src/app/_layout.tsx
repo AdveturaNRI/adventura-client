@@ -1,6 +1,6 @@
 import 'react-native-gesture-handler';
 
-import { Stack } from 'expo-router';
+import { Stack, usePathname } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { Platform, StyleSheet, View } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
@@ -48,27 +48,43 @@ export default function RootLayout() {
     <GestureHandlerRootView style={rootStyles.container}>
       <SafeAreaProvider>
         <ThemeProvider>
-          <AuthProvider>
-            <RealtimeProvider>
-              <ProfileProvider>
-                <AuthorsProvider>
-                  <VoiceCallProvider>
-                    <PushPromptProvider>
-                      <View style={rootStyles.container}>
-                        <YandexMetrikaTracker />
-                        <RootNavigator />
-                        <AppToast />
-                        <GlobalLoadingOverlay />
-                      </View>
-                    </PushPromptProvider>
-                  </VoiceCallProvider>
-                </AuthorsProvider>
-              </ProfileProvider>
-            </RealtimeProvider>
-          </AuthProvider>
+          <AppRouteProviders />
         </ThemeProvider>
       </SafeAreaProvider>
     </GestureHandlerRootView>
+  );
+}
+
+function AppRouteProviders() {
+  const pathname = usePathname();
+  const isPublicLanding = pathname === '/l' || pathname.startsWith('/l/');
+  const navigator = (
+    <View style={rootStyles.container}>
+      <YandexMetrikaTracker />
+      <RootNavigator />
+      {!isPublicLanding ? <AppToast /> : null}
+      {!isPublicLanding ? <GlobalLoadingOverlay /> : null}
+    </View>
+  );
+
+  // A public landing must not restore a session, open sockets, ask for push
+  // permissions, or surface app-level authorization errors.
+  if (isPublicLanding) {
+    return navigator;
+  }
+
+  return (
+    <AuthProvider>
+      <RealtimeProvider>
+        <ProfileProvider>
+          <AuthorsProvider>
+            <VoiceCallProvider>
+              <PushPromptProvider>{navigator}</PushPromptProvider>
+            </VoiceCallProvider>
+          </AuthorsProvider>
+        </ProfileProvider>
+      </RealtimeProvider>
+    </AuthProvider>
   );
 }
 

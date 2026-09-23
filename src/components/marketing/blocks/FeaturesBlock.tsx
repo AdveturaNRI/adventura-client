@@ -37,8 +37,7 @@ export function FeaturesBlockView({ block, skin, onCta }: Props) {
     <MarketingSection skin={skin}>
       <MarketingPanel skin={skin}>
         <SectionHeader skin={skin} title={block.title} description={block.description} />
-        <View style={[styles.grid, { gap: compact ? 12 : 16 }]}>
-        {items.map((item, idx) => {
+        <View style={[styles.grid, { gap: compact ? 12 : 16 }]}>{items.map((item, idx) => {
           const accent = item.accentColor || FEATURE_ACCENTS[idx % FEATURE_ACCENTS.length];
           const iconName = ICONS[item.meta || ''] || 'sparkles';
           const card = (
@@ -73,8 +72,7 @@ export function FeaturesBlockView({ block, skin, onCta }: Props) {
               )}
             </LandingStaggerItem>
           );
-        })}
-        </View>
+        })}</View>
       </MarketingPanel>
     </MarketingSection>
   );

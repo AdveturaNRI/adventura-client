@@ -35,6 +35,8 @@ export type MarketingLanding = {
 
 export function getPublishedLanding(slug: string) {
   return apiRequest<MarketingLanding>(`/marketing/landings/${encodeURIComponent(slug)}`, {
+    skipAuth: true,
     skipAuthRefresh: true,
+    skipLoading: true,
   });
 }

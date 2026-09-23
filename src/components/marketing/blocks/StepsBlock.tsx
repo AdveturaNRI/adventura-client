@@ -31,8 +31,7 @@ export function StepsBlockView({ block, skin }: Props) {
     <MarketingSection skin={skin}>
       <MarketingPanel skin={skin}>
         <SectionHeader skin={skin} title={block.title} description={block.description} />
-        <View style={[styles.row, isMobile && styles.col]}>
-        {items.map((item, idx) => {
+        <View style={[styles.row, isMobile && styles.col]}>{items.map((item, idx) => {
           const accent = FEATURE_ACCENTS[idx % FEATURE_ACCENTS.length];
           const iconName = ICONS[item.meta || ''] || 'ellipse';
           return (
@@ -63,8 +62,7 @@ export function StepsBlockView({ block, skin }: Props) {
               ) : null}
             </LandingStaggerItem>
           );
-        })}
-        </View>
+        })}</View>
       </MarketingPanel>
     </MarketingSection>
   );

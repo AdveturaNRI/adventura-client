@@ -24,6 +24,8 @@ type RequestOptions = {
   method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
   body?: unknown;
   token?: string | null;
+  /** Public endpoints must not send a stale bearer token. */
+  skipAuth?: boolean;
   skipAuthRefresh?: boolean;
   skipLoading?: boolean;
   _retry?: boolean;
@@ -100,7 +102,7 @@ async function executeApiRequest<T>(
   path: string,
   options: RequestOptions = {},
 ): Promise<T> {
-  const token = options.token ?? (await getStoredToken());
+  const token = options.skipAuth ? null : options.token ?? (await getStoredToken());
 
   let response: Response;
   let payload: T | ApiErrorBody | null;

@@ -1,6 +1,7 @@
 import { Image } from 'expo-image';
-import type { ReactNode } from 'react';
+import { createElement, type ReactNode } from 'react';
 import {
+  Platform,
   Pressable,
   StyleSheet,
   Text,
@@ -42,11 +43,11 @@ export function MarketingSection({
         styles.section,
         {
           paddingVertical: isMobile ? MarketingLayout.sectionYMobile : MarketingLayout.sectionY,
-          paddingHorizontal: MarketingLayout.gutter,
+          paddingHorizontal: isMobile ? 16 : MarketingLayout.gutter,
         },
         style,
       ]}>
-      <View style={styles.inner}>{children}</View>
+      <View style={[styles.inner, isMobile && styles.innerMobile]}>{children}</View>
     </View>
   );
 }
@@ -66,6 +67,7 @@ export function MarketingPanel({
   children: ReactNode;
   style?: StyleProp<ViewStyle>;
 }) {
+  const { isMobile } = useMarketingBreakpoint();
   return (
     <View
       style={[
@@ -73,6 +75,8 @@ export function MarketingPanel({
         {
           backgroundColor: skin.surface,
           borderColor: skin.border,
+          padding: isMobile ? 16 : 28,
+          borderRadius: isMobile ? MarketingLayout.radiusSm : MarketingLayout.radius,
         },
         style,
       ]}>
@@ -102,6 +106,7 @@ export function SectionHeader({
         styles.headerRow,
         align === 'center' && !action ? styles.headerCenter : null,
         action ? styles.headerBetween : null,
+        action && isMobile ? styles.headerBetweenMobile : null,
       ]}>
       <View style={[styles.headerText, align === 'center' && !action ? styles.headerTextCenter : null]}>
         {title ? (
@@ -144,6 +149,7 @@ export function MarketingButton({
   onPress: () => void;
   variant?: 'primary' | 'secondary' | 'ghost' | 'surface';
 }) {
+  const { isMobile } = useMarketingBreakpoint();
   const bg =
     variant === 'primary'
       ? skin.accentColor
@@ -163,6 +169,7 @@ export function MarketingButton({
       onPress={onPress}
       style={({ pressed }) => [
         styles.btn,
+        isMobile && styles.btnMobile,
         {
           backgroundColor: bg,
           borderColor,
@@ -203,11 +210,14 @@ export function CoverImage({
   uri,
   style,
   priority = false,
+  fit = 'cover',
 }: {
   uri?: string | null;
   style?: StyleProp<ViewStyle>;
   priority?: boolean;
+  fit?: 'cover' | 'contain';
 }) {
+  const { isMobile } = useMarketingBreakpoint();
   if (!uri) {
     return (
       <View style={[styles.coverFallback, style]}>
@@ -216,11 +226,21 @@ export function CoverImage({
       </View>
     );
   }
+  // expo-image may reserve the box without painting redirected S3 URLs in
+  // mobile web. A native DOM image follows the redirect reliably.
+  if (Platform.OS === 'web' && isMobile) {
+    const imageStyle = StyleSheet.flatten(style) as Record<string, unknown>;
+    return createElement('img', {
+      src: uri,
+      alt: '',
+      style: { ...imageStyle, objectFit: fit, display: 'block' },
+    });
+  }
   return (
     <Image
       source={{ uri }}
       style={style as never}
-      contentFit="cover"
+      contentFit={fit}
       recyclingKey={uri}
       {...(priority ? { priority: 'high' as const } : { priority: 'low' as const })}
     />
@@ -236,6 +256,9 @@ const styles = StyleSheet.create({
     width: '100%',
     maxWidth: MarketingLayout.maxWidth,
     gap: 28,
+  },
+  innerMobile: {
+    gap: 16,
   },
   panel: {
     width: '100%',
@@ -259,9 +282,13 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
     gap: 12,
   },
+  headerBetweenMobile: {
+    flexDirection: 'column',
+    alignItems: 'stretch',
+  },
   headerText: {
     flex: 1,
-    minWidth: 200,
+    minWidth: 0,
     gap: 0,
   },
   headerTextCenter: {
@@ -275,6 +302,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     alignSelf: 'flex-start',
+  },
+  btnMobile: {
+    width: '100%',
+    alignSelf: 'stretch',
+    paddingHorizontal: 16,
   },
   card: {
     borderRadius: MarketingLayout.radius,

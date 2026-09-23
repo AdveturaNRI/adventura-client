@@ -1,9 +1,9 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Platform } from 'react-native';
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import { Platform } from "react-native";
 
-import { apiRequest } from '@/services/api/client';
+import { apiRequest } from "@/services/api/client";
 
-export const ANON_KEY = '@adventura/marketing-anonymous-id-v1';
+export const ANON_KEY = "@adventura/marketing-anonymous-id-v1";
 
 export type MarketingQuery = {
   utm_source?: string;
@@ -22,25 +22,27 @@ let anonymousIdPromise: Promise<string> | null = null;
 
 function softLog(...args: unknown[]) {
   // eslint-disable-next-line no-undef
-  if (typeof __DEV__ !== 'undefined' && __DEV__) {
+  if (typeof __DEV__ !== "undefined" && __DEV__) {
     // eslint-disable-next-line no-console
     console.warn(...args);
   }
 }
 
 function safeLocalStorageGet(key: string): string | null {
-  if (Platform.OS !== 'web') return null;
+  if (Platform.OS !== "web") return null;
   try {
-    return typeof localStorage !== 'undefined' ? localStorage.getItem(key) : null;
+    return typeof localStorage !== "undefined"
+      ? localStorage.getItem(key)
+      : null;
   } catch {
     return null;
   }
 }
 
 function safeLocalStorageSet(key: string, value: string): void {
-  if (Platform.OS !== 'web') return;
+  if (Platform.OS !== "web") return;
   try {
-    if (typeof localStorage !== 'undefined') {
+    if (typeof localStorage !== "undefined") {
       localStorage.setItem(key, value);
     }
   } catch {
@@ -50,8 +52,8 @@ function safeLocalStorageSet(key: string, value: string): void {
 
 function bytesToHex(bytes: Uint8Array): string {
   return Array.from(bytes)
-    .map((b) => b.toString(16).padStart(2, '0'))
-    .join('');
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
 }
 
 function randomBytes(size: number): Uint8Array {
@@ -60,7 +62,7 @@ function randomBytes(size: number): Uint8Array {
   try {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const c = (globalThis as any)?.crypto;
-    if (c && typeof c.getRandomValues === 'function') {
+    if (c && typeof c.getRandomValues === "function") {
       c.getRandomValues(out);
       return out;
     }
@@ -79,7 +81,7 @@ function uuidv4(): string {
   try {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const c = (globalThis as any)?.crypto;
-    if (c && typeof c.randomUUID === 'function') {
+    if (c && typeof c.randomUUID === "function") {
       return c.randomUUID();
     }
   } catch {
@@ -99,7 +101,7 @@ function uuidv4(): string {
 }
 
 function pickFirst(value: unknown): string | undefined {
-  if (typeof value === 'string') {
+  if (typeof value === "string") {
     const trimmed = value.trim();
     return trimmed ? trimmed : undefined;
   }
@@ -120,18 +122,19 @@ function getParam(params: URLSearchParams, key: string): string | undefined {
 export function parseMarketingQuery(
   input: URLSearchParams | Record<string, unknown>,
 ): MarketingQuery {
-  if (typeof (input as URLSearchParams)?.get === 'function') {
+  if (typeof (input as URLSearchParams)?.get === "function") {
     const params = input as URLSearchParams;
     return {
-      utm_source: getParam(params, 'utm_source'),
-      utm_medium: getParam(params, 'utm_medium'),
-      utm_campaign: getParam(params, 'utm_campaign'),
-      utm_content: getParam(params, 'utm_content'),
-      utm_term: getParam(params, 'utm_term'),
-      utm_id: getParam(params, 'utm_id'),
-      yclid: getParam(params, 'yclid'),
-      adv_variant: getParam(params, 'adv_variant'),
-      landingSlug: getParam(params, 'landing') ?? getParam(params, 'landingSlug'),
+      utm_source: getParam(params, "utm_source"),
+      utm_medium: getParam(params, "utm_medium"),
+      utm_campaign: getParam(params, "utm_campaign"),
+      utm_content: getParam(params, "utm_content"),
+      utm_term: getParam(params, "utm_term"),
+      utm_id: getParam(params, "utm_id"),
+      yclid: getParam(params, "yclid"),
+      adv_variant: getParam(params, "adv_variant"),
+      landingSlug:
+        getParam(params, "landing") ?? getParam(params, "landingSlug"),
     };
   }
 
@@ -194,15 +197,15 @@ export async function getMarketingAnonymousId(): Promise<string> {
 }
 
 function resolveWebReferrerOrigin(): string | null {
-  if (Platform.OS !== 'web') {
+  if (Platform.OS !== "web") {
     return null;
   }
   try {
-    if (typeof document === 'undefined' || !document.referrer) {
+    if (typeof document === "undefined" || !document.referrer) {
       return null;
     }
     const url = new URL(document.referrer);
-    if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+    if (url.protocol !== "http:" && url.protocol !== "https:") {
       return null;
     }
     return url.origin;
@@ -215,6 +218,7 @@ export type RecordMarketingTouchInput = {
   anonymousId?: string;
   query?: MarketingQuery;
   landingSlug?: string;
+  idempotencyKey?: string;
 };
 
 function optionalTrimmed(value?: string | null): string | undefined {
@@ -222,18 +226,24 @@ function optionalTrimmed(value?: string | null): string | undefined {
   return trimmed || undefined;
 }
 
-export async function recordMarketingTouch(input: RecordMarketingTouchInput): Promise<void> {
+export async function recordMarketingTouch(
+  input: RecordMarketingTouchInput,
+): Promise<void> {
   try {
     const anonymousId = input.anonymousId ?? (await getMarketingAnonymousId());
     const query = input.query ?? {};
     const referrer = resolveWebReferrerOrigin();
 
-    await apiRequest<{ ok?: boolean }>('/marketing/attribution/touches', {
-      method: 'POST',
+    await apiRequest<{ ok?: boolean }>("/marketing/attribution/touches", {
+      method: "POST",
+      skipAuth: true,
       skipAuthRefresh: true,
       skipLoading: true,
       body: {
         anonymousId,
+        ...(optionalTrimmed(input.idempotencyKey)
+          ? { idempotencyKey: optionalTrimmed(input.idempotencyKey) }
+          : {}),
         ...(optionalTrimmed(query.adv_variant)
           ? { variantId: optionalTrimmed(query.adv_variant) }
           : {}),
@@ -252,23 +262,29 @@ export async function recordMarketingTouch(input: RecordMarketingTouchInput): Pr
         ...(optionalTrimmed(query.utm_term)
           ? { utmTerm: optionalTrimmed(query.utm_term) }
           : {}),
-        ...(optionalTrimmed(query.utm_id) ? { utmId: optionalTrimmed(query.utm_id) } : {}),
-        ...(optionalTrimmed(query.yclid) ? { yclid: optionalTrimmed(query.yclid) } : {}),
+        ...(optionalTrimmed(query.utm_id)
+          ? { utmId: optionalTrimmed(query.utm_id) }
+          : {}),
+        ...(optionalTrimmed(query.yclid)
+          ? { yclid: optionalTrimmed(query.yclid) }
+          : {}),
         ...(referrer ? { referrer } : {}),
         ...(optionalTrimmed(input.landingSlug ?? query.landingSlug)
-          ? { landingSlug: optionalTrimmed(input.landingSlug ?? query.landingSlug) }
+          ? {
+              landingSlug: optionalTrimmed(
+                input.landingSlug ?? query.landingSlug,
+              ),
+            }
           : {}),
       },
     });
   } catch (error) {
-    softLog('[marketing] recordMarketingTouch failed', error);
+    softLog("[marketing] recordMarketingTouch failed", error);
   }
 }
 
 export type MarketingConversionType =
-  | 'LANDING_VIEW'
-  | 'CTA_CLICK'
-  | 'REGISTRATION_STARTED';
+  "LANDING_VIEW" | "CTA_CLICK" | "REGISTRATION_STARTED";
 
 export type RecordMarketingConversionInput = {
   type: MarketingConversionType;
@@ -288,17 +304,20 @@ export async function recordMarketingConversion(
     const anonymousId = input.anonymousId ?? (await getMarketingAnonymousId());
     const type = input.type ?? input.event;
     if (!type) {
-      softLog('[marketing] recordMarketingConversion skipped: missing type');
+      softLog("[marketing] recordMarketingConversion skipped: missing type");
       return;
     }
     const idempotencyKey = input.idempotencyKey.trim();
     if (!idempotencyKey) {
-      softLog('[marketing] recordMarketingConversion skipped: missing idempotencyKey');
+      softLog(
+        "[marketing] recordMarketingConversion skipped: missing idempotencyKey",
+      );
       return;
     }
 
-    await apiRequest<{ ok?: boolean }>('/marketing/conversions', {
-      method: 'POST',
+    await apiRequest<{ ok?: boolean }>("/marketing/conversions", {
+      method: "POST",
+      skipAuth: true,
       skipAuthRefresh: true,
       skipLoading: true,
       body: {
@@ -315,24 +334,6 @@ export async function recordMarketingConversion(
       },
     });
   } catch (error) {
-    softLog('[marketing] recordMarketingConversion failed', error);
+    softLog("[marketing] recordMarketingConversion failed", error);
   }
 }
-
-export async function bindMarketingTouches(
-  token: string,
-  anonymousId?: string,
-): Promise<void> {
-  try {
-    const id = anonymousId ?? (await getMarketingAnonymousId());
-    await apiRequest<{ ok?: boolean }>('/marketing/attribution/bind', {
-      method: 'POST',
-      token,
-      skipLoading: true,
-      body: { anonymousId: id },
-    });
-  } catch (error) {
-    softLog('[marketing] bindMarketingTouches failed', error);
-  }
-}
-

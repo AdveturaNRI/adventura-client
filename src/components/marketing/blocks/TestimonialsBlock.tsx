@@ -25,12 +25,11 @@ export function TestimonialsBlockView({ block, skin }: Props) {
     <MarketingSection skin={skin}>
       <MarketingPanel skin={skin}>
         <SectionHeader skin={skin} title={block.title} description={block.description} />
-        <View style={[styles.grid, isMobile && styles.col]}>
-        {items.map((item, idx) => (
+        <View style={[styles.grid, isMobile && styles.col]}>{items.map((item, idx) => (
           <LandingStaggerItem
             key={item.id ?? idx}
             index={idx}
-            style={{ flex: 1, minWidth: 240 }}>
+            style={{ flex: 1, minWidth: isMobile ? '100%' : 240, width: isMobile ? '100%' : undefined }}>
             <MarketingCard skin={skin} style={styles.card}>
               <View style={styles.head}>
                 {item.imageUrl ? (
@@ -58,7 +57,7 @@ export function TestimonialsBlockView({ block, skin }: Props) {
               ) : null}
             </MarketingCard>
           </LandingStaggerItem>
-        ))}        </View>
+        ))}</View>
       </MarketingPanel>
     </MarketingSection>
   );

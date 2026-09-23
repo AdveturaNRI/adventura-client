@@ -41,6 +41,7 @@ export const MarketingLayout = {
   radiusSm: 14,
   radiusPill: 999,
   heroMinHeight: 560,
+  heroMinHeightMobile: 0,
 } as const;
 
 export const MarketingType = {

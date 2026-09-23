@@ -7,12 +7,16 @@ importScripts('https://www.gstatic.com/firebasejs/11.6.0/firebase-messaging-comp
 
 function showPushNotification(data) {
   const title = data.title || 'Adventura';
+  const tag = data.tag || 'adventura';
+  const isCall = typeof tag === 'string' && tag.startsWith('call:');
   const options = {
     body: data.body || '',
     icon: data.icon || '/icons/icon-192.png',
     badge: '/icons/icon-192.png',
-    tag: data.tag || 'adventura',
+    tag,
     renotify: Boolean(data.tag),
+    // Keep call toasts visible until dismissed / answered via open.
+    requireInteraction: data.requireInteraction === true || data.requireInteraction === 'true' || isCall,
     data: { url: data.url || '/' },
   };
   return self.registration.showNotification(title, options);

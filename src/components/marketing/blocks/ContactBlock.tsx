@@ -32,42 +32,50 @@ export function ContactBlockView({ block, skin, onCta }: Props) {
 
   return (
     <MarketingSection skin={skin}>
-      <MarketingPanel skin={skin} style={styles.panel}>
+      <MarketingPanel skin={skin} style={[styles.panel, isMobile && styles.panelMobile]}>
         <View style={[styles.row, isMobile && styles.col]}>
-        <View style={styles.copy}>
-          <Text style={[MarketingType.section, { color: skin.text }]}>
-            {block.title || 'Остались вопросы?'}
-          </Text>
-          {block.description ? (
-            <Text style={[MarketingType.bodyLg, { color: skin.textSecondary, marginTop: 12 }]}>
-              {block.description}
+          <View style={[styles.copy, isMobile && styles.copyMobile]}>
+            <Text
+              style={[
+                isMobile ? MarketingType.sectionMobile : MarketingType.section,
+                { color: skin.text },
+              ]}>
+              {block.title || 'Остались вопросы?'}
             </Text>
-          ) : null}
-          <View style={styles.actions}>
-            {actions.length === 0 ? (
-              <Text style={[MarketingType.body, { color: skin.textSecondary }]}>
-                Укажите Telegram или email в настройках блока.
+            {block.description ? (
+              <Text
+                style={[
+                  isMobile ? MarketingType.body : MarketingType.bodyLg,
+                  { color: skin.textSecondary, marginTop: 12 },
+                ]}>
+                {block.description}
               </Text>
+            ) : null}
+            <View style={styles.actions}>
+              {actions.length === 0 ? (
+                <Text style={[MarketingType.body, { color: skin.textSecondary }]}>
+                  Укажите Telegram или email в настройках блока.
+                </Text>
+              ) : (
+                actions.map((action) => (
+                  <MarketingButton
+                    key={action.url}
+                    skin={skin}
+                    label={action.label}
+                    variant="surface"
+                    onPress={() => onCta(action.url, key)}
+                  />
+                ))
+              )}
+            </View>
+          </View>
+          <View style={isMobile ? styles.mediaMobile : styles.media}>
+            {block.imageUrl ? (
+              <CoverImage uri={block.imageUrl} style={styles.image} />
             ) : (
-              actions.map((action) => (
-                <MarketingButton
-                  key={action.url}
-                  skin={skin}
-                  label={action.label}
-                  variant="surface"
-                  onPress={() => onCta(action.url, key)}
-                />
-              ))
+              <View style={[styles.image, { backgroundColor: skin.surfaceElevated }]} />
             )}
           </View>
-        </View>
-        <View style={[styles.media, isMobile && styles.mediaMobile]}>
-          {block.imageUrl ? (
-            <CoverImage uri={block.imageUrl} style={styles.image} />
-          ) : (
-            <View style={[styles.image, { backgroundColor: skin.surfaceElevated }]} />
-          )}
-        </View>
         </View>
       </MarketingPanel>
     </MarketingSection>
@@ -75,12 +83,27 @@ export function ContactBlockView({ block, skin, onCta }: Props) {
 }
 
 const styles = StyleSheet.create({
-  row: { flexDirection: 'row', gap: 28, alignItems: 'center' },
-  panel: { padding: 0 },
+  row: { flexDirection: 'row', gap: 0, alignItems: 'stretch' },
+  panel: { padding: 0, overflow: 'hidden' },
+  panelMobile: { padding: 0 },
   col: { flexDirection: 'column' },
-  copy: { flex: 1, minWidth: 0, padding: 28 },
+  copy: { flex: 1, minWidth: 0, padding: 28, justifyContent: 'center' },
+  copyMobile: { padding: 18, paddingBottom: 8 },
   actions: { marginTop: 22, gap: 12 },
-  media: { flex: 1, minHeight: 280, alignSelf: 'stretch' },
-  mediaMobile: { width: '100%', minHeight: 220 },
-  image: { width: '100%', height: '100%', minHeight: 280, borderRadius: 0 },
+  media: {
+    flex: 1,
+    minWidth: 0,
+    minHeight: 280,
+    alignSelf: 'stretch',
+    overflow: 'hidden',
+  },
+  mediaMobile: {
+    width: '100%',
+    height: 220,
+    position: 'relative',
+    overflow: 'hidden',
+  },
+  image: {
+    ...StyleSheet.absoluteFillObject,
+  },
 });

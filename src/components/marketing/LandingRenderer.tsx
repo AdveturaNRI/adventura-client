@@ -14,7 +14,7 @@ import { HeroBlockView } from '@/components/marketing/blocks/HeroBlock';
 import { StatsBlockView } from '@/components/marketing/blocks/StatsBlock';
 import { StepsBlockView } from '@/components/marketing/blocks/StepsBlock';
 import { TestimonialsBlockView } from '@/components/marketing/blocks/TestimonialsBlock';
-import { CoverImage, MarketingPanel, MarketingSection } from '@/components/marketing/shared';
+import { CoverImage, MarketingPanel, MarketingSection, useMarketingBreakpoint } from '@/components/marketing/shared';
 import {
   MarketingType,
   resolveMarketingSkin,
@@ -45,6 +45,7 @@ function QuoteOrMedia({
   block: Extract<MarketingLandingBlock, { type: 'quote' | 'media' }>;
   skin: ResolvedMarketingSkin;
 }) {
+  const { isMobile } = useMarketingBreakpoint();
   if (block.type === 'quote') {
     return (
       <MarketingSection skin={skin}>
@@ -62,10 +63,12 @@ function QuoteOrMedia({
     );
   }
   return (
-      <MarketingSection skin={skin}>
-      <MarketingPanel skin={skin} style={{ padding: 16 }}>
+    <MarketingSection skin={skin}>
+      <MarketingPanel skin={skin} style={{ padding: isMobile ? 12 : 16 }}>
         {block.title ? (
-          <Text style={[MarketingType.label, { color: skin.text, marginBottom: 10 }]}>{block.title}</Text>
+          <Text style={[MarketingType.label, { color: skin.text, marginBottom: 10 }]}>
+            {block.title}
+          </Text>
         ) : null}
         {block.description ? (
           <Text style={[MarketingType.body, { color: skin.textSecondary, marginBottom: 10 }]}>
@@ -75,7 +78,11 @@ function QuoteOrMedia({
         {block.imageUrl ? (
           <CoverImage
             uri={block.imageUrl}
-            style={{ width: '100%', aspectRatio: 16 / 9, borderRadius: 16 }}
+            style={{
+              width: '100%',
+              aspectRatio: isMobile ? 4 / 3 : 16 / 9,
+              borderRadius: isMobile ? 12 : 16,
+            }}
           />
         ) : null}
       </MarketingPanel>

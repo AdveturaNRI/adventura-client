@@ -64,7 +64,7 @@ export function GamesBlockView({ block, skin, games, loading, onCta, onOpenGame 
                 key={game.id}
                 onPress={() => onOpenGame(game.id)}
                 style={{
-                  width: `${100 / cols - 1}%` as unknown as number,
+                  width: cols === 1 ? '100%' : (`${100 / cols - 1}%` as unknown as number),
                   flexGrow: 1,
                   flexBasis: `${Math.floor(100 / cols) - 2}%`,
                   maxWidth: cols === 1 ? '100%' : undefined,
