@@ -1,17 +1,15 @@
-import { useAudioPlayer, useAudioPlayerStatus } from 'expo-audio';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Platform } from 'react-native';
 
 import type { ChatLiveVoiceStatus, RoomDataHandler } from '@/hooks/use-chat-live-voice';
 import { getMusicTrack } from '@/services/music/musicApi';
+import { CallBardPlayerPool, type BardLayerStatus } from '@/utils/call-bard-player-pool';
 import { clearPlayableMusicUrlCache } from '@/utils/music-playable-url';
 import { unlockWebMediaPlayback } from '@/utils/unlock-web-media';
-import {
-  WebBardAudioEngine,
-  type WebBardAudioStatus,
-} from '@/utils/web-bard-audio';
 
 export const CALL_MUSIC_TOPIC = 'adventura.music';
+
+/** Cap concurrent layers so CPU/bandwidth stay sane. */
+export const MAX_CALL_MUSIC_LAYERS = 8;
 
 export type CallMusicQueueEntry = {
   entryId: string;
@@ -20,25 +18,40 @@ export type CallMusicQueueEntry = {
   addedBy: string;
   playUrl: string;
   durationSec: number | null;
+  /** Per-layer transport. Absent / true = playing (legacy peers). */
+  playing?: boolean;
+  /** Per-layer clock stamp for seek sync (optional on older peers). */
+  positionSec?: number;
+  /** When this layer's position was stamped. */
+  at?: number;
+  /** Per-track gain 0…1 for everyone in the call. Absent = 1. */
+  volume?: number;
+  /** Repeat this track. Absent = false. */
+  loop?: boolean;
 };
 
+/**
+ * Shared Bard state.
+ * `queue` = tracks currently in the room (playing together), not a waiting list.
+ */
 export type CallMusicSnapshot = {
   bardPresent: boolean;
+  /** Now playing — every entry is an active layer. */
   queue: CallMusicQueueEntry[];
-  /** Bumped only on enqueue/remove so seek/volume cannot wipe the shared queue. */
+  /** Bumped only when the now-playing set changes. */
   queueAt: number;
+  /** Focused layer for seek / title (usually last started). */
   currentEntryId: string | null;
   trackId: string | null;
   trackTitle: string | null;
   playUrl: string | null;
+  /** True if any layer wants to play — drives Bard tile aura. */
   playing: boolean;
   positionSec: number;
   globalVolume: number;
-  /** Playback clock — bump only when play/pause/seek/track/volume/bard presence change. */
   at: number;
 };
 
-/** Fields that advance the playback clock (`at`). Queue-only edits must not touch it. */
 function patchTouchesPlayback(patch: Partial<CallMusicSnapshot>): boolean {
   return (
     patch.playing !== undefined ||
@@ -83,14 +96,6 @@ const EMPTY_SNAPSHOT: CallMusicSnapshot = {
   at: 0,
 };
 
-const EMPTY_WEB_STATUS: WebBardAudioStatus = {
-  playing: false,
-  currentTime: 0,
-  duration: 0,
-  ended: false,
-  buffering: false,
-};
-
 function clamp01(value: number) {
   if (!Number.isFinite(value)) {
     return 1;
@@ -127,7 +132,78 @@ function parseQueueEntry(raw: unknown): CallMusicQueueEntry | null {
     typeof obj.durationSec === 'number' && Number.isFinite(obj.durationSec) && obj.durationSec > 0
       ? obj.durationSec
       : null;
-  return { entryId, trackId, title, addedBy, playUrl, durationSec };
+  const positionSec =
+    typeof obj.positionSec === 'number' && Number.isFinite(obj.positionSec)
+      ? Math.max(0, obj.positionSec)
+      : undefined;
+  const at =
+    typeof obj.at === 'number' && Number.isFinite(obj.at) ? obj.at : undefined;
+  const playing = typeof obj.playing === 'boolean' ? obj.playing : undefined;
+  const volume =
+    typeof obj.volume === 'number' && Number.isFinite(obj.volume)
+      ? Math.min(1, Math.max(0, obj.volume))
+      : undefined;
+  const loop = typeof obj.loop === 'boolean' ? obj.loop : undefined;
+  return {
+    entryId,
+    trackId,
+    title,
+    addedBy,
+    playUrl,
+    durationSec,
+    positionSec,
+    at,
+    playing,
+    volume,
+    loop,
+  };
+}
+
+function layerVolume(entry: CallMusicQueueEntry) {
+  return typeof entry.volume === 'number' && Number.isFinite(entry.volume)
+    ? Math.min(1, Math.max(0, entry.volume))
+    : 1;
+}
+
+function layerLoops(entry: CallMusicQueueEntry) {
+  return entry.loop === true;
+}
+
+function layerWantsPlay(entry: CallMusicQueueEntry) {
+  return entry.playing !== false;
+}
+
+function anyLayerWantsPlay(queue: CallMusicQueueEntry[]) {
+  return queue.some(layerWantsPlay);
+}
+
+function focusFromQueue(
+  queue: CallMusicQueueEntry[],
+  preferredId: string | null,
+): Pick<
+  CallMusicSnapshot,
+  'currentEntryId' | 'trackId' | 'trackTitle' | 'playUrl' | 'positionSec'
+> {
+  const preferred =
+    (preferredId ? queue.find((item) => item.entryId === preferredId) : null) ??
+    queue[queue.length - 1] ??
+    null;
+  if (!preferred) {
+    return {
+      currentEntryId: null,
+      trackId: null,
+      trackTitle: null,
+      playUrl: null,
+      positionSec: 0,
+    };
+  }
+  return {
+    currentEntryId: preferred.entryId,
+    trackId: preferred.trackId,
+    trackTitle: preferred.title,
+    playUrl: preferred.playUrl,
+    positionSec: preferred.positionSec ?? 0,
+  };
 }
 
 function parseWire(raw: unknown): MusicWirePayload | null {
@@ -145,9 +221,11 @@ function parseWire(raw: unknown): MusicWirePayload | null {
     return null;
   }
   const queueRaw = Array.isArray(obj.queue) ? obj.queue : [];
-  const queue = queueRaw
+  let queue = queueRaw
     .map(parseQueueEntry)
     .filter((entry): entry is CallMusicQueueEntry => Boolean(entry));
+
+  // Older peers: singular current track only — promote into the now-playing list.
   const trackId =
     typeof obj.trackId === 'string' && obj.trackId.trim() ? obj.trackId.trim() : null;
   const playUrl =
@@ -156,6 +234,27 @@ function parseWire(raw: unknown): MusicWirePayload | null {
     typeof obj.currentEntryId === 'string' && obj.currentEntryId.trim()
       ? obj.currentEntryId.trim()
       : null;
+  if (queue.length === 0 && trackId && playUrl) {
+    queue = [
+      {
+        entryId: currentEntryId || `legacy-${trackId}`,
+        trackId,
+        title:
+          typeof obj.trackTitle === 'string' && obj.trackTitle.trim()
+            ? obj.trackTitle.trim()
+            : 'Трек',
+        addedBy: 'Участник',
+        playUrl,
+        durationSec: null,
+        positionSec:
+          typeof obj.positionSec === 'number' && Number.isFinite(obj.positionSec)
+            ? Math.max(0, obj.positionSec)
+            : 0,
+        at: typeof obj.at === 'number' && Number.isFinite(obj.at) ? obj.at : Date.now(),
+      },
+    ];
+  }
+
   return {
     type: 'music_state',
     bardPresent: Boolean(obj.bardPresent),
@@ -187,26 +286,33 @@ export type UseCallSharedMusicOptions = {
   enabled: boolean;
   liveStatus: ChatLiveVoiceStatus;
   canControl: boolean;
-  /** Display name for queue "added by". */
   localDisplayName: string;
   deafened: boolean;
   publishRoomData: (topic: string, payload: object) => Promise<void>;
   subscribeRoomData: (topic: string, handler: RoomDataHandler) => () => void;
 };
 
+export type CallMusicLayerLive = {
+  positionSec: number;
+  durationSec: number;
+  playing: boolean;
+  buffering: boolean;
+};
+
 export type UseCallSharedMusicResult = {
   snapshot: CallMusicSnapshot;
-  /** Shared playback intent — drives play/pause icon for everyone. */
   isPlaying: boolean;
-  /** Local track is buffering / starting — spinner in player + around Bard tile. */
   trackLoading: boolean;
   livePositionSec: number;
   durationSec: number;
+  /** Live transport status per now-playing entry. */
+  layerLive: Record<string, CallMusicLayerLive>;
   localVolume: number;
   effectiveVolume: number;
   localDisplayName: string;
   summonBard: () => Promise<void>;
   dismissBard: () => Promise<void>;
+  /** Start a track alongside whatever is already playing. */
   enqueueTrack: (
     trackId: string,
     trackTitle?: string | null,
@@ -214,7 +320,13 @@ export type UseCallSharedMusicResult = {
     playUrl?: string | null,
   ) => Promise<void>;
   removeQueueEntry: (entryId: string) => Promise<void>;
+  /** Focus a playing track (legacy / title). */
   playQueueEntry: (entryId: string) => Promise<void>;
+  toggleLayerPlay: (entryId: string) => Promise<void>;
+  seekLayer: (entryId: string, positionSec: number) => Promise<void>;
+  setLayerVolume: (entryId: string, volume: number) => Promise<void>;
+  toggleLayerLoop: (entryId: string) => Promise<void>;
+  /** @deprecated Prefer per-layer controls; pauses/resumes every layer. */
   togglePlay: () => Promise<void>;
   seek: (positionSec: number) => Promise<void>;
   stopTrack: () => Promise<void>;
@@ -222,12 +334,9 @@ export type UseCallSharedMusicResult = {
   setGlobalVolume: (volume: number) => Promise<void>;
   requestSync: () => void;
   republishState: () => void;
-  /** Call from Accept / Start / Play tap (user gesture). */
   resumeFromGesture: () => void;
   reset: () => void;
 };
-
-const isWeb = Platform.OS === 'web';
 
 export function useCallSharedMusic({
   enabled,
@@ -240,7 +349,7 @@ export function useCallSharedMusic({
 }: UseCallSharedMusicOptions): UseCallSharedMusicResult {
   const [snapshot, setSnapshot] = useState<CallMusicSnapshot>(EMPTY_SNAPSHOT);
   const [localVolume, setLocalVolumeState] = useState(1);
-  const [webStatus, setWebStatus] = useState<WebBardAudioStatus>(EMPTY_WEB_STATUS);
+  const [layerStatus, setLayerStatus] = useState<Record<string, BardLayerStatus>>({});
   const [trackLoading, setTrackLoading] = useState(false);
 
   const snapshotRef = useRef(snapshot);
@@ -253,27 +362,35 @@ export function useCallSharedMusic({
   localDisplayNameRef.current = localDisplayName;
   const deafenedRef = useRef(deafened);
   deafenedRef.current = deafened;
-  const loadGenRef = useRef(0);
   const applyingRemoteRef = useRef(false);
-  const loadedKeyRef = useRef<string | null>(null);
   const toggleInFlightRef = useRef(false);
-  const webEngineRef = useRef<WebBardAudioEngine | null>(null);
-
-  // Native only — hooks must stay unconditional.
-  const nativePlayer = useAudioPlayer(null, { updateInterval: 250 });
-  const nativeStatus = useAudioPlayerStatus(nativePlayer);
+  const poolRef = useRef<CallBardPlayerPool | null>(null);
+  const layerStatusRef = useRef(layerStatus);
+  layerStatusRef.current = layerStatus;
 
   useEffect(() => {
-    if (!isWeb) {
-      return;
-    }
-    const engine = new WebBardAudioEngine();
-    webEngineRef.current = engine;
-    const unsub = engine.subscribe(setWebStatus);
+    const pool = new CallBardPlayerPool();
+    poolRef.current = pool;
+    const unsub = pool.subscribe((entryId, status) => {
+      setLayerStatus((prev) => {
+        const prevStatus = prev[entryId];
+        if (
+          prevStatus &&
+          prevStatus.playing === status.playing &&
+          prevStatus.ended === status.ended &&
+          prevStatus.buffering === status.buffering &&
+          Math.abs(prevStatus.currentTime - status.currentTime) < 0.2 &&
+          Math.abs(prevStatus.duration - status.duration) < 0.2
+        ) {
+          return prev;
+        }
+        return { ...prev, [entryId]: status };
+      });
+    });
     return () => {
       unsub();
-      engine.dispose();
-      webEngineRef.current = null;
+      pool.dispose();
+      poolRef.current = null;
       clearPlayableMusicUrlCache();
     };
   }, []);
@@ -282,21 +399,24 @@ export function useCallSharedMusic({
     clamp01(localVolume) * clamp01(snapshot.globalVolume) * (deafened ? 0 : 1);
 
   const applyVolume = useCallback(() => {
-    const next =
+    const master =
       clamp01(localVolumeRef.current) *
       clamp01(snapshotRef.current.globalVolume) *
       (deafenedRef.current ? 0 : 1);
-    if (isWeb) {
-      webEngineRef.current?.setVolume(next);
+    const pool = poolRef.current;
+    if (!pool) {
       return;
     }
-    try {
-      nativePlayer.volume = next;
-      nativePlayer.muted = next < 0.001;
-    } catch {
-      // ignore
+    pool.setVolume(master);
+    const gains: Record<string, number> = {};
+    const loops: Record<string, boolean> = {};
+    for (const entry of snapshotRef.current.queue) {
+      gains[entry.entryId] = layerVolume(entry);
+      loops[entry.entryId] = layerLoops(entry);
     }
-  }, [nativePlayer]);
+    pool.syncLayerGains(gains);
+    pool.syncLayerLoops(loops);
+  }, []);
 
   useEffect(() => {
     applyVolume();
@@ -304,180 +424,91 @@ export function useCallSharedMusic({
 
   const resumeFromGesture = useCallback(() => {
     unlockWebMediaPlayback();
-    if (isWeb) {
-      webEngineRef.current?.unlockFromGesture();
-      if (snapshotRef.current.playing && !deafenedRef.current) {
-        void webEngineRef.current?.play();
-      }
+    poolRef.current?.unlockFromGesture();
+    const queue = snapshotRef.current.queue;
+    if (deafenedRef.current) {
       return;
     }
-    if (snapshotRef.current.playing && !deafenedRef.current) {
-      try {
-        nativePlayer.play();
-      } catch {
-        // ignore
+    for (const entry of queue) {
+      if (layerWantsPlay(entry)) {
+        void poolRef.current?.play(entry.entryId);
       }
-    }
-  }, [nativePlayer]);
-
-  /** Gesture right before starting a known URL — no silent play/pause race. */
-  const armPlaybackGesture = useCallback(() => {
-    unlockWebMediaPlayback();
-    if (isWeb) {
-      webEngineRef.current?.resumeContextFromGesture();
-      return;
     }
   }, []);
 
-  const stopLocalPlayback = useCallback(() => {
-    loadGenRef.current += 1;
-    loadedKeyRef.current = null;
-    setTrackLoading(false);
-    if (isWeb) {
-      webEngineRef.current?.stop();
-      return;
-    }
-    try {
-      nativePlayer.pause();
-    } catch {
-      // ignore
-    }
-  }, [nativePlayer]);
+  const armPlaybackGesture = useCallback(() => {
+    unlockWebMediaPlayback();
+    poolRef.current?.resumeContextFromGesture();
+  }, []);
 
-  const loadFromPlayUrl = useCallback(
-    async (
-      trackId: string,
-      playUrl: string,
-      shouldPlay: boolean,
-      positionSec: number,
-      at: number,
-    ) => {
-      const gen = ++loadGenRef.current;
-      const loadKey = `${trackId}::${playUrl}`;
-      if (!playUrl) {
+  const stopLocalPlayback = useCallback(() => {
+    setTrackLoading(false);
+    poolRef.current?.stopAll();
+    setLayerStatus({});
+  }, []);
+
+  const stampQueuePositions = useCallback((queue: CallMusicQueueEntry[]): CallMusicQueueEntry[] => {
+    const now = Date.now();
+    return queue.map((entry) => {
+      const status = layerStatusRef.current[entry.entryId] ?? poolRef.current?.getStatus(entry.entryId);
+      return {
+        ...entry,
+        positionSec: status?.currentTime ?? entry.positionSec ?? 0,
+        at: now,
+      };
+    });
+  }, []);
+
+  const syncLayersToQueue = useCallback(
+    async (queue: CallMusicQueueEntry[], playbackAt: number) => {
+      const pool = poolRef.current;
+      if (!pool) {
         return;
       }
+      const wantIds = new Set(queue.map((entry) => entry.entryId));
+      for (const entryId of pool.listEntryIds()) {
+        if (!wantIds.has(entryId)) {
+          pool.stopLayer(entryId);
+        }
+      }
+      setLayerStatus((prev) => {
+        const next = { ...prev };
+        for (const key of Object.keys(next)) {
+          if (!wantIds.has(key)) {
+            delete next[key];
+          }
+        }
+        return next;
+      });
 
-      const lagSec = Math.max(0, (Date.now() - at) / 1000);
-      const seekTo = Math.max(0, positionSec + (shouldPlay ? lagSec : 0));
-      const play = shouldPlay && !deafenedRef.current;
-
-      if (play) {
+      const anyPlay = anyLayerWantsPlay(queue) && !deafenedRef.current;
+      if (anyPlay && queue.length > 0) {
         setTrackLoading(true);
       }
 
-      if (isWeb) {
-        const engine = webEngineRef.current;
-        if (!engine) {
-          setTrackLoading(false);
-          return;
-        }
-        loadedKeyRef.current = loadKey;
-        const ok = await engine.load({
-          key: loadKey,
-          playUrl,
-          shouldPlay: play,
-          positionSec: seekTo,
-        });
-        if (gen !== loadGenRef.current) {
-          return;
-        }
-        applyVolume();
-        if (!play || ok || engine.getStatus().playing) {
-          setTrackLoading(false);
-        }
-        return;
-      }
+      await Promise.all(
+        queue.map(async (entry) => {
+          const play = layerWantsPlay(entry) && !deafenedRef.current;
+          const stampedAt = entry.at ?? playbackAt;
+          const lagSec = Math.max(0, (Date.now() - stampedAt) / 1000);
+          const basePos = entry.positionSec ?? 0;
+          const seekTo = Math.max(0, basePos + (play ? lagSec : 0));
+          await pool.load({
+            entryId: entry.entryId,
+            trackId: entry.trackId,
+            playUrl: entry.playUrl,
+            shouldPlay: play,
+            positionSec: seekTo,
+            loop: layerLoops(entry),
+          });
+        }),
+      );
 
-      try {
-        nativePlayer.pause();
-      } catch {
-        // ignore
-      }
-      nativePlayer.replace(playUrl);
-      loadedKeyRef.current = loadKey;
-      await new Promise((resolve) => setTimeout(resolve, 40));
-      if (gen !== loadGenRef.current) {
-        return;
-      }
-      try {
-        await nativePlayer.seekTo(seekTo);
-      } catch {
-        // ignore
-      }
       applyVolume();
-      if (play) {
-        try {
-          nativePlayer.play();
-        } catch {
-          // ignore
-        }
-      } else {
-        try {
-          nativePlayer.pause();
-        } catch {
-          // ignore
-        }
-      }
       setTrackLoading(false);
     },
-    [applyVolume, nativePlayer],
+    [applyVolume],
   );
-
-  const ensurePlaying = useCallback(async () => {
-    if (deafenedRef.current) {
-      return false;
-    }
-    if (isWeb) {
-      return Boolean(await webEngineRef.current?.play());
-    }
-    try {
-      nativePlayer.play();
-      return true;
-    } catch {
-      return false;
-    }
-  }, [nativePlayer]);
-
-  const pauseLocal = useCallback(() => {
-    if (isWeb) {
-      webEngineRef.current?.pause();
-      return;
-    }
-    try {
-      nativePlayer.pause();
-    } catch {
-      // ignore
-    }
-  }, [nativePlayer]);
-
-  const seekLocal = useCallback(
-    async (positionSec: number) => {
-      if (isWeb) {
-        webEngineRef.current?.seek(positionSec);
-        return;
-      }
-      try {
-        await nativePlayer.seekTo(positionSec);
-      } catch {
-        // ignore
-      }
-    },
-    [nativePlayer],
-  );
-
-  const readLocalPosition = useCallback(() => {
-    if (isWeb) {
-      const t = webEngineRef.current?.getStatus().currentTime;
-      return typeof t === 'number' && Number.isFinite(t)
-        ? Math.max(0, t)
-        : snapshotRef.current.positionSec;
-    }
-    const t = nativeStatus.currentTime;
-    return typeof t === 'number' && Number.isFinite(t)
-      ? Math.max(0, t)
-      : snapshotRef.current.positionSec;
-  }, [nativeStatus.currentTime]);
 
   const buildWire = useCallback((next: CallMusicSnapshot): MusicWirePayload => {
     return {
@@ -519,29 +550,32 @@ export function useCallSharedMusic({
       }
       const now = Date.now();
       const bumpPlaybackAt = patchTouchesPlayback(patch);
-      const next: CallMusicSnapshot = {
+      let next: CallMusicSnapshot = {
         ...snapshotRef.current,
         ...patch,
         at: bumpPlaybackAt ? now : snapshotRef.current.at,
         queueAt: opts?.bumpQueue ? now : (patch.queueAt ?? snapshotRef.current.queueAt),
       };
       if (!next.bardPresent) {
-        next.queue = [];
-        next.queueAt = now;
-        next.currentEntryId = null;
-        next.trackId = null;
-        next.trackTitle = null;
-        next.playUrl = null;
-        next.playing = false;
-        next.positionSec = 0;
-        next.at = now;
+        next = {
+          ...EMPTY_SNAPSHOT,
+          globalVolume: next.globalVolume,
+          at: now,
+          queueAt: now,
+        };
+      } else if (patch.queue) {
+        const focus = focusFromQueue(next.queue, next.currentEntryId);
+        next = {
+          ...next,
+          ...focus,
+          playing: anyLayerWantsPlay(next.queue),
+        };
       }
       snapshotRef.current = next;
       setSnapshot(next);
       if (opts?.publish === false) {
         return;
       }
-      // Don't block local play on network — publish in the background.
       void publishSnapshot(next, opts);
     },
     [publishSnapshot],
@@ -559,7 +593,7 @@ export function useCallSharedMusic({
       }
 
       applyingRemoteRef.current = true;
-      const next: CallMusicSnapshot = { ...local };
+      let next: CallMusicSnapshot = { ...local };
 
       if (takeQueue) {
         next.queue = incoming.queue;
@@ -568,12 +602,6 @@ export function useCallSharedMusic({
 
       if (takePlayback) {
         next.bardPresent = incoming.bardPresent;
-        next.currentEntryId = incoming.currentEntryId;
-        next.trackId = incoming.trackId;
-        next.trackTitle = incoming.trackTitle ?? null;
-        next.playUrl = incoming.playUrl ?? null;
-        next.playing = incoming.bardPresent ? incoming.playing : false;
-        next.positionSec = incoming.positionSec;
         next.globalVolume = clamp01(incoming.globalVolume);
         next.at = incoming.at;
         if (!incoming.bardPresent) {
@@ -585,56 +613,53 @@ export function useCallSharedMusic({
           next.playUrl = null;
           next.playing = false;
           next.positionSec = 0;
+        } else {
+          const anyExplicit = next.queue.some((entry) => typeof entry.playing === 'boolean');
+          if (!anyExplicit) {
+            next.queue = next.queue.map((entry) => ({
+              ...entry,
+              playing: incoming.playing,
+            }));
+          }
+          const focus = focusFromQueue(
+            next.queue,
+            incoming.currentEntryId ?? local.currentEntryId,
+          );
+          next = {
+            ...next,
+            ...focus,
+            playing: anyLayerWantsPlay(next.queue),
+            positionSec:
+              incoming.currentEntryId &&
+              incoming.currentEntryId === focus.currentEntryId
+                ? incoming.positionSec
+                : focus.positionSec,
+          };
         }
+      } else if (takeQueue) {
+        const focus = focusFromQueue(next.queue, next.currentEntryId);
+        next = {
+          ...next,
+          ...focus,
+          playing: anyLayerWantsPlay(next.queue),
+        };
       }
 
       setSnapshot(next);
       snapshotRef.current = next;
 
-      if (!next.bardPresent || !next.trackId || !next.playUrl) {
+      if (!next.bardPresent) {
         stopLocalPlayback();
         applyingRemoteRef.current = false;
         return;
       }
 
-      if (!takePlayback) {
-        applyingRemoteRef.current = false;
-        return;
-      }
-
-      const loadKey = `${next.trackId}::${next.playUrl}`;
-      const sameSource = loadedKeyRef.current === loadKey;
-      if (!sameSource) {
-        await loadFromPlayUrl(
-          next.trackId,
-          next.playUrl,
-          next.playing,
-          next.positionSec,
-          next.at,
-        );
-      } else if (next.playing) {
-        const lagSec = Math.max(0, (Date.now() - next.at) / 1000);
-        const target = Math.max(0, next.positionSec + lagSec);
-        const current = readLocalPosition();
-        if (Math.abs(current - target) > 1.2) {
-          await seekLocal(target);
-        }
-        applyVolume();
-        await ensurePlaying();
-      } else {
-        pauseLocal();
+      if (takeQueue || takePlayback) {
+        await syncLayersToQueue(next.queue, next.at);
       }
       applyingRemoteRef.current = false;
     },
-    [
-      applyVolume,
-      ensurePlaying,
-      loadFromPlayUrl,
-      pauseLocal,
-      readLocalPosition,
-      seekLocal,
-      stopLocalPlayback,
-    ],
+    [stopLocalPlayback, syncLayersToQueue],
   );
 
   const applyRemoteStateRef = useRef(applyRemoteState);
@@ -742,7 +767,6 @@ export function useCallSharedMusic({
       if (!id) {
         return;
       }
-      // Gesture turn — unlock context BEFORE any await (no silent play race).
       armPlaybackGesture();
 
       let playUrl = knownPlayUrl?.trim() || null;
@@ -763,19 +787,36 @@ export function useCallSharedMusic({
           return;
         }
       } else {
-        // Refresh signed URL in background — don't block first play.
         void getMusicTrack(id)
           .then((fresh) => {
-            if (fresh.url && fresh.url !== playUrl) {
-              // Keep queue entry URL fresh for peers if ours was stale.
-              const current = snapshotRef.current;
-              if (current.trackId === id && current.playUrl === playUrl) {
-                void commitLocal({
-                  playUrl: fresh.url,
-                  positionSec: readLocalPosition(),
-                  playing: current.playing,
-                });
-              }
+            if (!fresh.url) {
+              return;
+            }
+            const current = snapshotRef.current;
+            const hit = current.queue.find((item) => item.trackId === id && item.playUrl === playUrl);
+            if (!hit || fresh.url === playUrl) {
+              return;
+            }
+            const queue = current.queue.map((item) =>
+              item.entryId === hit.entryId ? { ...item, playUrl: fresh.url } : item,
+            );
+            void commitLocal(
+              {
+                queue,
+                ...focusFromQueue(queue, hit.entryId),
+                playing: current.playing,
+              },
+              { bumpQueue: true, allowAnyone: canControlRef.current },
+            );
+            if (canControlRef.current) {
+              void poolRef.current?.load({
+                entryId: hit.entryId,
+                trackId: hit.trackId,
+                playUrl: fresh.url,
+                shouldPlay: current.playing && !deafenedRef.current,
+                positionSec: layerStatusRef.current[hit.entryId]?.currentTime ?? 0,
+                loop: layerLoops(hit),
+              });
             }
           })
           .catch(() => undefined);
@@ -785,6 +826,7 @@ export function useCallSharedMusic({
         return;
       }
 
+      const now = Date.now();
       const entry: CallMusicQueueEntry = {
         entryId: newEntryId(),
         trackId: id,
@@ -792,10 +834,24 @@ export function useCallSharedMusic({
         addedBy: localDisplayNameRef.current.trim() || 'Участник',
         playUrl,
         durationSec: duration,
+        playing: true,
+        positionSec: 0,
+        at: now,
+        volume: 1,
+        loop: false,
       };
-      const queue = [...snapshotRef.current.queue, entry];
+
+      const stamped = stampQueuePositions(snapshotRef.current.queue);
+      let queue = [...stamped, entry];
+      if (queue.length > MAX_CALL_MUSIC_LAYERS) {
+        const dropped = queue.slice(0, queue.length - MAX_CALL_MUSIC_LAYERS);
+        queue = queue.slice(queue.length - MAX_CALL_MUSIC_LAYERS);
+        for (const item of dropped) {
+          poolRef.current?.stopLayer(item.entryId);
+        }
+      }
+
       if (canControlRef.current) {
-        // Local state + play in the same turn as the tap (no await publish).
         void commitLocal(
           {
             queue,
@@ -808,12 +864,40 @@ export function useCallSharedMusic({
           },
           { bumpQueue: true },
         );
-        void loadFromPlayUrl(entry.trackId, entry.playUrl, true, 0, Date.now());
+        setTrackLoading(true);
+        void poolRef.current
+          ?.load({
+            entryId: entry.entryId,
+            trackId: entry.trackId,
+            playUrl: entry.playUrl,
+            shouldPlay: !deafenedRef.current,
+            positionSec: 0,
+            loop: false,
+          })
+          .finally(() => setTrackLoading(false));
+        applyVolume();
         return;
       }
-      await commitLocal({ queue }, { allowAnyone: true, bumpQueue: true });
+
+      // Non-controller can start a layer too — peers merge via wire.
+      await commitLocal({ queue, playing: true, ...focusFromQueue(queue, entry.entryId) }, {
+        allowAnyone: true,
+        bumpQueue: true,
+      });
+      setTrackLoading(true);
+      void poolRef.current
+        ?.load({
+          entryId: entry.entryId,
+          trackId: entry.trackId,
+          playUrl: entry.playUrl,
+          shouldPlay: !deafenedRef.current,
+          positionSec: 0,
+          loop: false,
+        })
+        .finally(() => setTrackLoading(false));
+      applyVolume();
     },
-    [armPlaybackGesture, commitLocal, loadFromPlayUrl, readLocalPosition],
+    [applyVolume, armPlaybackGesture, commitLocal, stampQueuePositions],
   );
 
   const removeQueueEntry = useCallback(
@@ -829,51 +913,21 @@ export function useCallSharedMusic({
       if (!canControlRef.current && !isAuthor) {
         return;
       }
-      const queue = snapshotRef.current.queue.filter((item) => item.entryId !== entryId);
-      const removingCurrent = snapshotRef.current.currentEntryId === entryId;
-      if (!removingCurrent) {
-        await commitLocal({ queue }, { allowAnyone: true, bumpQueue: true });
-        return;
-      }
-      const nextEntry = queue[0] ?? null;
-      if (nextEntry && canControlRef.current) {
-        armPlaybackGesture();
-        await commitLocal(
-          {
-            queue,
-            currentEntryId: nextEntry.entryId,
-            trackId: nextEntry.trackId,
-            trackTitle: nextEntry.title,
-            playUrl: nextEntry.playUrl,
-            playing: snapshotRef.current.playing,
-            positionSec: 0,
-          },
-          { bumpQueue: true },
-        );
-        await loadFromPlayUrl(
-          nextEntry.trackId,
-          nextEntry.playUrl,
-          snapshotRef.current.playing,
-          0,
-          Date.now(),
-        );
-        return;
-      }
-      stopLocalPlayback();
+      poolRef.current?.stopLayer(entryId);
+      const queue = stampQueuePositions(
+        snapshotRef.current.queue.filter((item) => item.entryId !== entryId),
+      );
+      const focus = focusFromQueue(queue, snapshotRef.current.currentEntryId);
       await commitLocal(
         {
           queue,
-          currentEntryId: null,
-          trackId: null,
-          trackTitle: null,
-          playUrl: null,
-          playing: false,
-          positionSec: 0,
+          ...focus,
+          playing: anyLayerWantsPlay(queue),
         },
         { allowAnyone: true, bumpQueue: true },
       );
     },
-    [armPlaybackGesture, commitLocal, loadFromPlayUrl, stopLocalPlayback],
+    [commitLocal, stampQueuePositions],
   );
 
   const playQueueEntry = useCallback(
@@ -885,28 +939,163 @@ export function useCallSharedMusic({
       if (!entry) {
         return;
       }
-      // Same gesture turn as the tap — do not silent-unlock (that raced and muted iOS).
       armPlaybackGesture();
+      const status = poolRef.current?.getStatus(entryId);
+      const now = Date.now();
+      const queue = snapshotRef.current.queue.map((item) =>
+        item.entryId === entryId
+          ? {
+              ...item,
+              playing: true,
+              positionSec: status?.currentTime ?? item.positionSec ?? 0,
+              at: now,
+            }
+          : item,
+      );
       void commitLocal({
+        queue,
         currentEntryId: entry.entryId,
         trackId: entry.trackId,
         trackTitle: entry.title,
         playUrl: entry.playUrl,
+        positionSec: status?.currentTime ?? entry.positionSec ?? 0,
         playing: true,
-        positionSec: 0,
       });
-      void loadFromPlayUrl(entry.trackId, entry.playUrl, true, 0, Date.now());
+      if (!deafenedRef.current) {
+        await poolRef.current?.play(entryId);
+      }
     },
-    [armPlaybackGesture, commitLocal, loadFromPlayUrl],
+    [armPlaybackGesture, commitLocal],
+  );
+
+  const toggleLayerPlay = useCallback(
+    async (entryId: string) => {
+      if (!canControlRef.current || !snapshotRef.current.bardPresent) {
+        return;
+      }
+      const entry = snapshotRef.current.queue.find((item) => item.entryId === entryId);
+      if (!entry) {
+        return;
+      }
+      armPlaybackGesture();
+      const status = poolRef.current?.getStatus(entryId);
+      const nextPlaying = !layerWantsPlay(entry);
+      const now = Date.now();
+      const queue = snapshotRef.current.queue.map((item) =>
+        item.entryId === entryId
+          ? {
+              ...item,
+              playing: nextPlaying,
+              positionSec: status?.currentTime ?? item.positionSec ?? 0,
+              at: now,
+            }
+          : item,
+      );
+      void commitLocal({
+        queue,
+        currentEntryId: entryId,
+        trackId: entry.trackId,
+        trackTitle: entry.title,
+        playUrl: entry.playUrl,
+        positionSec: status?.currentTime ?? entry.positionSec ?? 0,
+        playing: anyLayerWantsPlay(queue),
+      });
+      if (nextPlaying && !deafenedRef.current) {
+        await poolRef.current?.play(entryId);
+      } else {
+        poolRef.current?.pause(entryId);
+      }
+    },
+    [armPlaybackGesture, commitLocal],
+  );
+
+  const seekLayer = useCallback(
+    async (entryId: string, positionSec: number) => {
+      if (!canControlRef.current || !snapshotRef.current.bardPresent) {
+        return;
+      }
+      const entry = snapshotRef.current.queue.find((item) => item.entryId === entryId);
+      if (!entry) {
+        return;
+      }
+      const nextPos = Math.max(0, positionSec);
+      const now = Date.now();
+      const queue = snapshotRef.current.queue.map((item) =>
+        item.entryId === entryId ? { ...item, positionSec: nextPos, at: now } : item,
+      );
+      await commitLocal({
+        queue,
+        currentEntryId: entryId,
+        trackId: entry.trackId,
+        trackTitle: entry.title,
+        playUrl: entry.playUrl,
+        positionSec: nextPos,
+        playing: anyLayerWantsPlay(queue),
+      });
+      poolRef.current?.seek(entryId, nextPos);
+      if (layerWantsPlay(entry) && !deafenedRef.current) {
+        await poolRef.current?.play(entryId);
+      }
+    },
+    [commitLocal],
+  );
+
+  const setLayerVolume = useCallback(
+    async (entryId: string, volume: number) => {
+      if (!canControlRef.current || !snapshotRef.current.bardPresent) {
+        return;
+      }
+      const entry = snapshotRef.current.queue.find((item) => item.entryId === entryId);
+      if (!entry) {
+        return;
+      }
+      const nextVol = clamp01(volume);
+      const queue = snapshotRef.current.queue.map((item) =>
+        item.entryId === entryId ? { ...item, volume: nextVol } : item,
+      );
+      await commitLocal(
+        {
+          queue,
+          playing: anyLayerWantsPlay(queue),
+        },
+        { bumpQueue: true },
+      );
+      poolRef.current?.setLayerGain(entryId, nextVol);
+      applyVolume();
+    },
+    [applyVolume, commitLocal],
+  );
+
+  const toggleLayerLoop = useCallback(
+    async (entryId: string) => {
+      if (!canControlRef.current || !snapshotRef.current.bardPresent) {
+        return;
+      }
+      const entry = snapshotRef.current.queue.find((item) => item.entryId === entryId);
+      if (!entry) {
+        return;
+      }
+      const nextLoop = !layerLoops(entry);
+      const queue = snapshotRef.current.queue.map((item) =>
+        item.entryId === entryId ? { ...item, loop: nextLoop } : item,
+      );
+      await commitLocal(
+        {
+          queue,
+          playing: anyLayerWantsPlay(queue),
+        },
+        { bumpQueue: true },
+      );
+      poolRef.current?.setLayerLoop(entryId, nextLoop);
+    },
+    [commitLocal],
   );
 
   const togglePlay = useCallback(async () => {
-    if (
-      !canControlRef.current ||
-      !snapshotRef.current.bardPresent ||
-      !snapshotRef.current.trackId ||
-      !snapshotRef.current.playUrl
-    ) {
+    if (!canControlRef.current || !snapshotRef.current.bardPresent) {
+      return;
+    }
+    if (snapshotRef.current.queue.length === 0) {
       return;
     }
     if (toggleInFlightRef.current) {
@@ -915,56 +1104,42 @@ export function useCallSharedMusic({
     toggleInFlightRef.current = true;
     try {
       armPlaybackGesture();
-      const positionSec = readLocalPosition();
       const snap = snapshotRef.current;
-
-      if (!snap.playing) {
-        void commitLocal({ playing: true, positionSec });
-        const key = `${snap.trackId}::${snap.playUrl}`;
-        if (loadedKeyRef.current !== key) {
-          void loadFromPlayUrl(snap.trackId!, snap.playUrl!, true, positionSec, Date.now());
-        } else {
-          setTrackLoading(true);
-          void ensurePlaying().finally(() => setTrackLoading(false));
-        }
-        return;
+      const resume = !anyLayerWantsPlay(snap.queue);
+      const now = Date.now();
+      const queue = stampQueuePositions(snap.queue).map((entry) => ({
+        ...entry,
+        playing: resume,
+        at: now,
+      }));
+      const focus = focusFromQueue(queue, snap.currentEntryId);
+      void commitLocal({
+        queue,
+        ...focus,
+        playing: resume,
+      });
+      if (resume) {
+        setTrackLoading(true);
+        await syncLayersToQueue(queue, Date.now());
+        setTrackLoading(false);
+      } else {
+        setTrackLoading(false);
+        poolRef.current?.pauseAll();
       }
-
-      void commitLocal({ playing: false, positionSec });
-      setTrackLoading(false);
-      pauseLocal();
     } finally {
       toggleInFlightRef.current = false;
     }
-  }, [
-    armPlaybackGesture,
-    commitLocal,
-    ensurePlaying,
-    loadFromPlayUrl,
-    pauseLocal,
-    readLocalPosition,
-  ]);
+  }, [armPlaybackGesture, commitLocal, stampQueuePositions, syncLayersToQueue]);
 
   const seek = useCallback(
     async (positionSec: number) => {
-      if (
-        !canControlRef.current ||
-        !snapshotRef.current.bardPresent ||
-        !snapshotRef.current.trackId
-      ) {
+      const entryId = snapshotRef.current.currentEntryId;
+      if (!entryId) {
         return;
       }
-      const nextPos = Math.max(0, positionSec);
-      await commitLocal({
-        positionSec: nextPos,
-        playing: snapshotRef.current.playing,
-      });
-      await seekLocal(nextPos);
-      if (snapshotRef.current.playing) {
-        await ensurePlaying();
-      }
+      await seekLayer(entryId, positionSec);
     },
-    [commitLocal, ensurePlaying, seekLocal],
+    [seekLayer],
   );
 
   const stopTrack = useCallback(async () => {
@@ -972,14 +1147,18 @@ export function useCallSharedMusic({
       return;
     }
     stopLocalPlayback();
-    await commitLocal({
-      currentEntryId: null,
-      trackId: null,
-      trackTitle: null,
-      playUrl: null,
-      playing: false,
-      positionSec: 0,
-    });
+    await commitLocal(
+      {
+        queue: [],
+        currentEntryId: null,
+        trackId: null,
+        trackTitle: null,
+        playUrl: null,
+        playing: false,
+        positionSec: 0,
+      },
+      { bumpQueue: true },
+    );
   }, [commitLocal, stopLocalPlayback]);
 
   const setLocalVolume = useCallback(
@@ -998,14 +1177,16 @@ export function useCallSharedMusic({
         return;
       }
       const next = clamp01(volume);
+      const queue = stampQueuePositions(snapshotRef.current.queue);
       await commitLocal({
+        queue,
         globalVolume: next,
-        positionSec: readLocalPosition(),
+        positionSec: focusFromQueue(queue, snapshotRef.current.currentEntryId).positionSec,
         playing: snapshotRef.current.playing,
       });
       applyVolume();
     },
-    [applyVolume, commitLocal, readLocalPosition],
+    [applyVolume, commitLocal, stampQueuePositions],
   );
 
   const requestSync = useCallback(() => {
@@ -1023,133 +1204,122 @@ export function useCallSharedMusic({
     void publishRoomData(CALL_MUSIC_TOPIC, buildWire(current));
   }, [buildWire, liveStatus, publishRoomData]);
 
-  // Intent says play but element is paused — retry a few times (after Accept unlock).
+  // Intent says a layer should play but engine is paused — nudge that layer.
   useEffect(() => {
-    if (!enabled || !snapshot.playing || deafened || !snapshot.playUrl) {
+    if (!enabled || deafened || snapshot.queue.length === 0) {
       return;
     }
-    const locallyPlaying = isWeb ? webStatus.playing : Boolean(nativeStatus.playing);
-    if (locallyPlaying) {
+    const stuck = snapshot.queue.filter(
+      (entry) => layerWantsPlay(entry) && !layerStatus[entry.entryId]?.playing,
+    );
+    if (stuck.length === 0) {
       return;
     }
-    void ensurePlaying();
-    const t1 = setTimeout(() => void ensurePlaying(), 250);
-    const t2 = setTimeout(() => void ensurePlaying(), 900);
+    for (const entry of stuck) {
+      void poolRef.current?.play(entry.entryId);
+    }
+    const t1 = setTimeout(() => {
+      for (const entry of stuck) {
+        void poolRef.current?.play(entry.entryId);
+      }
+    }, 250);
+    const t2 = setTimeout(() => {
+      for (const entry of stuck) {
+        void poolRef.current?.play(entry.entryId);
+      }
+    }, 900);
     return () => {
       clearTimeout(t1);
       clearTimeout(t2);
     };
-  }, [
-    deafened,
-    enabled,
-    ensurePlaying,
-    nativeStatus.playing,
-    snapshot.playUrl,
-    snapshot.playing,
-    snapshot.trackId,
-    snapshot.at,
-    webStatus.playing,
-  ]);
+  }, [deafened, enabled, layerStatus, snapshot.queue, snapshot.at]);
 
-  // Shared pause while element still runs.
+  // Pause layers whose shared intent is paused.
   useEffect(() => {
-    if (!enabled || applyingRemoteRef.current || snapshot.playing) {
+    if (!enabled || applyingRemoteRef.current) {
       return;
     }
-    const locallyPlaying = isWeb ? webStatus.playing : Boolean(nativeStatus.playing);
-    if (!locallyPlaying) {
-      return;
+    for (const entry of snapshot.queue) {
+      if (layerWantsPlay(entry)) {
+        continue;
+      }
+      if (layerStatus[entry.entryId]?.playing) {
+        poolRef.current?.pause(entry.entryId);
+      }
     }
-    pauseLocal();
-  }, [enabled, nativeStatus.playing, pauseLocal, snapshot.playing, webStatus.playing]);
+  }, [enabled, layerStatus, snapshot.queue]);
 
-  // Controller: advance queue when track ends.
-  const didJustFinish = isWeb ? webStatus.ended : Boolean(nativeStatus.didJustFinish);
-  const handledEndedRef = useRef(false);
+  // Drop finished layers (controller only).
+  const handledEndedRef = useRef<Set<string>>(new Set());
   useEffect(() => {
-    if (!didJustFinish) {
-      handledEndedRef.current = false;
-      return;
-    }
-    if (handledEndedRef.current) {
-      return;
-    }
     if (applyingRemoteRef.current || !canControlRef.current) {
       return;
     }
-    if (!snapshot.bardPresent || !snapshot.trackId || !snapshot.playing) {
+    if (!snapshot.bardPresent) {
+      handledEndedRef.current.clear();
       return;
     }
-    handledEndedRef.current = true;
-    const currentId = snapshot.currentEntryId;
-    const queue = snapshotRef.current.queue;
-    const idx = currentId ? queue.findIndex((item) => item.entryId === currentId) : -1;
-    const nextEntry = idx >= 0 ? queue[idx + 1] ?? null : queue[0] ?? null;
-    if (nextEntry) {
-      void (async () => {
-        resumeFromGesture();
-        await commitLocal({
-          currentEntryId: nextEntry.entryId,
-          trackId: nextEntry.trackId,
-          trackTitle: nextEntry.title,
-          playUrl: nextEntry.playUrl,
-          playing: true,
-          positionSec: 0,
-        });
-        await loadFromPlayUrl(nextEntry.trackId, nextEntry.playUrl, true, 0, Date.now());
-      })();
-      return;
+    const endedIds = snapshot.queue
+      .filter((entry) => !layerLoops(entry) && layerStatus[entry.entryId]?.ended)
+      .map((entry) => entry.entryId);
+    for (const entryId of endedIds) {
+      if (handledEndedRef.current.has(entryId)) {
+        continue;
+      }
+      handledEndedRef.current.add(entryId);
+      void removeQueueEntry(entryId);
     }
-    void commitLocal({
-      playing: false,
-      positionSec: readLocalPosition(),
-    });
-  }, [
-    commitLocal,
-    didJustFinish,
-    loadFromPlayUrl,
-    readLocalPosition,
-    resumeFromGesture,
-    snapshot.bardPresent,
-    snapshot.currentEntryId,
-    snapshot.playing,
-    snapshot.trackId,
-  ]);
+    for (const id of [...handledEndedRef.current]) {
+      if (!snapshot.queue.some((entry) => entry.entryId === id)) {
+        handledEndedRef.current.delete(id);
+      }
+    }
+  }, [layerStatus, removeQueueEntry, snapshot.bardPresent, snapshot.queue]);
 
-  const livePositionSec = isWeb
-    ? webStatus.currentTime || snapshot.positionSec
-    : typeof nativeStatus.currentTime === 'number' && Number.isFinite(nativeStatus.currentTime)
-      ? Math.max(0, nativeStatus.currentTime)
-      : snapshot.positionSec;
+  const focusId = snapshot.currentEntryId;
+  const focusStatus = focusId ? layerStatus[focusId] : undefined;
+  const livePositionSec = focusStatus?.currentTime ?? snapshot.positionSec;
+  const durationSec =
+    focusStatus?.duration ||
+    snapshot.queue.find((item) => item.entryId === focusId)?.durationSec ||
+    0;
 
-  const durationSec = isWeb
-    ? webStatus.duration ||
-      snapshot.queue.find((item) => item.entryId === snapshot.currentEntryId)?.durationSec ||
-      0
-    : typeof nativeStatus.duration === 'number' &&
-        Number.isFinite(nativeStatus.duration) &&
-        nativeStatus.duration > 0
-      ? nativeStatus.duration
-      : snapshot.queue.find((item) => item.entryId === snapshot.currentEntryId)?.durationSec ||
-        0;
-
-  // Keep spinner while engine reports buffering.
   useEffect(() => {
-    if (!isWeb) {
+    const wantsPlay = anyLayerWantsPlay(snapshot.queue);
+    if (!wantsPlay) {
+      setTrackLoading(false);
       return;
     }
-    if (webStatus.buffering && snapshot.playing) {
+    const buffering = snapshot.queue.some(
+      (entry) => layerWantsPlay(entry) && layerStatus[entry.entryId]?.buffering,
+    );
+    const anyPlaying = snapshot.queue.some((entry) => layerStatus[entry.entryId]?.playing);
+    if (buffering) {
       setTrackLoading(true);
       return;
     }
-    if (webStatus.playing && !webStatus.buffering) {
+    if (anyPlaying) {
       setTrackLoading(false);
     }
-  }, [snapshot.playing, webStatus.buffering, webStatus.playing]);
+  }, [layerStatus, snapshot.queue]);
 
-  // Icon follows shared intent so Play never "lies" after a failed local start.
-  const isPlaying = Boolean(snapshot.playing);
-  const showTrackLoading = Boolean(trackLoading && snapshot.playing);
+  const layerLive: Record<string, CallMusicLayerLive> = {};
+  for (const entry of snapshot.queue) {
+    const status = layerStatus[entry.entryId];
+    layerLive[entry.entryId] = {
+      positionSec: status?.currentTime ?? entry.positionSec ?? 0,
+      durationSec:
+        status?.duration ||
+        (typeof entry.durationSec === 'number' && entry.durationSec > 0 ? entry.durationSec : 0),
+      playing: Boolean(status?.playing ?? layerWantsPlay(entry)),
+      buffering: Boolean(status?.buffering),
+    };
+  }
+
+  const isPlaying = anyLayerWantsPlay(snapshot.queue);
+  const showTrackLoading = Boolean(
+    trackLoading && snapshot.queue.some((entry) => layerWantsPlay(entry)),
+  );
 
   return {
     snapshot,
@@ -1157,6 +1327,7 @@ export function useCallSharedMusic({
     trackLoading: showTrackLoading,
     livePositionSec,
     durationSec,
+    layerLive,
     localVolume,
     effectiveVolume,
     localDisplayName,
@@ -1165,6 +1336,10 @@ export function useCallSharedMusic({
     enqueueTrack,
     removeQueueEntry,
     playQueueEntry,
+    toggleLayerPlay,
+    seekLayer,
+    setLayerVolume,
+    toggleLayerLoop,
     togglePlay,
     seek,
     stopTrack,

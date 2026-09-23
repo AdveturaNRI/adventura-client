@@ -24,7 +24,7 @@ import { UserAvatar } from '@/components/navigation/UserAvatar';
 import type { RewardBadgeType } from '@/data/rewards/catalog';
 import { VoiceCallDiceLayer } from '@/components/chats/VoiceCallDiceLayer';
 import { CallBardSheet } from '@/components/chats/CallBardSheet';
-import type { CallMusicQueueEntry } from '@/hooks/use-call-shared-music';
+import type { CallMusicLayerLive, CallMusicQueueEntry } from '@/hooks/use-call-shared-music';
 import { CallVideoView } from '@/components/chats/CallVideoView';
 import { FontSize, Radius, Spacing } from '@/constants/theme';
 import { useProfile } from '@/context/ProfileContext';
@@ -101,11 +101,8 @@ type Props = {
   bardTrackTitle?: string | null;
   bardPlaying?: boolean;
   bardLoading?: boolean;
-  bardTrackId?: string | null;
-  bardCurrentEntryId?: string | null;
   bardQueue?: CallMusicQueueEntry[];
-  bardPositionSec?: number;
-  bardDurationSec?: number;
+  bardLayerLive?: Record<string, CallMusicLayerLive>;
   bardLocalVolume?: number;
   bardGlobalVolume?: number;
   bardLocalDisplayName?: string;
@@ -118,11 +115,12 @@ type Props = {
     durationSec: number | null,
     playUrl?: string | null,
   ) => void;
-  onPlayBardQueueEntry?: (entryId: string) => void;
   onRemoveBardQueueEntry?: (entryId: string) => void;
+  onToggleBardLayerPlay?: (entryId: string) => void;
+  onSeekBardLayer?: (entryId: string, positionSec: number) => void;
+  onSetBardLayerVolume?: (entryId: string, volume: number) => void;
+  onToggleBardLayerLoop?: (entryId: string) => void;
   onToggleBardPlay?: () => void;
-  onSeekBard?: (positionSec: number) => void;
-  onStopBardTrack?: () => void;
   onSetBardGlobalVolume?: (volume: number) => void;
   onRequestBardSync?: () => void;
   /** Unlock + retry Bard audio (web autoplay) from a user gesture. */
@@ -1123,11 +1121,8 @@ export function VoiceCallOverlay({
   bardTrackTitle = null,
   bardPlaying = false,
   bardLoading = false,
-  bardTrackId = null,
-  bardCurrentEntryId = null,
   bardQueue = [],
-  bardPositionSec = 0,
-  bardDurationSec = 0,
+  bardLayerLive = {},
   bardLocalVolume = 1,
   bardGlobalVolume = 1,
   bardLocalDisplayName = 'Участник',
@@ -1135,11 +1130,12 @@ export function VoiceCallOverlay({
   onDismissBard,
   onSetBardLocalVolume,
   onEnqueueBardTrack,
-  onPlayBardQueueEntry,
   onRemoveBardQueueEntry,
+  onToggleBardLayerPlay,
+  onSeekBardLayer,
+  onSetBardLayerVolume,
+  onToggleBardLayerLoop,
   onToggleBardPlay,
-  onSeekBard,
-  onStopBardTrack,
   onSetBardGlobalVolume,
   onRequestBardSync,
   onResumeBardAudio,
@@ -1858,7 +1854,7 @@ export function VoiceCallOverlay({
                 accessibilityRole="button"
                 accessibilityLabel={
                   bardPresent
-                    ? 'Очередь и библиотека Барда'
+                    ? 'Треки и библиотека Барда'
                     : 'Призвать Барда'
                 }
                 accessibilityState={{ selected: bardPresent }}
@@ -1917,24 +1913,21 @@ export function VoiceCallOverlay({
       visible={bardSheetOpen && bardPresent}
       canControl={canControlMusic}
       localDisplayName={bardLocalDisplayName}
-      trackId={bardTrackId}
       trackTitle={bardTrackTitle}
-      currentEntryId={bardCurrentEntryId}
-      playing={bardPlaying}
-      trackLoading={bardLoading}
-      positionSec={bardPositionSec}
-      durationSec={bardDurationSec}
       globalVolume={bardGlobalVolume}
       queue={bardQueue}
+      layerLive={bardLayerLive}
       onClose={() => setBardSheetOpen(false)}
       onEnqueueTrack={(trackId, title, durationSec, playUrl) =>
         onEnqueueBardTrack?.(trackId, title, durationSec, playUrl)
       }
-      onPlayQueueEntry={(entryId) => onPlayBardQueueEntry?.(entryId)}
       onRemoveQueueEntry={(entryId) => onRemoveBardQueueEntry?.(entryId)}
-      onTogglePlay={() => onToggleBardPlay?.()}
-      onSeek={(positionSec) => onSeekBard?.(positionSec)}
-      onStopTrack={() => onStopBardTrack?.()}
+      onToggleLayerPlay={(entryId) => onToggleBardLayerPlay?.(entryId)}
+      onSeekLayer={(entryId, positionSec) => onSeekBardLayer?.(entryId, positionSec)}
+      onLayerVolumeChange={(entryId, volume) => onSetBardLayerVolume?.(entryId, volume)}
+      onToggleLayerLoop={(entryId) => onToggleBardLayerLoop?.(entryId)}
+      onPauseAll={() => onToggleBardPlay?.()}
+      anyPlaying={bardPlaying}
       onGlobalVolumeChange={(volume) => onSetBardGlobalVolume?.(volume)}
       onDismissBard={() => onDismissBard?.()}
       onRequestSync={() => onRequestBardSync?.()}

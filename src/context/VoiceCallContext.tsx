@@ -1064,11 +1064,8 @@ export function VoiceCallProvider({ children }: { children: ReactNode }) {
           bardTrackTitle={sharedMusic.snapshot.trackTitle}
           bardPlaying={sharedMusic.isPlaying}
           bardLoading={sharedMusic.trackLoading}
-          bardTrackId={sharedMusic.snapshot.trackId}
-          bardCurrentEntryId={sharedMusic.snapshot.currentEntryId}
           bardQueue={sharedMusic.snapshot.queue}
-          bardPositionSec={sharedMusic.livePositionSec}
-          bardDurationSec={sharedMusic.durationSec}
+          bardLayerLive={sharedMusic.layerLive}
           bardLocalVolume={sharedMusic.localVolume}
           bardGlobalVolume={sharedMusic.snapshot.globalVolume}
           bardLocalDisplayName={sharedMusic.localDisplayName}
@@ -1081,14 +1078,18 @@ export function VoiceCallProvider({ children }: { children: ReactNode }) {
           onEnqueueBardTrack={(trackId, title, durationSec, playUrl) =>
             void sharedMusic.enqueueTrack(trackId, title, durationSec, playUrl)
           }
-          onPlayBardQueueEntry={(entryId) => void sharedMusic.playQueueEntry(entryId)}
           onRemoveBardQueueEntry={(entryId) => void sharedMusic.removeQueueEntry(entryId)}
+          onToggleBardLayerPlay={(entryId) => {
+            sharedMusic.resumeFromGesture();
+            void sharedMusic.toggleLayerPlay(entryId);
+          }}
+          onSeekBardLayer={(entryId, positionSec) => void sharedMusic.seekLayer(entryId, positionSec)}
+          onSetBardLayerVolume={(entryId, volume) => void sharedMusic.setLayerVolume(entryId, volume)}
+          onToggleBardLayerLoop={(entryId) => void sharedMusic.toggleLayerLoop(entryId)}
           onToggleBardPlay={() => {
             sharedMusic.resumeFromGesture();
             void sharedMusic.togglePlay();
           }}
-          onSeekBard={(positionSec) => void sharedMusic.seek(positionSec)}
-          onStopBardTrack={() => void sharedMusic.stopTrack()}
           onSetBardGlobalVolume={(volume) => void sharedMusic.setGlobalVolume(volume)}
           onRequestBardSync={() => {
             sharedMusic.resumeFromGesture();

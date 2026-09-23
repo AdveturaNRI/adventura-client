@@ -148,11 +148,23 @@ export class WebBardAudioEngine {
     this.applyVolume();
   }
 
+  setLoop(enabled: boolean) {
+    if (this.disposed) {
+      return;
+    }
+    this.audio.loop = Boolean(enabled);
+    if (enabled) {
+      this.ended = false;
+    }
+    this.emitStatus();
+  }
+
   async load(params: {
     key: string;
     playUrl: string;
     shouldPlay: boolean;
     positionSec: number;
+    loop?: boolean;
   }): Promise<boolean> {
     if (this.disposed) {
       return false;
@@ -170,6 +182,7 @@ export class WebBardAudioEngine {
 
     this.ensureContext();
     void this.ctx?.resume().catch(() => undefined);
+    this.audio.loop = Boolean(params.loop);
 
     const same =
       this.loadedKey === params.key &&
@@ -321,6 +334,11 @@ export class WebBardAudioEngine {
   }
 
   private onEnded = () => {
+    if (this.audio.loop) {
+      this.ended = false;
+      this.emitStatus();
+      return;
+    }
     this.ended = true;
     this.buffering = false;
     this.emitStatus();
