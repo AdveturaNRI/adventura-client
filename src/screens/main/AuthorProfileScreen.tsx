@@ -1,4 +1,4 @@
-import { useLocalSearchParams } from 'expo-router';
+import { useLocalSearchParams, router } from 'expo-router';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -290,6 +290,7 @@ export default function AuthorProfileScreen() {
                 <AuthorProfile
                   author={author}
                   variant={isDesktopWeb ? 'panel' : 'default'}
+                  onPress={() => router.push(`/users/${author.id}`)}
                 />
               </View>
 

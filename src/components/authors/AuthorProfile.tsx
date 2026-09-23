@@ -1,5 +1,5 @@
 import { type ReactNode } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { AuthorContacts } from '@/components/authors/AuthorContacts';
 import { CreativityCategoryBadges } from '@/components/authors/CreativityCategoryBadge';
@@ -14,6 +14,8 @@ type AuthorProfileProps = {
   actions?: ReactNode;
   /** `panel` — вертикальный сайдбар для десктоп-кабинета */
   variant?: 'default' | 'panel';
+  /** Клик по блоку автора (аватар, имя, описание) — обычно анкета. */
+  onPress?: () => void;
 };
 
 function createStyles(colors: ThemeColors, variant: 'default' | 'panel') {
@@ -53,6 +55,12 @@ function createStyles(colors: ThemeColors, variant: 'default' | 'panel') {
     actions: {
       gap: Spacing.sm,
     },
+    identityHit: {
+      gap: Spacing.md,
+    },
+    identityPressed: {
+      opacity: 0.88,
+    },
   });
 }
 
@@ -60,12 +68,13 @@ export function AuthorProfile({
   author,
   actions,
   variant = 'default',
+  onPress,
 }: AuthorProfileProps) {
   const styles = useThemedStyles((theme) => createStyles(theme, variant));
   const avatarSize = variant === 'panel' ? 88 : 72;
 
-  return (
-    <View style={styles.root}>
+  const identity = (
+    <>
       <View style={styles.topRow}>
         <UserAvatar
           nickname={author.name}
@@ -81,6 +90,22 @@ export function AuthorProfile({
       </View>
 
       {author.description ? <Text style={styles.description}>{author.description}</Text> : null}
+    </>
+  );
+
+  return (
+    <View style={styles.root}>
+      {onPress ? (
+        <Pressable
+          accessibilityRole="link"
+          accessibilityLabel={`Анкета ${author.name}`}
+          onPress={onPress}
+          style={({ pressed }) => [styles.identityHit, pressed && styles.identityPressed]}>
+          {identity}
+        </Pressable>
+      ) : (
+        identity
+      )}
 
       {actions ? <View style={styles.actions}>{actions}</View> : null}
 
