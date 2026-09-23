@@ -41,6 +41,7 @@ import {
   stopMediaStream,
   takePrimedMicrophone,
 } from '@/utils/voice-media-devices';
+import { markVoiceCallLocallyEnded } from '@/utils/voice-call-local-end';
 
 /** Discord-like: stop showing unanswered invitees after this. */
 const RINGING_PEER_TIMEOUT_MS = 30_000;
@@ -263,10 +264,16 @@ export function VoiceCallProvider({ children }: { children: ReactNode }) {
 
     // End on server first — leave() must not block / skip hangup for solo cancels.
     if (opts?.endRemote && current) {
+      markVoiceCallLocallyEnded(current.callId);
       try {
         await endChatVoiceCall(current.conversationId, current.callId);
       } catch {
-        // already gone on server
+        // Retry once — otherwise join banner keeps "В эфире / Вернуться".
+        try {
+          await endChatVoiceCall(current.conversationId, current.callId);
+        } catch {
+          // already gone / offline
+        }
       }
     }
 
@@ -715,6 +722,7 @@ export function VoiceCallProvider({ children }: { children: ReactNode }) {
       }
 
       if (event.type === 'ended') {
+        markVoiceCallLocallyEnded(event.payload.callId);
         const wasOutgoing = current.role === 'caller' && current.phase === 'outgoing';
         // Switching to another call — ignore end of the call we just left.
         if (switchingCallRef.current) {
@@ -1035,7 +1043,10 @@ export function VoiceCallProvider({ children }: { children: ReactNode }) {
           urgentById={urgentById}
           volumeById={volumeById}
           onToggleMute={() => void toggleMute()}
-          onMicGesture={() => beginMicrophonePrimeFromGesture()}
+          onMicGesture={() => {
+            beginMicrophonePrimeFromGesture();
+            sharedMusic.resumeFromGesture();
+          }}
           onToggleDeafen={() => void toggleDeafen()}
           onToggleCamera={() => void handleToggleCamera()}
           onHangup={() => void hangup()}
@@ -1069,7 +1080,10 @@ export function VoiceCallProvider({ children }: { children: ReactNode }) {
           }
           onPlayBardQueueEntry={(entryId) => void sharedMusic.playQueueEntry(entryId)}
           onRemoveBardQueueEntry={(entryId) => void sharedMusic.removeQueueEntry(entryId)}
-          onToggleBardPlay={() => void sharedMusic.togglePlay()}
+          onToggleBardPlay={() => {
+            sharedMusic.resumeFromGesture();
+            void sharedMusic.togglePlay();
+          }}
           onSeekBard={(positionSec) => void sharedMusic.seek(positionSec)}
           onStopBardTrack={() => void sharedMusic.stopTrack()}
           onSetBardGlobalVolume={(volume) => void sharedMusic.setGlobalVolume(volume)}
@@ -1106,7 +1120,10 @@ export function VoiceCallProvider({ children }: { children: ReactNode }) {
             return undefined;
           })()}
           onAccept={() => void acceptIncoming()}
-          onAcceptPressIn={() => beginMicrophonePrimeFromGesture()}
+          onAcceptPressIn={() => {
+            beginMicrophonePrimeFromGesture();
+            sharedMusic.resumeFromGesture();
+          }}
           onDecline={() => void declineIncoming()}
         />
       </View>

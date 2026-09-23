@@ -4,7 +4,20 @@ import { Platform } from 'react-native';
 
 import type { ChatLiveVoiceStatus, RoomDataHandler } from '@/hooks/use-chat-live-voice';
 import { getMusicTrack } from '@/services/music/musicApi';
-import { unlockWebMediaPlayback } from '@/utils/unlock-web-media';
+import {
+  clearPlayableMusicUrlCache,
+  resolvePlayableMusicUrl,
+} from '@/utils/music-playable-url';
+import {
+  unlockHtmlAudioElement,
+  unlockWebMediaPlayback,
+  wasRecentWebMediaGesture,
+} from '@/utils/unlock-web-media';
+import {
+  createWebMediaGain,
+  getExpoAudioPlayerMedia,
+  type WebMediaGainHandle,
+} from '@/utils/web-media-gain';
 
 export const CALL_MUSIC_TOPIC = 'adventura.music';
 
@@ -241,6 +254,8 @@ export function useCallSharedMusic({
   const loadedKeyRef = useRef<string | null>(null);
   const toggleInFlightRef = useRef(false);
   const statusPlayingRef = useRef(false);
+  const mediaGainRef = useRef<WebMediaGainHandle | null>(null);
+  const gainReadyRef = useRef(false);
 
   const player = useAudioPlayer(null, { updateInterval: 250 });
   const status = useAudioPlayerStatus(player);
@@ -249,15 +264,49 @@ export function useCallSharedMusic({
   const effectiveVolume =
     clamp01(localVolume) * clamp01(snapshot.globalVolume) * (deafened ? 0 : 1);
 
+  const syncMediaGain = useCallback(() => {
+    if (Platform.OS !== 'web') {
+      return;
+    }
+    const media = getExpoAudioPlayerMedia(player);
+    if (!media) {
+      return;
+    }
+    // GainNode only after blob:/same-origin — otherwise MediaElementSource = silence.
+    const src = media.currentSrc || media.src || '';
+    const safeForGain =
+      src.startsWith('blob:') ||
+      src.startsWith('data:') ||
+      (typeof window !== 'undefined' &&
+        src.startsWith(window.location.origin));
+    if (!safeForGain) {
+      gainReadyRef.current = false;
+      return;
+    }
+    if (!mediaGainRef.current) {
+      mediaGainRef.current = createWebMediaGain(media);
+    } else {
+      mediaGainRef.current.rebind(media);
+    }
+    gainReadyRef.current = Boolean(mediaGainRef.current);
+  }, [player]);
+
   const applyPlayerVolume = useCallback(() => {
     const next =
       clamp01(localVolumeRef.current) *
       clamp01(snapshotRef.current.globalVolume) *
       (deafenedRef.current ? 0 : 1);
     try {
-      player.volume = next;
-      // Safari often ignores element.volume — mute still cuts sound to zero.
-      player.muted = next < 0.001;
+      if (gainReadyRef.current && mediaGainRef.current) {
+        // Element stays unmuted at full; audible level is GainNode (Safari/iOS).
+        player.volume = 1;
+        player.muted = next < 0.001;
+        mediaGainRef.current.setGain(next < 0.001 ? 0 : next);
+      } else {
+        player.volume = next;
+        // Safari ignores volume — mute still cuts to zero until GainNode is ready.
+        player.muted = next < 0.001;
+      }
     } catch {
       // ignore
     }
@@ -279,12 +328,22 @@ export function useCallSharedMusic({
 
   const resumeFromGesture = useCallback(() => {
     unlockWebMediaPlayback();
+    unlockHtmlAudioElement(getExpoAudioPlayerMedia(player));
     tryPlay();
-  }, [tryPlay]);
+  }, [player, tryPlay]);
 
   useEffect(() => {
     applyPlayerVolume();
   }, [applyPlayerVolume, effectiveVolume]);
+
+  useEffect(() => {
+    return () => {
+      mediaGainRef.current?.dispose();
+      mediaGainRef.current = null;
+      gainReadyRef.current = false;
+      clearPlayableMusicUrlCache();
+    };
+  }, []);
 
   // Web autoplay: remote play() is blocked until a gesture. Accept/Start unlocks
   // the document; any later tap in the tab retries the actual expo-audio element.
@@ -296,9 +355,11 @@ export function useCallSharedMusic({
       resumeFromGesture();
     };
     window.addEventListener('pointerdown', onGesture, true);
+    window.addEventListener('touchstart', onGesture, true);
     window.addEventListener('keydown', onGesture, true);
     return () => {
       window.removeEventListener('pointerdown', onGesture, true);
+      window.removeEventListener('touchstart', onGesture, true);
       window.removeEventListener('keydown', onGesture, true);
     };
   }, [enabled, resumeFromGesture]);
@@ -362,8 +423,25 @@ export function useCallSharedMusic({
         } catch {
           // ignore
         }
-        player.replace(playUrl);
-        loadedKeyRef.current = loadKey;
+
+        // Same-origin blob so Safari GainNode can control volume (element.volume is ignored).
+        const playableUrl = await resolvePlayableMusicUrl(playUrl);
+        if (gen !== loadGenRef.current) {
+          return;
+        }
+
+        const existingMedia = getExpoAudioPlayerMedia(player);
+        if (Platform.OS === 'web' && existingMedia) {
+          // Keep the same HTMLAudioElement — replace() creates a new one and
+          // drops the Accept-call autoplay unlock on iOS Safari.
+          existingMedia.src = playableUrl;
+          existingMedia.load();
+          loadedKeyRef.current = loadKey;
+        } else {
+          player.replace(playableUrl);
+          loadedKeyRef.current = loadKey;
+        }
+
         const lagSec = Math.max(0, (Date.now() - at) / 1000);
         const seekTo = Math.max(0, positionSec + (shouldPlay ? lagSec : 0));
         await new Promise((resolve) => setTimeout(resolve, 40));
@@ -375,9 +453,18 @@ export function useCallSharedMusic({
         } catch {
           // ignore seek errors on fresh replace
         }
+        syncMediaGain();
         applyPlayerVolume();
         if (shouldPlay) {
           tryPlay();
+          // Remote start often lands right after Accept — one more try while gesture is fresh.
+          if (wasRecentWebMediaGesture()) {
+            setTimeout(() => {
+              if (gen === loadGenRef.current) {
+                tryPlay();
+              }
+            }, 120);
+          }
         } else {
           try {
             player.pause();
@@ -389,7 +476,7 @@ export function useCallSharedMusic({
         // source swap failed — leave idle
       }
     },
-    [applyPlayerVolume, player, tryPlay],
+    [applyPlayerVolume, player, syncMediaGain, tryPlay],
   );
 
   const applyRemoteState = useCallback(
@@ -472,6 +559,7 @@ export function useCallSharedMusic({
         } catch {
           // ignore
         }
+        syncMediaGain();
         applyPlayerVolume();
         if (next.playing) {
           tryPlay();
@@ -485,7 +573,7 @@ export function useCallSharedMusic({
       }
       applyingRemoteRef.current = false;
     },
-    [applyPlayerVolume, loadFromPlayUrl, player, stopLocalPlayback, tryPlay],
+    [applyPlayerVolume, loadFromPlayUrl, player, stopLocalPlayback, syncMediaGain, tryPlay],
   );
 
   const applyRemoteStateRef = useRef(applyRemoteState);
@@ -538,6 +626,10 @@ export function useCallSharedMusic({
 
   const reset = useCallback(() => {
     stopLocalPlayback();
+    mediaGainRef.current?.dispose();
+    mediaGainRef.current = null;
+    gainReadyRef.current = false;
+    clearPlayableMusicUrlCache();
     snapshotRef.current = EMPTY_SNAPSHOT;
     setSnapshot(EMPTY_SNAPSHOT);
     setLocalVolumeState(1);
@@ -889,14 +981,22 @@ export function useCallSharedMusic({
     const t1 = setTimeout(() => tryPlay(), 200);
     const t2 = setTimeout(() => tryPlay(), 800);
     const t3 = setTimeout(() => tryPlay(), 2000);
+    // Accept/Start gesture is still "fresh" — warm the element again.
+    const tGesture = wasRecentWebMediaGesture()
+      ? setTimeout(() => resumeFromGesture(), 60)
+      : null;
     return () => {
       clearTimeout(t1);
       clearTimeout(t2);
       clearTimeout(t3);
+      if (tGesture) {
+        clearTimeout(tGesture);
+      }
     };
   }, [
     deafened,
     enabled,
+    resumeFromGesture,
     snapshot.playUrl,
     snapshot.playing,
     snapshot.trackId,
