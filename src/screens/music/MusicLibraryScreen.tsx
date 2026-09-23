@@ -1138,11 +1138,7 @@ export default function MusicLibraryScreen() {
         setTracks((prev) => [track, ...prev]);
         await refreshQuota();
         closeUrlModal();
-        toast.success(
-          track.source === 'external'
-            ? 'Трек добавлен по ссылке'
-            : 'Трек скачан в библиотеку',
-        );
+        toast.success('Трек добавлен по ссылке');
       } catch (error) {
         toast.error(localizeErrorMessage(error, 'Не удалось добавить трек'));
       } finally {
