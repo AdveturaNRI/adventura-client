@@ -665,16 +665,12 @@ export function WandererDeck({
   }, [index]);
 
   const handleBrowseSkip = useCallback(() => {
-    const target = currentItemRef.current;
-    if (!target || isReactingRef.current || bucket !== 'feed' || searchActive) {
+    if (!currentItemRef.current || isReactingRef.current || bucket !== 'feed' || searchActive) {
       return;
     }
 
-    setFeedUndoIds((prev) => [...prev, target.id]);
-    setFeedUndoKinds((prev) => [...prev, 'browse']);
-    onBrowseSkipped?.(target.id);
-    setDismissRequest(null);
-  }, [bucket, onBrowseSkipped, searchActive]);
+    setDismissRequest({ direction: 'up', token: Date.now() });
+  }, [bucket, searchActive]);
 
   const persistReaction = useCallback(
     async (
@@ -748,13 +744,26 @@ export function WandererDeck({
   );
 
   const handleDismiss = useCallback(
-    async (direction: 'left' | 'right') => {
+    (direction: 'left' | 'right' | 'up') => {
+      if (direction === 'up') {
+        const target = currentItemRef.current;
+        if (!target) {
+          return;
+        }
+
+        setFeedUndoIds((prev) => [...prev, target.id]);
+        setFeedUndoKinds((prev) => [...prev, 'browse']);
+        onBrowseSkipped?.(target.id);
+        setDismissRequest(null);
+        return;
+      }
+
       const type = direction === 'right' ? 'favorite' : 'skipped';
       // Capture before optimistic remove — currentItemRef may already advance.
       const item = currentItemRef.current ?? undefined;
-      await persistReaction(type, { item });
+      void persistReaction(type, { item });
     },
-    [persistReaction],
+    [onBrowseSkipped, persistReaction],
   );
 
   const requestDismiss = useCallback(
@@ -1550,7 +1559,7 @@ export function WandererDeck({
             showVisibility={false}
             swipe={{
                     dismissible: true,
-                    resetKey: `${currentItem.id}-${index}`,
+                    resetKey: `${currentItem.id}-${index}-${feedUndoIds.length}`,
                     dismissRequest,
                     leftAction: {
                       label: WANDERERS_SCREEN.likeAction,

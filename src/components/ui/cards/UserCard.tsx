@@ -36,7 +36,7 @@ export type UserCardSwipeConfig = {
   actionWidth?: number;
   dismissible?: boolean;
   resetKey?: string | number;
-  onDismiss?: (direction: 'left' | 'right') => void;
+  onDismiss?: (direction: 'left' | 'right' | 'up') => void;
   onSwipeLeft?: () => void;
   onSwipeRight?: () => void;
   dismissRequest?: SwipeDismissRequest | null;

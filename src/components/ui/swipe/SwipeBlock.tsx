@@ -26,8 +26,10 @@ import { FontSize, Radius, Spacing, type ThemeColors } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { useThemedStyles } from '@/hooks/use-themed-styles';
 
+export type SwipeDismissDirection = 'left' | 'right' | 'up';
+
 export type SwipeDismissRequest = {
-  direction: 'left' | 'right';
+  direction: SwipeDismissDirection;
   token: number;
 };
 
@@ -53,7 +55,7 @@ type SwipeBlockProps = {
   nativeScrollGesture?: ReturnType<typeof Gesture.Native>;
   /** Keep false for deck cards with outer FX (dragon / oak rim). */
   clipContent?: boolean;
-  onDismiss?: (direction: 'left' | 'right') => void;
+  onDismiss?: (direction: SwipeDismissDirection) => void;
   onSwipeLeft?: () => void;
   onSwipeRight?: () => void;
   dismissRequest?: SwipeDismissRequest | null;
@@ -169,6 +171,7 @@ function CornerSwipeBlock({
   const translateX = useSharedValue(restX);
   const startX = useSharedValue(restX);
   const exitTranslateX = useSharedValue(0);
+  const exitTranslateY = useSharedValue(0);
   const exitOpacity = useSharedValue(0);
   const enterOpacity = useSharedValue(1);
   const enterScale = useSharedValue(1);
@@ -197,7 +200,7 @@ function CornerSwipeBlock({
   const isFirstMount = useRef(true);
   const shouldPlayEnter = useRef(false);
   const pendingDismiss = useRef<{
-    direction: 'left' | 'right';
+    direction: SwipeDismissDirection;
     triggeredLeft: boolean;
     triggeredRight: boolean;
     currentX: number;
@@ -234,7 +237,7 @@ function CornerSwipeBlock({
   }, [enterOpacity, enterScale, enterTranslateY, isExiting]);
 
   const fireDismissCallbacks = useCallback(
-    (direction: 'left' | 'right', triggeredLeft: boolean, triggeredRight: boolean) => {
+    (direction: SwipeDismissDirection, triggeredLeft: boolean, triggeredRight: boolean) => {
       if (triggeredLeft && leftActionRef.current?.onPress) {
         leftActionRef.current.onPress();
       }
@@ -294,10 +297,13 @@ function CornerSwipeBlock({
     const { direction, currentX } = pendingDismiss.current;
     pendingDismiss.current = null;
 
-    const targetX = direction === 'left' ? -flyOutDistance : flyOutDistance;
+    const targetX =
+      direction === 'left' ? -flyOutDistance : direction === 'right' ? flyOutDistance : 0;
+    const targetY = direction === 'up' ? -Math.max(320, flyOutDistance * 0.75) : 0;
 
     isExiting.value = true;
     exitTranslateX.value = currentX;
+    exitTranslateY.value = 0;
     exitOpacity.value = 1;
 
     // Keep the front card opaque under the outgoing layer until resetKey
@@ -311,11 +317,13 @@ function CornerSwipeBlock({
         runOnJS(clearOutgoing)();
       }
     });
+    exitTranslateY.value = withSpring(targetY, DISMISS_SPRING);
     exitOpacity.value = withTiming(0, { duration: 240 });
   }, [
     clearOutgoing,
     exitOpacity,
     exitTranslateX,
+    exitTranslateY,
     flyOutDistance,
     isExiting,
     outgoingCard,
@@ -326,7 +334,7 @@ function CornerSwipeBlock({
 
   const startDismiss = useCallback(
     (
-      direction: 'left' | 'right',
+      direction: SwipeDismissDirection,
       triggeredLeft: boolean,
       triggeredRight: boolean,
       currentX: number,
@@ -727,7 +735,11 @@ function CornerSwipeBlock({
 
     return {
       opacity: exitOpacity.value,
-      transform: [{ translateX: exitTranslateX.value }, { rotate: `${tilt}deg` }],
+      transform: [
+        { translateX: exitTranslateX.value },
+        { translateY: exitTranslateY.value },
+        { rotate: `${tilt}deg` },
+      ],
     };
   });
 

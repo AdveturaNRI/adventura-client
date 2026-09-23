@@ -265,7 +265,17 @@ export default function WanderersScreen() {
       if (removed) {
         browseSkippedCardsRef.current.set(targetUserId, removed);
       }
-      return prev.filter((item) => item.id !== targetUserId);
+
+      const next = prev.filter((item) => item.id !== targetUserId);
+
+      // Всех только пролистали — начинаем круг заново, без избранных/скрытых.
+      if (next.length === 0 && browseSkippedCardsRef.current.size > 0) {
+        const looped = [...browseSkippedCardsRef.current.values()];
+        browseSkippedCardsRef.current.clear();
+        return looped;
+      }
+
+      return next;
     });
   }, []);
 
@@ -282,6 +292,8 @@ export default function WanderersScreen() {
 
   const handleReactionSaved = useCallback(
     (targetUserId: string, type: WandererReactionType) => {
+      browseSkippedCardsRef.current.delete(targetUserId);
+
       if (searchActive) {
         setSearchResults((prev) => {
           if (type === 'skipped') {
