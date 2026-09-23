@@ -8,6 +8,7 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   useWindowDimensions,
   View,
 } from 'react-native';
@@ -60,6 +61,25 @@ function createStyles(colors: ThemeColors) {
       fontWeight: '600',
       color: colors.textSecondary,
       marginBottom: 6,
+    },
+    searchWrap: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: Spacing.sm,
+      borderWidth: 1,
+      borderColor: colors.border,
+      borderRadius: 14,
+      paddingHorizontal: Spacing.md,
+      minHeight: 44,
+      backgroundColor: colors.surface,
+      marginBottom: Spacing.sm,
+    },
+    searchInput: {
+      flex: 1,
+      fontSize: FontSize.input,
+      color: colors.text,
+      paddingVertical: 10,
+      minWidth: 0,
     },
     list: {
       borderWidth: 1,
@@ -156,7 +176,7 @@ function createStyles(colors: ThemeColors) {
   });
 }
 
-const CHROME_HEIGHT = 220;
+const CHROME_HEIGHT = 280;
 
 export function AddGroupMembersDialog({
   visible,
@@ -174,11 +194,13 @@ export function AddGroupMembersDialog({
     Math.max(120, Math.round(windowHeight * 0.88 - CHROME_HEIGHT)),
   );
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [memberQuery, setMemberQuery] = useState('');
   const exclude = useMemo(() => new Set(excludeIds), [excludeIds]);
 
   useEffect(() => {
     if (!visible) {
       setSelected(new Set());
+      setMemberQuery('');
     }
   }, [visible]);
 
@@ -186,6 +208,14 @@ export function AddGroupMembersDialog({
     () => contacts.filter((c) => !exclude.has(c.id)),
     [contacts, exclude],
   );
+
+  const filtered = useMemo(() => {
+    const q = memberQuery.trim().toLowerCase();
+    if (!q) {
+      return available;
+    }
+    return available.filter((contact) => contact.nickname.toLowerCase().includes(q));
+  }, [available, memberQuery]);
 
   const canSubmit = selected.size > 0 && !isBusy;
 
@@ -215,6 +245,31 @@ export function AddGroupMembersDialog({
         <View style={styles.card}>
           <Text style={styles.title}>Добавить участников</Text>
           <Text style={styles.label}>Из личных переписок</Text>
+          {available.length > 0 ? (
+            <View style={styles.searchWrap}>
+              <Ionicons name="search" size={16} color={colors.textSubtle} />
+              <TextInput
+                value={memberQuery}
+                onChangeText={setMemberQuery}
+                placeholder="Поиск по нику"
+                placeholderTextColor={colors.textSubtle}
+                style={styles.searchInput}
+                autoCapitalize="none"
+                autoCorrect={false}
+                editable={!isBusy}
+              />
+              {memberQuery.length > 0 ? (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Очистить поиск"
+                  onPress={() => setMemberQuery('')}
+                  hitSlop={8}
+                  disabled={isBusy}>
+                  <Ionicons name="close-circle" size={18} color={colors.textSubtle} />
+                </Pressable>
+              ) : null}
+            </View>
+          ) : null}
           <ScrollView
             style={[styles.list, { maxHeight: listMaxHeight }]}
             nestedScrollEnabled
@@ -223,8 +278,10 @@ export function AddGroupMembersDialog({
               <Text style={styles.empty}>
                 Некого добавить — все контакты уже в группе или переписок пока нет.
               </Text>
+            ) : filtered.length === 0 ? (
+              <Text style={styles.empty}>Никого не нашли по этому нику.</Text>
             ) : (
-              available.map((contact) => {
+              filtered.map((contact) => {
                 const on = selected.has(contact.id);
                 const initial = [...contact.nickname.trim()][0]?.toUpperCase() ?? '?';
                 return (

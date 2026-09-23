@@ -80,6 +80,25 @@ function createStyles(colors: ThemeColors) {
       color: colors.text,
       backgroundColor: colors.surface,
     },
+    searchWrap: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: Spacing.sm,
+      borderWidth: 1,
+      borderColor: colors.border,
+      borderRadius: 14,
+      paddingHorizontal: Spacing.md,
+      minHeight: 44,
+      backgroundColor: colors.surface,
+      marginBottom: Spacing.sm,
+    },
+    searchInput: {
+      flex: 1,
+      fontSize: FontSize.input,
+      color: colors.text,
+      paddingVertical: 10,
+      minWidth: 0,
+    },
     list: {
       borderWidth: 1,
       borderColor: colors.border,
@@ -194,8 +213,8 @@ export function contactsFromConversations(items: ConversationListItem[]): Contac
   return [...map.values()].sort((a, b) => a.nickname.localeCompare(b.nickname, 'ru'));
 }
 
-/** Title, name field, actions and paddings — leave the rest for the list. */
-const CREATE_GROUP_CHROME_HEIGHT = 320;
+/** Title, name field, search, actions and paddings — leave the rest for the list. */
+const CREATE_GROUP_CHROME_HEIGHT = 360;
 
 export function CreateGroupDialog({
   visible,
@@ -212,18 +231,26 @@ export function CreateGroupDialog({
     Math.max(120, Math.round(windowHeight * 0.88 - CREATE_GROUP_CHROME_HEIGHT)),
   );
   const [title, setTitle] = useState('');
+  const [memberQuery, setMemberQuery] = useState('');
   const [selected, setSelected] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     if (!visible) {
       setTitle('');
+      setMemberQuery('');
       setSelected(new Set());
     }
   }, [visible]);
 
   const canSubmit = title.trim().length > 0 && selected.size > 0 && !isBusy;
 
-  const sortedContacts = useMemo(() => contacts, [contacts]);
+  const filteredContacts = useMemo(() => {
+    const q = memberQuery.trim().toLowerCase();
+    if (!q) {
+      return contacts;
+    }
+    return contacts.filter((contact) => contact.nickname.toLowerCase().includes(q));
+  }, [contacts, memberQuery]);
 
   const toggle = (id: string) => {
     setSelected((prev) => {
@@ -242,6 +269,7 @@ export function CreateGroupDialog({
       return;
     }
     setTitle('');
+    setMemberQuery('');
     setSelected(new Set());
     onCancel();
   };
@@ -274,16 +302,43 @@ export function CreateGroupDialog({
 
           <View style={styles.listBlock}>
             <Text style={styles.label}>Участники из переписок</Text>
+            {contacts.length > 0 ? (
+              <View style={styles.searchWrap}>
+                <Ionicons name="search" size={16} color={colors.textSubtle} />
+                <TextInput
+                  value={memberQuery}
+                  onChangeText={setMemberQuery}
+                  placeholder="Поиск по нику"
+                  placeholderTextColor={colors.textSubtle}
+                  style={styles.searchInput}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  editable={!isBusy}
+                />
+                {memberQuery.length > 0 ? (
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel="Очистить поиск"
+                    onPress={() => setMemberQuery('')}
+                    hitSlop={8}
+                    disabled={isBusy}>
+                    <Ionicons name="close-circle" size={18} color={colors.textSubtle} />
+                  </Pressable>
+                ) : null}
+              </View>
+            ) : null}
             <ScrollView
               style={[styles.list, { maxHeight: listMaxHeight }]}
               nestedScrollEnabled
               keyboardShouldPersistTaps="handled">
-              {sortedContacts.length === 0 ? (
+              {contacts.length === 0 ? (
                 <Text style={styles.empty}>
                   Сначала напишите кому-нибудь в личку — оттуда можно будет выбрать людей.
                 </Text>
+              ) : filteredContacts.length === 0 ? (
+                <Text style={styles.empty}>Никого не нашли по этому нику.</Text>
               ) : (
-                sortedContacts.map((contact) => {
+                filteredContacts.map((contact) => {
                   const on = selected.has(contact.id);
                   const initial = [...contact.nickname.trim()][0]?.toUpperCase() ?? '?';
                   return (

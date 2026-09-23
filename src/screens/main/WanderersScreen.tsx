@@ -13,6 +13,7 @@ import { WANDERERS_SCREEN } from '@/screens/main/profile.config';
 import {
   fetchWandererBucketCounts,
   fetchWanderers,
+  searchWanderers,
   type WandererBucket,
   type WandererBucketCounts,
   type WandererCardItem,
@@ -42,6 +43,9 @@ const EMPTY_BUCKET_COUNTS: WandererBucketCounts = {
   skipped: 0,
 };
 
+const NICKNAME_SEARCH_MIN = 1;
+const NICKNAME_SEARCH_DEBOUNCE_MS = 300;
+
 export default function WanderersScreen() {
   const styles = useMainScreenStyles();
   const colors = useTheme();
@@ -56,10 +60,19 @@ export default function WanderersScreen() {
   const [bucketCounts, setBucketCounts] = useState<WandererBucketCounts>(EMPTY_BUCKET_COUNTS);
   const [filters, setFilters] = useState<WanderersFilters>(EMPTY_WANDERERS_FILTERS);
   const [filtersExpanded, setFiltersExpanded] = useState(false);
+  const [nicknameQuery, setNicknameQuery] = useState('');
+  const [searchResults, setSearchResults] = useState<WandererCardItem[]>([]);
+  const [isSearching, setIsSearching] = useState(false);
+  const [searchError, setSearchError] = useState<string | null>(null);
   const [officialSystems, setOfficialSystems] = useState<string[]>([]);
   const [experienceLabels, setExperienceLabels] = useState<string[]>([]);
   const loadGenerationRef = useRef(0);
+  const searchGenerationRef = useRef(0);
   const feedRemovedCardsRef = useRef(new Map<string, WandererCardItem>());
+  const browseSkippedCardsRef = useRef(new Map<string, WandererCardItem>());
+
+  const trimmedNicknameQuery = nicknameQuery.trim();
+  const searchActive = trimmedNicknameQuery.length >= NICKNAME_SEARCH_MIN;
 
   const loadBucketCounts = useCallback(async () => {
     try {
@@ -85,6 +98,7 @@ export default function WanderersScreen() {
       }
       if (nextBucket === 'feed') {
         feedRemovedCardsRef.current.clear();
+        browseSkippedCardsRef.current.clear();
       }
       setItems(nextItems);
     } catch (error) {
@@ -131,6 +145,46 @@ export default function WanderersScreen() {
     };
   }, []);
 
+  useEffect(() => {
+    if (!searchActive) {
+      searchGenerationRef.current += 1;
+      setSearchResults([]);
+      setSearchError(null);
+      setIsSearching(false);
+      return;
+    }
+
+    const generation = ++searchGenerationRef.current;
+    setIsSearching(true);
+    setSearchError(null);
+
+    const timer = setTimeout(() => {
+      void (async () => {
+        try {
+          const results = await searchWanderers(trimmedNicknameQuery);
+          if (generation !== searchGenerationRef.current) {
+            return;
+          }
+          setSearchResults(results);
+        } catch (error) {
+          if (generation !== searchGenerationRef.current) {
+            return;
+          }
+          setSearchResults([]);
+          setSearchError(localizeErrorMessage(error, WANDERERS_SCREEN.searchError));
+        } finally {
+          if (generation === searchGenerationRef.current) {
+            setIsSearching(false);
+          }
+        }
+      })();
+    }, NICKNAME_SEARCH_DEBOUNCE_MS);
+
+    return () => {
+      clearTimeout(timer);
+    };
+  }, [searchActive, trimmedNicknameQuery]);
+
   const bucketOptions = useMemo<SwitcherOption[]>(
     () =>
       BUCKET_OPTIONS.map((option) => ({
@@ -168,7 +222,12 @@ export default function WanderersScreen() {
     [filters, visibleItems],
   );
 
-  const filtersSignature = useMemo(() => JSON.stringify(filters), [filters]);
+  const filtersSignature = useMemo(
+    () => `${JSON.stringify(filters)}|${searchActive ? trimmedNicknameQuery : ''}`,
+    [filters, searchActive, trimmedNicknameQuery],
+  );
+
+  const deckItems = searchActive ? searchResults : filteredItems;
 
   const handleFiltersChange = useCallback((next: WanderersFilters) => {
     setFilters(next);
@@ -187,6 +246,7 @@ export default function WanderersScreen() {
       if (nextBucket === bucket) {
         return;
       }
+      setNicknameQuery('');
       setBucket(nextBucket);
       setItems([]);
       setIsLoading(true);
@@ -199,8 +259,54 @@ export default function WanderersScreen() {
     void loadWanderers(bucket);
   }, [bucket, loadWanderers]);
 
+  const handleBrowseSkipped = useCallback((targetUserId: string) => {
+    setItems((prev) => {
+      const removed = prev.find((item) => item.id === targetUserId);
+      if (removed) {
+        browseSkippedCardsRef.current.set(targetUserId, removed);
+      }
+      return prev.filter((item) => item.id !== targetUserId);
+    });
+  }, []);
+
+  const handleBrowseRestored = useCallback((targetUserId: string) => {
+    const cached = browseSkippedCardsRef.current.get(targetUserId);
+    browseSkippedCardsRef.current.delete(targetUserId);
+    if (!cached) {
+      return;
+    }
+    setItems((prev) =>
+      prev.some((item) => item.id === targetUserId) ? prev : [cached, ...prev],
+    );
+  }, []);
+
   const handleReactionSaved = useCallback(
     (targetUserId: string, type: WandererReactionType) => {
+      if (searchActive) {
+        setSearchResults((prev) => {
+          if (type === 'skipped') {
+            return prev.filter((item) => item.id !== targetUserId);
+          }
+          return prev.map((item) =>
+            item.id === targetUserId ? { ...item, isFavorite: true } : item,
+          );
+        });
+        void loadBucketCounts();
+        setItems((prev) => {
+          if (bucket === 'feed') {
+            return prev.filter((item) => item.id !== targetUserId);
+          }
+          if (bucket === 'favorites' && type === 'skipped') {
+            return prev.filter((item) => item.id !== targetUserId);
+          }
+          if (bucket === 'skipped' && type === 'favorite') {
+            return prev.filter((item) => item.id !== targetUserId);
+          }
+          return prev;
+        });
+        return;
+      }
+
       if (bucket === 'feed') {
         setItems((prev) => {
           const removed = prev.find((item) => item.id === targetUserId);
@@ -235,11 +341,21 @@ export default function WanderersScreen() {
         }));
       }
     },
-    [bucket],
+    [bucket, loadBucketCounts, searchActive],
   );
 
   const handleReactionCleared = useCallback(
     (targetUserId: string, previousType: WandererReactionType) => {
+      if (searchActive) {
+        setSearchResults((prev) =>
+          prev.map((item) =>
+            item.id === targetUserId ? { ...item, isFavorite: false } : item,
+          ),
+        );
+        void loadBucketCounts();
+        return;
+      }
+
       setBucketCounts((prev) => ({
         favorites:
           previousType === 'favorite'
@@ -266,7 +382,7 @@ export default function WanderersScreen() {
 
       setItems((prev) => prev.filter((item) => item.id !== targetUserId));
     },
-    [bucket, loadWanderers],
+    [bucket, loadBucketCounts, loadWanderers, searchActive],
   );
 
   const pageHeader = showCompactNav ? (
@@ -283,12 +399,65 @@ export default function WanderersScreen() {
       onExpandedChange={setFiltersExpanded}
       onChange={handleFiltersChange}
       onClear={handleFiltersClear}
+      nicknameQuery={nicknameQuery}
+      onNicknameQueryChange={setNicknameQuery}
       bucket={bucket}
       bucketOptions={bucketOptions}
       onBucketChange={handleBucketChange}
-      bucketDisabled={isLoading}
+      bucketDisabled={isLoading && !searchActive}
     />
   ) : null;
+
+  if (searchActive) {
+    if (isSearching && searchResults.length === 0 && !searchError) {
+      return (
+        <ScreenTransition animateOnFocus>
+          <View style={styles.container}>
+            {pageHeader}
+            {filtersPanel}
+            <View style={[styles.stateWrap, { flex: 1, justifyContent: 'center' }]}>
+              <ActivityIndicator color={colors.primary} size="large" />
+            </View>
+          </View>
+        </ScreenTransition>
+      );
+    }
+
+    if (searchError && searchResults.length === 0) {
+      return (
+        <ScreenTransition animateOnFocus>
+          <View style={styles.container}>
+            {pageHeader}
+            {filtersPanel}
+            <Text style={styles.stateText}>{searchError}</Text>
+          </View>
+        </ScreenTransition>
+      );
+    }
+
+    return (
+      <ScreenTransition animateOnFocus>
+        <WandererDeck
+          items={deckItems}
+          bucket={bucket}
+          searchActive
+          filtersSignature={filtersSignature}
+          feedSourceEmpty={deckItems.length === 0}
+          filtersSlot={filtersPanel}
+          onRestart={handleRestart}
+          onReactionSaved={handleReactionSaved}
+          onReactionCleared={handleReactionCleared}
+          onUnblocked={(targetUserId) => {
+            setSearchResults((prev) =>
+              prev.map((item) =>
+                item.id === targetUserId ? { ...item, blockedByMe: false } : item,
+              ),
+            );
+          }}
+        />
+      </ScreenTransition>
+    );
+  }
 
   if (isLoading) {
     return (
@@ -329,6 +498,8 @@ export default function WanderersScreen() {
         onRestart={handleRestart}
         onReactionSaved={handleReactionSaved}
         onReactionCleared={handleReactionCleared}
+        onBrowseSkipped={handleBrowseSkipped}
+        onBrowseRestored={handleBrowseRestored}
         onUnblocked={(targetUserId) => {
           setItems((prev) =>
             prev.map((item) =>

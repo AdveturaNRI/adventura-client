@@ -55,6 +55,18 @@ export function fetchWandererBucketCounts() {
   });
 }
 
+export function searchWanderers(query: string) {
+  const q = query.trim();
+  if (!q) {
+    return Promise.resolve([] as WandererCardItem[]);
+  }
+
+  return apiRequest<WandererCardItem[]>(
+    `/users/wanderers/search?q=${encodeURIComponent(q)}`,
+    { skipLoading: true },
+  );
+}
+
 export function upsertWandererReaction(targetUserId: string, type: WandererReactionType) {
   return apiRequest<{ targetUserId: string; type: WandererReactionType }>(
     `/users/wanderers/${encodeURIComponent(targetUserId)}/reaction`,
