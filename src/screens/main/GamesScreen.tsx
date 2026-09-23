@@ -55,6 +55,7 @@ import {
 } from '@/utils/games-filters';
 import { localizeErrorMessage } from '@/utils/localizeError';
 import { DEFAULT_TIMEZONE } from '@/utils/timezones';
+import { trackVkEvent, VK_PIXEL_EVENTS } from '@/services/analytics/vk-pixel';
 
 import { useMainScreenStyles } from './main-screen.styles';
 
@@ -603,6 +604,7 @@ export default function GamesScreen() {
       patchItem(next);
       setApplyTarget(null);
       setApplyMessage('');
+      trackVkEvent(VK_PIXEL_EVENTS.applicationSent);
       toast.success('Заявка отправлена');
     } catch (error) {
       toast.error(localizeErrorMessage(error, 'Не удалось отправить заявку'));

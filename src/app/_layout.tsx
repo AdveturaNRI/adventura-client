@@ -10,6 +10,7 @@ import { stackScreenOptions } from '@/constants/navigation.config';
 import { AppToast } from '@/components/ui';
 import { GlobalLoadingOverlay } from '@/components/ui/feedback/GlobalLoadingOverlay';
 import { YandexMetrikaTracker } from '@/components/analytics/YandexMetrikaTracker';
+import { VkPixelTracker } from '@/components/analytics/VkPixelTracker';
 import { ThemeProvider } from '@/context/ThemeContext';
 import { AuthProvider } from '@/context/AuthContext';
 import { ProfileProvider } from '@/context/ProfileContext';
@@ -62,6 +63,7 @@ function AppRouteProviders() {
   const navigator = (
     <View style={rootStyles.container}>
       <YandexMetrikaTracker />
+      <VkPixelTracker />
       <RootNavigator />
       {!isPublicLanding ? <AppToast /> : null}
       {!isPublicLanding ? <GlobalLoadingOverlay /> : null}

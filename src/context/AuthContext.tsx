@@ -43,6 +43,7 @@ import {
 import { localizeErrorMessage } from '@/utils/localizeError';
 import { ensureUploadLimits } from '@/utils/upload-limits';
 import { trackUserSessionStarted } from '@/services/analytics/analytics';
+import { trackVkEvent, VK_PIXEL_EVENTS } from '@/services/analytics/vk-pixel';
 import {
   bootstrapYandexMetrika,
   reachYandexMetrikaGoal,
@@ -349,6 +350,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setRedirectToQuestionnaire(true);
         trackUserSessionStarted('register');
         reachYandexMetrikaGoal('register');
+        trackVkEvent(VK_PIXEL_EVENTS.registration);
         toast.success('Аккаунт создан — проверьте почту для подтверждения');
         return true;
       } catch (error) {

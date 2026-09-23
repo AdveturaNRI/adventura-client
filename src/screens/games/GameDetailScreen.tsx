@@ -36,6 +36,7 @@ import {
 } from '@/utils/games-filters';
 import { localizeErrorMessage } from '@/utils/localizeError';
 import { trackEntityTransition } from '@/services/analytics/analytics';
+import { trackVkEvent, VK_PIXEL_EVENTS } from '@/services/analytics/vk-pixel';
 
 function createStyles(
   colors: ThemeColors,
@@ -336,6 +337,7 @@ export default function GameDetailScreen() {
       setItem(next);
       setApplyOpen(false);
       setApplyMessage('');
+      trackVkEvent(VK_PIXEL_EVENTS.applicationSent);
       toast.success('Заявка отправлена');
     } catch (error) {
       toast.error(localizeErrorMessage(error, 'Не удалось отправить заявку'));
