@@ -929,6 +929,8 @@ export default function DiceScreen() {
   animationSpeedRef.current = animationSpeed;
   const [stageReady, setStageReady] = useState(false);
   const [rolling, setRolling] = useState(false);
+  const rollingRef = useRef(false);
+  const rollSessionRef = useRef(0);
   const [outcome, setOutcome] = useState<DiceRollOutcome | null>(null);
   const [showLast, setShowLast] = useState(false);
   const [history, setHistory] = useState<DiceHistoryEntry[]>([]);
@@ -1016,6 +1018,7 @@ export default function DiceScreen() {
       return subscribeDiceAnimationSpeed(setAnimationSpeed);
     }
     setStageReady(false);
+    rollingRef.current = false;
     setRolling(false);
   }, [isFocused]);
 
@@ -1096,6 +1099,12 @@ export default function DiceScreen() {
 
   const handleDone = useCallback(
     (next: DiceRollOutcome) => {
+      // Синхронный лок: второй onDone / double-tap не пишут вторую карточку.
+      if (!rollingRef.current) {
+        return;
+      }
+      rollingRef.current = false;
+
       const mod = modifierRef.current;
       const rollMode = modeRef.current;
       const kept = applyDiceKeepMode(next, rollMode, mod);
@@ -1124,9 +1133,10 @@ export default function DiceScreen() {
   );
 
   const handleRoll = useCallback(async () => {
-    if (rolling || parts.length === 0) return;
+    if (rollingRef.current || parts.length === 0) return;
     const speed = animationSpeedRef.current;
     if (speed === 'off') {
+      rollingRef.current = true;
       setRolling(true);
       setShowLast(false);
       const groups = DIE_OPTIONS.filter((option) => pool[option.sides] > 0).map((option) => {
@@ -1150,14 +1160,20 @@ export default function DiceScreen() {
       return;
     }
     if (!stageReady) return;
+    rollingRef.current = true;
+    const session = ++rollSessionRef.current;
     setRolling(true);
     setShowLast(false);
     try {
       await stageRef.current?.roll(parts.length === 1 ? parts[0] : parts);
+      // История пишется из onDone. Если промис отменился — лок снимется в catch.
     } catch {
-      setRolling(false);
+      if (session === rollSessionRef.current) {
+        rollingRef.current = false;
+        setRolling(false);
+      }
     }
-  }, [handleDone, parts, pool, rolling, stageReady]);
+  }, [handleDone, parts, pool, stageReady]);
 
   const dieCells = DIE_OPTIONS.map((option) => {
     const count = pool[option.sides];
