@@ -5,11 +5,6 @@ import { Platform } from 'react-native';
 import type { ChatLiveVoiceStatus, RoomDataHandler } from '@/hooks/use-chat-live-voice';
 import { getMusicTrack } from '@/services/music/musicApi';
 import { unlockWebMediaPlayback } from '@/utils/unlock-web-media';
-import {
-  createWebMediaGain,
-  getExpoAudioPlayerMedia,
-  type WebMediaGainHandle,
-} from '@/utils/web-media-gain';
 
 export const CALL_MUSIC_TOPIC = 'adventura.music';
 
@@ -246,7 +241,6 @@ export function useCallSharedMusic({
   const loadedKeyRef = useRef<string | null>(null);
   const toggleInFlightRef = useRef(false);
   const statusPlayingRef = useRef(false);
-  const mediaGainRef = useRef<WebMediaGainHandle | null>(null);
 
   const player = useAudioPlayer(null, { updateInterval: 250 });
   const status = useAudioPlayerStatus(player);
@@ -255,38 +249,19 @@ export function useCallSharedMusic({
   const effectiveVolume =
     clamp01(localVolume) * clamp01(snapshot.globalVolume) * (deafened ? 0 : 1);
 
-  const syncMediaGainGraph = useCallback(() => {
-    if (Platform.OS !== 'web') {
-      return;
-    }
-    const media = getExpoAudioPlayerMedia(player);
-    if (!media) {
-      return;
-    }
-    if (!mediaGainRef.current) {
-      mediaGainRef.current = createWebMediaGain(media);
-    } else {
-      mediaGainRef.current.rebind(media);
-    }
-  }, [player]);
-
   const applyPlayerVolume = useCallback(() => {
     const next =
       clamp01(localVolumeRef.current) *
       clamp01(snapshotRef.current.globalVolume) *
       (deafenedRef.current ? 0 : 1);
-    // Safari ignores HTMLMediaElement.volume — GainNode is the real attenuator.
-    // Keep element at unity so we don't double-attenuate on Chrome.
     try {
-      player.volume = Platform.OS === 'web' ? 1 : next;
+      player.volume = next;
+      // Safari often ignores element.volume — mute still cuts sound to zero.
+      player.muted = next < 0.001;
     } catch {
       // ignore
     }
-    if (Platform.OS === 'web') {
-      syncMediaGainGraph();
-      mediaGainRef.current?.setGain(next);
-    }
-  }, [player, syncMediaGainGraph]);
+  }, [player]);
 
   const tryPlay = useCallback(() => {
     if (deafenedRef.current) {
@@ -389,8 +364,6 @@ export function useCallSharedMusic({
         }
         player.replace(playUrl);
         loadedKeyRef.current = loadKey;
-        // replace() builds a new HTMLAudioElement — rewire GainNode before play.
-        syncMediaGainGraph();
         const lagSec = Math.max(0, (Date.now() - at) / 1000);
         const seekTo = Math.max(0, positionSec + (shouldPlay ? lagSec : 0));
         await new Promise((resolve) => setTimeout(resolve, 40));
@@ -416,7 +389,7 @@ export function useCallSharedMusic({
         // source swap failed — leave idle
       }
     },
-    [applyPlayerVolume, player, syncMediaGainGraph, tryPlay],
+    [applyPlayerVolume, player, tryPlay],
   );
 
   const applyRemoteState = useCallback(
@@ -565,8 +538,6 @@ export function useCallSharedMusic({
 
   const reset = useCallback(() => {
     stopLocalPlayback();
-    mediaGainRef.current?.dispose();
-    mediaGainRef.current = null;
     snapshotRef.current = EMPTY_SNAPSHOT;
     setSnapshot(EMPTY_SNAPSHOT);
     setLocalVolumeState(1);
@@ -578,13 +549,6 @@ export function useCallSharedMusic({
       reset();
     }
   }, [enabled, reset]);
-
-  useEffect(() => {
-    return () => {
-      mediaGainRef.current?.dispose();
-      mediaGainRef.current = null;
-    };
-  }, []);
 
   useEffect(() => {
     if (!enabled || liveStatus !== 'connected') {
