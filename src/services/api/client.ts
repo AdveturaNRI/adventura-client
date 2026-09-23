@@ -85,8 +85,11 @@ export async function apiRequest<T>(
   options: RequestOptions = {},
 ): Promise<T> {
   const task = executeApiRequest<T>(path, options);
+  const method = options.method ?? 'GET';
+  // Reads stay silent — screens own their loaders. Mutations use the global overlay unless opted out.
+  const skipLoading = options.skipLoading ?? method === 'GET';
 
-  if (options.skipLoading) {
+  if (skipLoading) {
     return task;
   }
 

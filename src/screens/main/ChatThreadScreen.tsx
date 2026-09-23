@@ -118,6 +118,16 @@ import {
 } from '@/utils/dice-animations-storage';
 import { setFocusedChatConversation } from '@/utils/chat-alerts';
 import { localizeErrorMessage } from '@/utils/localizeError';
+import {
+  appendCachedThreadMessage,
+  getCachedConversation,
+  getCachedThread,
+  mergeCachedThreadMessages,
+  removeCachedConversation,
+  setCachedConversations,
+  setCachedThread,
+  upsertCachedConversation,
+} from '@/utils/chat-thread-cache';
 import { shouldSendChatOnEnter } from '@/utils/chat-enter-key';
 import { beginMicrophonePrimeFromGesture } from '@/utils/voice-media-devices';
 import {
@@ -633,6 +643,13 @@ function createStyles(colors: ThemeColors, bottomPad: number, isDark: boolean) {
       width: 36,
       height: 36,
       borderRadius: 18,
+      alignItems: 'center',
+      justifyContent: 'center',
+      flexShrink: 0,
+    },
+    headerRefresh: {
+      width: 28,
+      height: 28,
       alignItems: 'center',
       justifyContent: 'center',
       flexShrink: 0,
@@ -1364,6 +1381,7 @@ export default function ChatThreadScreen() {
   const [peerLastReadAt, setPeerLastReadAt] = useState<string | null>(null);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [sending, setSending] = useState(false);
   const {
     activeKey: activeVoiceKey,
@@ -1395,7 +1413,15 @@ export default function ChatThreadScreen() {
       return;
     }
     let cancelled = false;
+    let inFlight = false;
+    /** Fallback only — realtime call events + focus cover the hot path. */
+    const FALLBACK_POLL_MS = 30_000;
+
     const refresh = async () => {
+      if (cancelled || inFlight) {
+        return;
+      }
+      inFlight = true;
       try {
         const active = await getActiveChatVoiceCall(conversationId);
         if (cancelled) {
@@ -1407,21 +1433,61 @@ export default function ChatThreadScreen() {
         if (!cancelled) {
           setOngoingVoiceCall(null);
         }
+      } finally {
+        inFlight = false;
       }
     };
+
+    const isForeground = () => {
+      if (AppState.currentState !== 'active') {
+        return false;
+      }
+      if (Platform.OS === 'web' && typeof document !== 'undefined') {
+        return document.visibilityState === 'visible';
+      }
+      return true;
+    };
+
+    const refreshIfVisible = () => {
+      if (isForeground()) {
+        void refresh();
+      }
+    };
+
     void refresh();
-    const timer = setInterval(() => {
-      void refresh();
-    }, 2500);
+
+    const timer = setInterval(refreshIfVisible, FALLBACK_POLL_MS);
+
+    const appSub = AppState.addEventListener('change', (state) => {
+      if (state === 'active') {
+        void refresh();
+      }
+    });
+
+    let visibilityHandler: (() => void) | null = null;
+    if (Platform.OS === 'web' && typeof document !== 'undefined') {
+      visibilityHandler = () => {
+        if (document.visibilityState === 'visible') {
+          void refresh();
+        }
+      };
+      document.addEventListener('visibilitychange', visibilityHandler);
+    }
+
     const unsubscribe = subscribeCallEvents((event) => {
       if (event.payload.conversationId !== conversationId) {
         return;
       }
       void refresh();
     });
+
     return () => {
       cancelled = true;
       clearInterval(timer);
+      appSub.remove();
+      if (visibilityHandler && typeof document !== 'undefined') {
+        document.removeEventListener('visibilitychange', visibilityHandler);
+      }
       unsubscribe();
     };
   }, [conversationId, subscribeCallEvents, voiceActiveHere]);
@@ -1530,6 +1596,9 @@ export default function ChatThreadScreen() {
   }, [pinToBottom]);
 
   const appendMessage = useCallback((message: ChatMessage) => {
+    if (conversationId && message.conversationId === conversationId) {
+      appendCachedThreadMessage(conversationId, message);
+    }
     setMessages((prev) => {
       if (prev.some((item) => item.id === message.id)) {
         return prev;
@@ -1541,7 +1610,7 @@ export default function ChatThreadScreen() {
           : prev;
       return [...withoutPending, message];
     });
-  }, [myId]);
+  }, [conversationId, myId]);
 
   const startNextDiceAnimation = useCallback(() => {
     const next = diceAnimQueueRef.current.shift() ?? null;
@@ -1775,9 +1844,11 @@ export default function ChatThreadScreen() {
       return null;
     }
     const list = await listConversations();
+    setCachedConversations(list);
     const found = list.find((item) => item.id === conversationId) ?? null;
     setConversation(found);
     if (found) {
+      upsertCachedConversation(found);
       setPeerLastReadAt(found.peerLastReadAt);
     }
     return found;
@@ -1788,10 +1859,11 @@ export default function ChatThreadScreen() {
       return;
     }
     const page = await listMessages(conversationId);
+    const merged = mergeCachedThreadMessages(conversationId, page);
     setMessages((prev) => {
-      const byId = new Map(page.items.map((item) => [item.id, item]));
+      const byId = new Map(merged.messages.map((item) => [item.id, item]));
       for (const item of prev) {
-        if (!byId.has(item.id)) {
+        if (!byId.has(item.id) && item.id.startsWith('pending-')) {
           byId.set(item.id, item);
         }
       }
@@ -1803,17 +1875,19 @@ export default function ChatThreadScreen() {
         left.createdAt.localeCompare(right.createdAt),
       );
     });
-    setNextCursor(page.nextCursor);
-    setPeerLastReadAt(page.peerLastReadAt);
-    setConversation((prev) =>
-      prev
-        ? {
-            ...prev,
-            blockedByMe: page.blockedByMe ?? prev.blockedByMe,
-            blockedMe: page.blockedMe ?? prev.blockedMe,
-          }
-        : prev,
-    );
+    setNextCursor(merged.nextCursor);
+    setPeerLastReadAt(merged.peerLastReadAt);
+    setConversation((prev) => {
+      const next = merged.conversation ?? prev;
+      if (!next) {
+        return prev;
+      }
+      return {
+        ...next,
+        blockedByMe: page.blockedByMe ?? next.blockedByMe,
+        blockedMe: page.blockedMe ?? next.blockedMe,
+      };
+    });
   }, [conversationId]);
 
   useEffect(() => {
@@ -1834,26 +1908,100 @@ export default function ChatThreadScreen() {
         leaveToChats();
         return;
       }
+
       setSuppressFavoriteBack(false);
-      setLoading(true);
+
+      const cachedThread = getCachedThread(conversationId);
+      const cachedConversation =
+        cachedThread?.conversation ?? getCachedConversation(conversationId);
+
+      if (cachedThread) {
+        setConversation(cachedConversation);
+        setMessages(cachedThread.messages);
+        setNextCursor(cachedThread.nextCursor);
+        setPeerLastReadAt(cachedThread.peerLastReadAt);
+        setLoading(false);
+      } else if (cachedConversation) {
+        setConversation(cachedConversation);
+        setMessages([]);
+        setNextCursor(null);
+        setPeerLastReadAt(cachedConversation.peerLastReadAt);
+        setLoading(false);
+      } else {
+        setConversation(null);
+        setMessages([]);
+        setNextCursor(null);
+        setPeerLastReadAt(null);
+        setLoading(true);
+      }
+
+      setRefreshing(true);
       try {
-        const [found] = await Promise.all([loadConversation(), loadMessages()]);
+        const [list, page] = await Promise.all([
+          listConversations(),
+          listMessages(conversationId),
+        ]);
+        if (cancelled) {
+          return;
+        }
+
+        setCachedConversations(list);
+        const found = list.find((item) => item.id === conversationId) ?? null;
         if (!found) {
+          removeCachedConversation(conversationId);
           leaveToChats('Чат не найден');
           return;
         }
+
+        upsertCachedConversation(found);
+        const merged = mergeCachedThreadMessages(conversationId, page, found);
+        setConversation({
+          ...found,
+          blockedByMe: page.blockedByMe ?? found.blockedByMe,
+          blockedMe: page.blockedMe ?? found.blockedMe,
+        });
+        setMessages((prev) => {
+          const byId = new Map(merged.messages.map((item) => [item.id, item]));
+          for (const item of prev) {
+            if (!byId.has(item.id) && item.id.startsWith('pending-')) {
+              byId.set(item.id, item);
+            }
+          }
+          for (const heldId of heldDiceMessagesRef.current.keys()) {
+            byId.delete(heldId);
+          }
+          return [...byId.values()].sort((left, right) =>
+            left.createdAt.localeCompare(right.createdAt),
+          );
+        });
+        setNextCursor(merged.nextCursor);
+        setPeerLastReadAt(merged.peerLastReadAt);
         await markConversationRead(conversationId);
       } catch (error) {
+        if (cancelled) {
+          return;
+        }
         const missing =
           error instanceof ApiError && (error.status === 404 || error.status === 403);
-        leaveToChats(
-          missing
-            ? 'Чат не найден'
-            : localizeErrorMessage(error, 'Не удалось открыть чат'),
-        );
+        if (missing) {
+          removeCachedConversation(conversationId);
+        }
+        // Keep cached UI if we already showed something; only bounce on cold miss.
+        if (!cachedThread && !cachedConversation) {
+          leaveToChats(
+            missing
+              ? 'Чат не найден'
+              : localizeErrorMessage(error, 'Не удалось открыть чат'),
+          );
+        } else if (missing) {
+          leaveToChats('Чат не найден');
+        } else {
+          toast.error(localizeErrorMessage(error, 'Не удалось обновить чат'));
+        }
       } finally {
         if (!cancelled) {
           setLoading(false);
+          setRefreshing(false);
         }
       }
     }
@@ -1871,7 +2019,7 @@ export default function ChatThreadScreen() {
       localDiceRollResolveRef.current = null;
       resolveLocal?.(null);
     };
-  }, [conversationId, loadConversation, loadMessages, router]);
+  }, [conversationId, router]);
 
   useEffect(() => {
     return subscribeMessages((message) => {
@@ -1931,6 +2079,7 @@ export default function ChatThreadScreen() {
     }
     setConversation((prev) => {
       if (!prev || prev.id !== lastConversationUpdate.id) {
+        upsertCachedConversation(lastConversationUpdate);
         return lastConversationUpdate;
       }
       const nextPeer = lastConversationUpdate.peer;
@@ -1946,12 +2095,20 @@ export default function ChatThreadScreen() {
               nickname: nextPeer.nickname || prevPeer.nickname,
             }
           : nextPeer;
-      return {
+      const prevActivity = prev.lastMessage?.createdAt ?? prev.updatedAt;
+      const incomingActivity =
+        lastConversationUpdate.lastMessage?.createdAt ?? lastConversationUpdate.updatedAt;
+      const keepPrevActivity = prevActivity > incomingActivity;
+      const next = {
         ...lastConversationUpdate,
         peer,
         isPinned: lastConversationUpdate.isPinned ?? prev.isPinned,
         pinSortOrder: lastConversationUpdate.pinSortOrder ?? prev.pinSortOrder,
+        updatedAt: keepPrevActivity ? prev.updatedAt : lastConversationUpdate.updatedAt,
+        lastMessage: keepPrevActivity ? prev.lastMessage : lastConversationUpdate.lastMessage,
       };
+      upsertCachedConversation(next);
+      return next;
     });
     setPeerLastReadAt(lastConversationUpdate.peerLastReadAt);
   }, [conversationId, lastConversationUpdate]);
@@ -2580,16 +2737,15 @@ export default function ChatThreadScreen() {
     setAddingBack(true);
     try {
       await upsertWandererReaction(peerId, 'favorite');
-      const next = { ...conversation, isFavorite: true };
-      setConversation(next);
-      publishConversationUpdate(next);
+      // Не публикуем снимок до await — realtime уже пришлёт событие и поднимет чат.
+      setConversation((prev) => (prev ? { ...prev, isFavorite: true } : prev));
       toast.success('Добавлен в избранные');
     } catch (error) {
       toast.error(localizeErrorMessage(error, 'Не удалось добавить в избранные'));
     } finally {
       setAddingBack(false);
     }
-  }, [addingBack, conversation, publishConversationUpdate]);
+  }, [addingBack, conversation]);
 
   const handleCancelFavorite = useCallback(async () => {
     const peerId = conversation?.peer?.id;
@@ -2600,9 +2756,7 @@ export default function ChatThreadScreen() {
     setSuppressFavoriteBack(true);
     try {
       await clearWandererReaction(peerId);
-      const next = { ...conversation, isFavorite: false };
-      setConversation(next);
-      publishConversationUpdate(next);
+      setConversation((prev) => (prev ? { ...prev, isFavorite: false } : prev));
       toast.success('Удалён из избранных');
     } catch (error) {
       setSuppressFavoriteBack(false);
@@ -2610,7 +2764,7 @@ export default function ChatThreadScreen() {
     } finally {
       setAddingBack(false);
     }
-  }, [addingBack, conversation, publishConversationUpdate]);
+  }, [addingBack, conversation]);
 
   const handleOpenMenu = useCallback(() => {
     setMenuOpen(true);
@@ -2627,6 +2781,7 @@ export default function ChatThreadScreen() {
       }
       setIsMenuBusy(true);
       setPendingDelete(false);
+      removeCachedConversation(conversationId);
       router.replace('/chats');
       try {
         await deleteConversation(conversationId, forEveryone);
@@ -2956,7 +3111,13 @@ export default function ChatThreadScreen() {
       setMessages((prev) => {
         const ids = new Set(prev.map((item) => item.id));
         const older = page.items.filter((item) => !ids.has(item.id));
-        return [...older, ...prev];
+        const next = [...older, ...prev];
+        setCachedThread(conversationId, {
+          messages: next,
+          nextCursor: page.nextCursor,
+          peerLastReadAt: page.peerLastReadAt ?? peerLastReadAt,
+        });
+        return next;
       });
       setNextCursor(page.nextCursor);
       if (page.peerLastReadAt) {
@@ -2969,7 +3130,7 @@ export default function ChatThreadScreen() {
         loadingOlderRef.current = false;
       });
     }
-  }, [conversationId, nextCursor]);
+  }, [conversationId, nextCursor, peerLastReadAt]);
 
   const headerPadTop = isDesktopWeb
     ? Spacing.md
@@ -3162,7 +3323,11 @@ export default function ChatThreadScreen() {
           <Pressable
             accessibilityRole="button"
             accessibilityLabel={
-              voiceActiveHere ? 'Завершить звонок' : 'Позвонить'
+              voiceActiveHere
+                ? 'Завершить звонок'
+                : ongoingVoiceCall
+                  ? 'Войти в звонок'
+                  : 'Позвонить'
             }
             hitSlop={8}
             onPressIn={() => {
@@ -3178,6 +3343,8 @@ export default function ChatThreadScreen() {
                 void hangupLiveVoice();
                 return;
               }
+              // Active lobby in this chat — join it (do not start a second invite).
+              // 1:1 hangup ends the call for both on the server, so this path is mostly groups.
               if (ongoingVoiceCall) {
                 setJoiningOngoingVoice(true);
                 void joinOngoingCall(
@@ -3243,6 +3410,11 @@ export default function ChatThreadScreen() {
               color={voiceActiveHere || ongoingVoiceCall ? colors.primary : colors.textSubtle}
             />
           </Pressable>
+          {refreshing ? (
+            <View style={styles.headerRefresh} accessibilityLabel="Обновление чата">
+              <ActivityIndicator size="small" color={colors.primary} />
+            </View>
+          ) : null}
           <Pressable
             accessibilityRole="button"
             accessibilityLabel="Ещё"
@@ -3395,7 +3567,7 @@ export default function ChatThreadScreen() {
           </View>
         ) : null}
 
-        {loading ? (
+        {loading && !conversation ? (
           <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
             <ActivityIndicator color={colors.primary} />
           </View>

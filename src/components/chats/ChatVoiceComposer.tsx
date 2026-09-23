@@ -132,13 +132,17 @@ export function ChatVoiceComposer({ conversationId, disabled, replyToId, showMic
     return () => clearInterval(id);
   }, [startedAt]);
 
-  // Configuring the audio session can take a noticeable native bridge round
-  // trip. It is independent of a particular message, so do it when the chat
-  // composer becomes available rather than after the user starts holding mic.
+  // Do not enable recording on mount — allowsRecording switches iOS to playAndRecord
+  // and shows the system mic indicator even when idle.
   useEffect(() => {
-    void setAudioModeAsync({ playsInSilentMode: true, allowsRecording: true }).catch(
+    void setAudioModeAsync({ playsInSilentMode: true, allowsRecording: false }).catch(
       () => undefined,
     );
+    return () => {
+      void setAudioModeAsync({ playsInSilentMode: true, allowsRecording: false }).catch(
+        () => undefined,
+      );
+    };
   }, []);
 
   useEffect(() => {
@@ -187,6 +191,9 @@ export function ChatVoiceComposer({ conversationId, disabled, replyToId, showMic
     cancelTriggeredRef.current = false;
     setTrimStart(0);
     setTrimEnd(1);
+    void setAudioModeAsync({ playsInSilentMode: true, allowsRecording: false }).catch(
+      () => undefined,
+    );
   }, []);
 
   const stopCurrent = useCallback(async (): Promise<Segment | null> => {
@@ -219,6 +226,13 @@ export function ChatVoiceComposer({ conversationId, disabled, replyToId, showMic
       if (!permission.granted) {
         toast.error('Не удалось получить доступ к микрофону');
         reset();
+        return;
+      }
+      await setAudioModeAsync({ playsInSilentMode: true, allowsRecording: true });
+      if (!pressingRef.current && phaseRef.current !== 'locked') {
+        await setAudioModeAsync({ playsInSilentMode: true, allowsRecording: false }).catch(
+          () => undefined,
+        );
         return;
       }
       await recorder.prepareToRecordAsync();
@@ -269,6 +283,9 @@ export function ChatVoiceComposer({ conversationId, disabled, replyToId, showMic
       trimStartRef.current = 0;
       trimEndRef.current = 1;
       setPhase('paused');
+      void setAudioModeAsync({ playsInSilentMode: true, allowsRecording: false }).catch(
+        () => undefined,
+      );
       try {
         const uris = next.map((item) => item.uri);
         if (uris.length > 1) {

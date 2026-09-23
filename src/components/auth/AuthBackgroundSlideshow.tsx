@@ -159,6 +159,7 @@ function WebBackground({ slideCount }: WebBackgroundProps) {
         />
       </View>
       <View style={styles.webOverlay} />
+      <View style={styles.webVignette} />
     </View>
   );
 }
@@ -175,7 +176,7 @@ const styles = StyleSheet.create({
   },
   dim: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.45)',
+    backgroundColor: 'rgba(8, 12, 24, 0.42)',
   },
   layer: {
     ...StyleSheet.absoluteFillObject,
@@ -184,6 +185,16 @@ const styles = StyleSheet.create({
   },
   webOverlay: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(0, 0, 0, 0.45)',
+    backgroundColor: 'rgba(8, 12, 24, 0.28)',
+  },
+  webVignette: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'transparent',
+    ...(Platform.OS === 'web'
+      ? ({
+          backgroundImage:
+            'radial-gradient(ellipse 65% 55% at 50% 42%, rgba(8,12,24,0.08) 0%, rgba(8,12,24,0.48) 100%)',
+        } as object)
+      : null),
   },
 });

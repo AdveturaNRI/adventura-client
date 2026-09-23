@@ -27,6 +27,7 @@ function MainStack() {
       <Stack.Screen name="master-room" />
       <Stack.Screen name="author-cabinet" />
       <Stack.Screen name="my-clubs" />
+      <Stack.Screen name="music-library" />
       <Stack.Screen name="clubs-create" />
       <Stack.Screen name="clubs/[id]" />
       <Stack.Screen name="my-games" />

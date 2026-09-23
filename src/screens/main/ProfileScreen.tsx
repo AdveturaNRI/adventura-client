@@ -4,6 +4,7 @@ import { Linking, Pressable, ScrollView, Text, View } from 'react-native';
 
 import { useIsDesktopSidebarVisible, useIsDesktopWeb } from '@/components/navigation/DesktopThemeToggle';
 import { MobileScreenHeader } from '@/components/navigation/MobileScreenHeader';
+import { PartnersTicker } from '@/components/partners/PartnersTicker';
 import { EmailVerificationBanner } from '@/components/profile/EmailVerificationBanner';
 import { ProfileCompletionBanner } from '@/components/profile/ProfileCompletionBanner';
 import { ProfileHeaderCard } from '@/components/profile/ProfileHeaderCard';
@@ -46,6 +47,9 @@ function handleMenuPress(key: string, router: ReturnType<typeof useRouter>, exte
       return;
     case 'my-clubs':
       router.push('/my-clubs');
+      return;
+    case 'music-library':
+      router.push('/music-library');
       return;
     case 'profile':
       router.push('/questionnaire');
@@ -113,6 +117,8 @@ export default function ProfileScreen() {
         ) : (
           <Text style={styles.title}>Профиль</Text>
         )}
+
+        <PartnersTicker />
 
         <ProfileHeaderCard
           nickname={user.nickname}

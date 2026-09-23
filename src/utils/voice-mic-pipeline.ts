@@ -130,6 +130,10 @@ export class AdventuraMicProcessor
     return this.usedKrisp;
   }
 
+  get noiseSuppressionEnabled() {
+    return this.noiseSuppression;
+  }
+
   setGain(gain: number) {
     this.gainValue = clampMicGain(gain);
     if (this.gainNode) {
@@ -330,10 +334,17 @@ async function attachMicProcessor(
   const existing = typeof track.getProcessor === 'function' ? track.getProcessor() : null;
   if (existing?.name === 'adventura-mic') {
     const current = existing as AdventuraMicProcessor;
-    if (typeof current.setGain === 'function') {
-      current.setGain(micGain);
+    if (current.noiseSuppressionEnabled === noiseSuppression) {
+      if (typeof current.setGain === 'function') {
+        current.setGain(micGain);
+      }
+      return { usedKrisp: current.usesKrisp, enabled: true };
     }
-    return { usedKrisp: current.usesKrisp, enabled: true };
+    try {
+      await track.stopProcessor();
+    } catch {
+      // continue and attach a fresh processor
+    }
   }
 
   const processor = new AdventuraMicProcessor(micGain, noiseSuppression);
@@ -347,5 +358,46 @@ async function attachMicProcessor(
       // ignore
     }
     return { usedKrisp: false, enabled: true };
+  }
+}
+
+/** Hot-apply Settings (device / gain / NS) to an already-connected LiveKit room. */
+export async function syncVoicePrefsToRoom(
+  room: Room,
+  opts: {
+    deviceId?: string | null;
+    micGain?: number;
+    noiseSuppression?: boolean;
+  },
+): Promise<void> {
+  const micGain = clampMicGain(opts.micGain ?? MIC_GAIN_DEFAULT);
+  const noiseSuppression = opts.noiseSuppression ?? NOISE_SUPPRESSION_DEFAULT;
+  const deviceId = isUsableMediaDeviceId(opts.deviceId) ? opts.deviceId!.trim() : null;
+
+  if (deviceId) {
+    try {
+      await room.switchActiveDevice('audioinput', deviceId);
+    } catch {
+      // device may have been unplugged — keep current mic
+    }
+  }
+
+  const pub = room.localParticipant.getTrackPublication(Track.Source.Microphone);
+  const track = pub?.track as LocalAudioTrack | undefined;
+  if (track && typeof track.applyConstraints === 'function') {
+    try {
+      await track.applyConstraints({
+        noiseSuppression: noiseSuppression,
+        echoCancellation: true,
+        autoGainControl: Math.abs(micGain - 1) < 0.05,
+        voiceIsolation: false,
+      });
+    } catch {
+      // mobile Safari rejects some constraint updates mid-call
+    }
+  }
+
+  if (room.localParticipant.isMicrophoneEnabled) {
+    await attachMicProcessor(room, micGain, noiseSuppression);
   }
 }

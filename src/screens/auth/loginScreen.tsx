@@ -1,9 +1,14 @@
 import { useState } from 'react';
-import { Pressable, StyleSheet, View } from 'react-native';
+import { Pressable, StyleSheet, useWindowDimensions, View } from 'react-native';
 import { Link, useLocalSearchParams, useRouter } from 'expo-router';
 
 import { AuthScreenLayout } from '@/components/auth/AuthScreenLayout';
+import {
+  AUTH_COMPACT_HEIGHT,
+  createAuthScreenLayoutStyles,
+} from '@/components/auth/auth-screen-layout.styles';
 import { OauthButtons } from '@/components/auth/OauthButtons';
+import { useIsDesktopWeb } from '@/components/navigation/DesktopThemeToggle';
 import {
   Button,
   Caption,
@@ -24,24 +29,38 @@ type LoginErrors = {
   password?: string;
 };
 
-function createStyles(_colors: ThemeColors) {
+function createStyles(colors: ThemeColors, compact: boolean) {
   return StyleSheet.create({
     header: {
-      gap: Spacing.lg,
+      gap: compact ? 10 : 14,
+      alignItems: 'center',
+    },
+    title: {
+      fontSize: compact ? 20 : 22,
+      lineHeight: compact ? 26 : 28,
+      fontWeight: '600',
+      letterSpacing: -0.3,
+      paddingHorizontal: Spacing.sm,
+    },
+    subtitle: {
+      textAlign: 'center',
+      color: colors.textMuted,
+      paddingHorizontal: Spacing.md,
+      marginBottom: Spacing.xs,
     },
     form: {
-      gap: Spacing.md,
+      gap: compact ? 12 : Spacing.md,
+      width: '100%',
     },
     forgotRow: {
       alignItems: 'flex-end',
       paddingHorizontal: Spacing.xs,
+      marginTop: Spacing.xs,
     },
-    footer: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'center',
-      gap: Spacing.sm,
-      paddingTop: Spacing.sm,
+    actions: {
+      gap: 12,
+      width: '100%',
+      marginTop: Spacing.xs,
     },
   });
 }
@@ -55,7 +74,13 @@ export default function LoginScreen() {
   const [password, setPassword] = useState('');
   const [errors, setErrors] = useState<LoginErrors>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const styles = useThemedStyles(createStyles);
+  const isDesktop = useIsDesktopWeb();
+  const { height } = useWindowDimensions();
+  const compact = height < AUTH_COMPACT_HEIGHT;
+  const styles = useThemedStyles((colors) => createStyles(colors, compact));
+  const layoutStyles = useThemedStyles((colors) =>
+    createAuthScreenLayoutStyles(colors, isDesktop, compact),
+  );
 
   const handleSubmit = async () => {
     const nextErrors: LoginErrors = {
@@ -86,9 +111,12 @@ export default function LoginScreen() {
   return (
     <AuthScreenLayout>
       <View style={styles.header}>
-        <H1>{'Начните приключение\nпрямо сейчас'}</H1>
+        <H1 style={styles.title}>Начните приключение прямо сейчас</H1>
+        <Caption style={styles.subtitle}>Войдите в аккаунт через email или соцсеть</Caption>
 
         <Switcher
+          size="compact"
+          stretch
           options={[
             { key: 'login', label: 'Вход' },
             { key: 'register', label: 'Регистрация' },
@@ -118,6 +146,7 @@ export default function LoginScreen() {
           textContentType="emailAddress"
           placeholder="example@mail.com"
           error={errors.email}
+          style={layoutStyles.softField}
         />
 
         <PasswordInput
@@ -131,6 +160,7 @@ export default function LoginScreen() {
           }}
           placeholder="••••••••"
           error={errors.password}
+          style={layoutStyles.softField}
         />
 
         <View style={styles.forgotRow}>
@@ -142,23 +172,18 @@ export default function LoginScreen() {
         </View>
       </View>
 
-      <Button
-        label={isSubmitting ? 'Входим...' : 'Войти'}
-        onPress={handleSubmit}
-      />
+      <View style={styles.actions}>
+        <Button
+          label={isSubmitting ? 'Входим...' : 'Войти'}
+          onPress={handleSubmit}
+          style={layoutStyles.authButton}
+        />
 
-      <OauthButtons
-        disabled={isSubmitting}
-        onSuccess={() => router.replace(resolvePostLoginHref(nextParam))}
-      />
-
-      <View style={styles.footer}>
-        <Caption>Нет аккаунта?</Caption>
-        <Link href="/auth/register" asChild>
-          <Pressable hitSlop={8}>
-            <LinkLabel>Регистрация</LinkLabel>
-          </Pressable>
-        </Link>
+        <OauthButtons
+          disabled={isSubmitting}
+          onSuccess={() => router.replace(resolvePostLoginHref(nextParam))}
+          buttonStyle={layoutStyles.authButtonGhost}
+        />
       </View>
     </AuthScreenLayout>
   );

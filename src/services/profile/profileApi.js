@@ -21,7 +21,9 @@ function parseQuestionnaireAge(age) {
 let inflightProfileRequest = null;
 export function getProfile() {
     if (!inflightProfileRequest) {
-        inflightProfileRequest = apiRequest('/users/me').finally(() => {
+        inflightProfileRequest = apiRequest('/users/me', {
+            skipLoading: true,
+        }).finally(() => {
             inflightProfileRequest = null;
         });
     }

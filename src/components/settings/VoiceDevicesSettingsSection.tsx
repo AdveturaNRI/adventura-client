@@ -463,11 +463,10 @@ export function VoiceDevicesSettingsSection() {
     };
   }, [refreshDevices, stopTest]);
 
-  // Ask for mic/camera when the user opens Settings (gesture from navigation on desktop).
-  // On iOS Safari a silent prompt may fail — then «Проверить микрофон» asks again on tap.
+  // Enumerate devices only — never call getUserMedia on open (that lights the mic indicator).
   useFocusEffect(
     useCallback(() => {
-      void refreshDevices({ requestPermission: true });
+      void refreshDevices({ requestPermission: false });
       return () => {
         stopTest();
       };

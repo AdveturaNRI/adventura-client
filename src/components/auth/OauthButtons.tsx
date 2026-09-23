@@ -1,6 +1,6 @@
-import { StyleSheet, View } from 'react-native';
+import { StyleSheet, View, type ViewStyle } from 'react-native';
 
-import { SocialButton } from '@/components/ui';
+import { DividerLabel, SocialButton } from '@/components/ui';
 import { Spacing, type ThemeColors } from '@/constants/theme';
 import { useAuth } from '@/context/AuthContext';
 import { useThemedStyles } from '@/hooks/use-themed-styles';
@@ -20,9 +20,17 @@ function createStyles(_colors: ThemeColors) {
 type OauthButtonsProps = {
   disabled?: boolean;
   onSuccess?: () => void;
+  /** Show “или” above the buttons. Default true. */
+  withDivider?: boolean;
+  buttonStyle?: ViewStyle;
 };
 
-export function OauthButtons({ disabled, onSuccess }: OauthButtonsProps) {
+export function OauthButtons({
+  disabled,
+  onSuccess,
+  withDivider = true,
+  buttonStyle,
+}: OauthButtonsProps) {
   const { signInWithVk, signInWithYandex } = useAuth();
   const styles = useThemedStyles(createStyles);
   const { vkAppId, yandexClientId, loaded } = useOauthPublicConfig();
@@ -36,10 +44,12 @@ export function OauthButtons({ disabled, onSuccess }: OauthButtonsProps) {
 
   return (
     <View style={styles.root}>
+      {withDivider ? <DividerLabel label="или" /> : null}
       {showVk ? (
         <SocialButton
           provider="vk"
           disabled={disabled}
+          style={buttonStyle}
           onPress={async () => {
             const ok = await signInWithVk();
             if (ok) onSuccess?.();
@@ -50,6 +60,7 @@ export function OauthButtons({ disabled, onSuccess }: OauthButtonsProps) {
         <SocialButton
           provider="yandex"
           disabled={disabled}
+          style={buttonStyle}
           onPress={async () => {
             const ok = await signInWithYandex();
             if (ok) onSuccess?.();

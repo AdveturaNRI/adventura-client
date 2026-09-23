@@ -12,6 +12,8 @@ import {
   Text,
   useWindowDimensions,
   View,
+  type GestureResponderEvent,
+  type LayoutChangeEvent,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -42,6 +44,8 @@ type OverlayTile = {
   urgent?: boolean;
   badges?: RewardBadgeType[];
   frameId?: string | null;
+  /** Local playback gain 0…1 (remote only). */
+  volume?: number;
 };
 
 export type VoiceCallWaitingPeer = {
@@ -67,6 +71,8 @@ type Props = {
   waitingPeers?: VoiceCallWaitingPeer[];
   /** identity → urgent flag (sticky until sender clears) */
   urgentById?: Record<string, boolean>;
+  /** Local playback gain per remote identity (0…1). */
+  volumeById?: Record<string, number>;
   /** Chat to post dice rolls into (same conversation as the call). */
   conversationId?: string | null;
   diceSenderNickname?: string;
@@ -80,6 +86,7 @@ type Props = {
   onMinimize?: () => void;
   onExpand?: () => void;
   onUrgentRequest?: () => void;
+  onSetParticipantVolume?: (identity: string, volume: number) => void;
 };
 
 /** Survives expand/collapse while the call is up. */
@@ -235,20 +242,233 @@ function UrgentPulseRings({ size }: { size: number }) {
   );
 }
 
+function clamp01(value: number): number {
+  if (!Number.isFinite(value)) {
+    return 1;
+  }
+  return Math.min(1, Math.max(0, value));
+}
+
+function volumeIconName(value: number): 'volume-mute' | 'volume-low' | 'volume-medium' | 'volume-high' {
+  if (value < 0.02) {
+    return 'volume-mute';
+  }
+  if (value < 0.34) {
+    return 'volume-low';
+  }
+  if (value < 0.67) {
+    return 'volume-medium';
+  }
+  return 'volume-high';
+}
+
+/** Compact glass volume dock — horizontal on wide tiles, vertical on narrow. */
+function ParticipantVolumeDock({
+  value,
+  onChange,
+  orientation,
+  participantName,
+}: {
+  value: number;
+  onChange: (next: number) => void;
+  orientation: 'horizontal' | 'vertical';
+  participantName: string;
+}) {
+  const trackBoxRef = useRef({ x: 0, y: 0, width: 1, height: 1 });
+  const [dragging, setDragging] = useState(false);
+  const beforeMuteRef = useRef(1);
+  const appear = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    appear.setValue(0);
+    Animated.spring(appear, {
+      toValue: 1,
+      friction: 7,
+      tension: 120,
+      useNativeDriver: true,
+    }).start();
+  }, [appear]);
+
+  const applyFromPage = (pageX: number, pageY: number) => {
+    const box = trackBoxRef.current;
+    if (orientation === 'vertical') {
+      onChange(clamp01(1 - (pageY - box.y) / box.height));
+      return;
+    }
+    onChange(clamp01((pageX - box.x) / box.width));
+  };
+
+  const onTrackLayout = (event: LayoutChangeEvent) => {
+    const target = event.target as unknown as {
+      measureInWindow?: (cb: (x: number, y: number, w: number, h: number) => void) => void;
+    };
+    if (typeof target?.measureInWindow === 'function') {
+      target.measureInWindow((x, y, w, h) => {
+        trackBoxRef.current = {
+          x,
+          y,
+          width: Math.max(1, w),
+          height: Math.max(1, h),
+        };
+      });
+      return;
+    }
+    const { width, height } = event.nativeEvent.layout;
+    trackBoxRef.current = {
+      ...trackBoxRef.current,
+      width: Math.max(1, width),
+      height: Math.max(1, height),
+    };
+  };
+
+  const onGrant = (event: GestureResponderEvent) => {
+    setDragging(true);
+    applyFromPage(event.nativeEvent.pageX, event.nativeEvent.pageY);
+  };
+
+  const onMove = (event: GestureResponderEvent) => {
+    applyFromPage(event.nativeEvent.pageX, event.nativeEvent.pageY);
+  };
+
+  const onRelease = () => {
+    setDragging(false);
+  };
+
+  const muted = value < 0.02;
+  const fill = Math.round(clamp01(value) * 100);
+  const iconName = volumeIconName(value);
+  const isVertical = orientation === 'vertical';
+
+  const toggleMute = () => {
+    if (muted) {
+      onChange(beforeMuteRef.current > 0.02 ? beforeMuteRef.current : 1);
+      return;
+    }
+    beforeMuteRef.current = value > 0.02 ? value : 1;
+    onChange(0);
+  };
+
+  return (
+    <Animated.View
+      pointerEvents="box-none"
+      accessibilityLabel={`Громкость ${participantName}: ${fill}%`}
+      style={[
+        styles.volumeDock,
+        isVertical ? styles.volumeDockVertical : styles.volumeDockHorizontal,
+        {
+          opacity: appear,
+          transform: [
+            {
+              scale: appear.interpolate({
+                inputRange: [0, 1],
+                outputRange: [0.92, 1],
+              }),
+            },
+            isVertical
+              ? {
+                  translateX: appear.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: [10, 0],
+                  }),
+                }
+              : {
+                  translateY: appear.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: [8, 0],
+                  }),
+                },
+          ],
+        },
+      ]}>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={muted ? 'Включить звук у себя' : 'Выключить звук у себя'}
+        hitSlop={6}
+        onPress={toggleMute}
+        style={({ pressed }) => [
+          styles.volumeMuteBtn,
+          muted && styles.volumeMuteBtnActive,
+          pressed && styles.pressed,
+        ]}>
+        <Ionicons name={iconName} size={15} color={muted ? '#FFFFFF' : '#F2F3F5'} />
+      </Pressable>
+
+      <View
+        style={[
+          styles.volumeTrackHit,
+          isVertical ? styles.volumeTrackHitVertical : styles.volumeTrackHitHorizontal,
+        ]}
+        onLayout={onTrackLayout}
+        onStartShouldSetResponder={() => true}
+        onMoveShouldSetResponder={() => true}
+        onResponderGrant={onGrant}
+        onResponderMove={onMove}
+        onResponderRelease={onRelease}
+        onResponderTerminate={onRelease}>
+        <View
+          style={[
+            styles.volumeTrackRail,
+            isVertical ? styles.volumeTrackRailVertical : styles.volumeTrackRailHorizontal,
+            dragging && (isVertical ? styles.volumeTrackRailActiveVertical : styles.volumeTrackRailActiveHorizontal),
+          ]}>
+          <View
+            style={[
+              styles.volumeFill,
+              isVertical
+                ? { height: `${fill}%`, width: '100%' }
+                : { width: `${fill}%`, height: '100%' },
+              muted && styles.volumeFillMuted,
+            ]}
+          />
+        </View>
+        <View
+          pointerEvents="none"
+          style={[
+            styles.volumeThumb,
+            dragging && styles.volumeThumbActive,
+            isVertical
+              ? { bottom: `${fill}%`, left: '50%', marginLeft: -8, marginBottom: -8 }
+              : { left: `${fill}%`, top: '50%', marginTop: -8, marginLeft: -8 },
+          ]}
+        />
+      </View>
+
+      <Text
+        style={[styles.volumePercent, muted && styles.volumePercentMuted]}
+        numberOfLines={1}>
+        {muted ? 'выкл' : `${fill}%`}
+      </Text>
+    </Animated.View>
+  );
+}
+
 function ParticipantTile({
   tile,
   avatarSize,
   tileWidth,
   videoHeight,
+  volumeOpen,
+  onToggleVolume,
+  onVolumeChange,
 }: {
   tile: OverlayTile;
   avatarSize: number;
   tileWidth: number;
   videoHeight: number | null;
+  volumeOpen?: boolean;
+  onToggleVolume?: () => void;
+  onVolumeChange?: (volume: number) => void;
 }) {
   const avatarOuter = avatarFrameOuterSize(avatarSize);
   const ringBox = avatarOuter + 8;
   const showVideo = Boolean(tile.cameraOn && tile.videoTrack && videoHeight);
+  const canAdjustVolume =
+    Boolean(onToggleVolume && onVolumeChange) && !tile.isLocal && !tile.waiting;
+  const volume = clamp01(tile.volume ?? 1);
+  const mutedLocally = volume < 0.02;
+  // Narrow tiles: vertical dock on the side; wide / video: horizontal under media.
+  const volumeOrientation: 'horizontal' | 'vertical' =
+    !showVideo && tileWidth < 168 ? 'vertical' : 'horizontal';
 
   return (
     <View
@@ -259,80 +479,128 @@ function ParticipantTile({
         tile.waiting && styles.tileWaiting,
         tile.urgent && styles.tileUrgent,
       ]}>
-      {showVideo ? (
-        <View
-          style={[
-            styles.videoFrame,
-            {
-              height: videoHeight ?? 180,
-              borderColor: tile.urgent
-                ? '#ED4245'
-                : tile.speaking
-                  ? '#23A559'
-                  : 'rgba(255,255,255,0.08)',
-            },
-          ]}>
-          <CallVideoView track={tile.videoTrack} mirror={tile.isLocal} />
-          {tile.muted ? (
-            <View style={styles.videoMuteBadge}>
-              <Ionicons name="mic-off" size={12} color="#FFFFFF" />
-            </View>
-          ) : null}
-          {tile.urgent ? (
-            <View style={styles.videoUrgentChip} pointerEvents="none">
-              <Text style={styles.urgentBubbleText}>срочная заявка</Text>
-            </View>
-          ) : null}
-        </View>
-      ) : (
-        <View style={[styles.avatarWrap, { width: ringBox + 28, height: ringBox + 28 }]}>
-          {tile.urgent ? <UrgentPulseRings size={ringBox} /> : null}
-          {!tile.urgent && tile.waiting && !tile.connecting ? (
-            <WaitingPulseRings size={ringBox} />
-          ) : null}
+      <View style={styles.tileMedia}>
+        {showVideo ? (
           <View
             style={[
-              styles.avatarRing,
+              styles.videoFrame,
               {
-                width: ringBox,
-                height: ringBox,
-                borderRadius: ringBox / 2,
+                height: videoHeight ?? 180,
                 borderColor: tile.urgent
                   ? '#ED4245'
                   : tile.speaking
                     ? '#23A559'
-                    : tile.waiting
-                      ? 'rgba(21, 122, 254, 0.85)'
-                      : 'transparent',
+                    : 'rgba(255,255,255,0.08)',
               },
             ]}>
-            <View style={[styles.avatarSlot, { width: avatarOuter, height: avatarOuter }]}>
-              <UserAvatar
-                nickname={tile.name}
-                avatarUrl={tile.avatarUrl}
-                size={avatarSize}
-                badges={tile.badges}
-                frameId={tile.frameId}
-              />
-            </View>
-            {tile.connecting ? (
-              <View style={styles.connectingOverlay} pointerEvents="none">
-                <ActivityIndicator size="small" color="#FFFFFF" />
-              </View>
-            ) : null}
-            {tile.muted && !tile.waiting ? (
-              <View style={styles.muteBadge}>
+            <CallVideoView track={tile.videoTrack} mirror={tile.isLocal} />
+            {tile.muted ? (
+              <View style={styles.videoMuteBadge}>
                 <Ionicons name="mic-off" size={12} color="#FFFFFF" />
               </View>
             ) : null}
+            {tile.urgent ? (
+              <View style={styles.videoUrgentChip} pointerEvents="none">
+                <Text style={styles.urgentBubbleText}>срочная заявка</Text>
+              </View>
+            ) : null}
+            {canAdjustVolume && volumeOpen && onVolumeChange ? (
+              <View style={styles.volumeDockOverlay} pointerEvents="box-none">
+                <ParticipantVolumeDock
+                  value={volume}
+                  onChange={onVolumeChange}
+                  orientation="horizontal"
+                  participantName={tile.name}
+                />
+              </View>
+            ) : null}
           </View>
-          {tile.urgent ? (
-            <View style={styles.urgentBubble} pointerEvents="none">
-              <Text style={styles.urgentBubbleText}>срочная заявка</Text>
+        ) : (
+          <View style={[styles.avatarWrap, { width: ringBox + 28, height: ringBox + 28 }]}>
+            {tile.urgent ? <UrgentPulseRings size={ringBox} /> : null}
+            {!tile.urgent && tile.waiting && !tile.connecting ? (
+              <WaitingPulseRings size={ringBox} />
+            ) : null}
+            <View
+              style={[
+                styles.avatarRing,
+                {
+                  width: ringBox,
+                  height: ringBox,
+                  borderRadius: ringBox / 2,
+                  borderColor: tile.urgent
+                    ? '#ED4245'
+                    : tile.speaking
+                      ? '#23A559'
+                      : tile.waiting
+                        ? 'rgba(21, 122, 254, 0.85)'
+                        : 'transparent',
+                },
+              ]}>
+              <View style={[styles.avatarSlot, { width: avatarOuter, height: avatarOuter }]}>
+                <UserAvatar
+                  nickname={tile.name}
+                  avatarUrl={tile.avatarUrl}
+                  size={avatarSize}
+                  badges={tile.badges}
+                  frameId={tile.frameId}
+                />
+              </View>
+              {tile.connecting ? (
+                <View style={styles.connectingOverlay} pointerEvents="none">
+                  <ActivityIndicator size="small" color="#FFFFFF" />
+                </View>
+              ) : null}
+              {tile.muted && !tile.waiting ? (
+                <View style={styles.muteBadge}>
+                  <Ionicons name="mic-off" size={12} color="#FFFFFF" />
+                </View>
+              ) : null}
             </View>
-          ) : null}
-        </View>
-      )}
+            {tile.urgent ? (
+              <View style={styles.urgentBubble} pointerEvents="none">
+                <Text style={styles.urgentBubbleText}>срочная заявка</Text>
+              </View>
+            ) : null}
+            {canAdjustVolume && volumeOpen && onVolumeChange && volumeOrientation === 'vertical' ? (
+              <View style={styles.volumeDockSide} pointerEvents="box-none">
+                <ParticipantVolumeDock
+                  value={volume}
+                  onChange={onVolumeChange}
+                  orientation="vertical"
+                  participantName={tile.name}
+                />
+              </View>
+            ) : null}
+          </View>
+        )}
+
+        {canAdjustVolume ? (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={
+              volumeOpen
+                ? `Скрыть громкость ${tile.name}`
+                : `Громкость ${tile.name} у себя`
+            }
+            accessibilityState={{ expanded: Boolean(volumeOpen) }}
+            hitSlop={6}
+            onPress={onToggleVolume}
+            style={({ pressed }) => [
+              styles.volumeChip,
+              mutedLocally && styles.volumeChipMuted,
+              volumeOpen && styles.volumeChipOpen,
+              pressed && styles.pressed,
+            ]}>
+            <Ionicons
+              name={volumeIconName(volume)}
+              size={13}
+              color={mutedLocally ? '#FFFFFF' : volumeOpen ? '#84B9FF' : '#E3E5E8'}
+            />
+          </Pressable>
+        ) : null}
+      </View>
+
       <NameWithBadges
         name={tile.isLocal ? `${tile.name} (вы)` : tile.name}
         badges={tile.badges}
@@ -345,6 +613,19 @@ function ParticipantTile({
         <Text style={styles.tileHint}>подключение…</Text>
       ) : tile.waiting && !tile.urgent ? (
         <Text style={styles.tileHint}>ожидание</Text>
+      ) : null}
+
+      {canAdjustVolume &&
+      volumeOpen &&
+      onVolumeChange &&
+      !showVideo &&
+      volumeOrientation === 'horizontal' ? (
+        <ParticipantVolumeDock
+          value={volume}
+          onChange={onVolumeChange}
+          orientation="horizontal"
+          participantName={tile.name}
+        />
       ) : null}
     </View>
   );
@@ -456,6 +737,7 @@ export function VoiceCallOverlay({
   participants,
   waitingPeers = [],
   urgentById = {},
+  volumeById = {},
   conversationId = null,
   diceSenderNickname = 'Вы',
   onToggleMute,
@@ -467,6 +749,7 @@ export function VoiceCallOverlay({
   onMinimize,
   onExpand,
   onUrgentRequest,
+  onSetParticipantVolume,
 }: Props) {
   const insets = useSafeAreaInsets();
   const isDesktop = useIsDesktopWeb();
@@ -476,6 +759,7 @@ export function VoiceCallOverlay({
   const miniOffsetRef = useRef(savedMiniOffset);
   const miniSizeRef = useRef({ width: 280, height: 56 });
   const suppressExpandRef = useRef(false);
+  const [volumeOpenId, setVolumeOpenId] = useState<string | null>(null);
   const failed = status === 'error';
   const mediaReady = status === 'connected';
   const linking = status === 'connecting';
@@ -538,6 +822,7 @@ export function VoiceCallOverlay({
   useEffect(() => {
     if (!visible) {
       setDiceOpen(false);
+      setVolumeOpenId(null);
       savedMiniOffset = { x: 0, y: 0 };
       miniOffsetRef.current = savedMiniOffset;
       setMiniOffset(savedMiniOffset);
@@ -607,6 +892,7 @@ export function VoiceCallOverlay({
       badges: p.badges,
       frameId: p.avatarFrameId,
       urgent: Boolean(urgentById[p.identity]),
+      volume: p.isLocal ? undefined : clamp01(volumeById[p.identity] ?? 1),
     }));
     const liveIds = new Set(live.map((p) => p.key));
     for (const peer of waitingPeers) {
@@ -638,7 +924,19 @@ export function VoiceCallOverlay({
       }
       return a.name.localeCompare(b.name, 'ru');
     });
-  }, [participants, profileAvatarUrl, urgentById, waitingPeers]);
+  }, [participants, profileAvatarUrl, urgentById, volumeById, waitingPeers]);
+
+  useEffect(() => {
+    if (!volumeOpenId) {
+      return;
+    }
+    const stillThere = tiles.some(
+      (tile) => tile.key === volumeOpenId && !tile.isLocal && !tile.waiting,
+    );
+    if (!stillThere) {
+      setVolumeOpenId(null);
+    }
+  }, [tiles, volumeOpenId]);
 
   const liveCount = participants.length;
   const localUrgent = participants.some((p) => p.isLocal && Boolean(urgentById[p.identity]));
@@ -995,6 +1293,20 @@ export function VoiceCallOverlay({
                   avatarSize={layout.avatarSize}
                   tileWidth={layout.tileWidth}
                   videoHeight={layout.videoHeight}
+                  volumeOpen={volumeOpenId === tile.key}
+                  onToggleVolume={
+                    onSetParticipantVolume && !tile.isLocal && !tile.waiting
+                      ? () =>
+                          setVolumeOpenId((current) =>
+                            current === tile.key ? null : tile.key,
+                          )
+                      : undefined
+                  }
+                  onVolumeChange={
+                    onSetParticipantVolume && !tile.isLocal && !tile.waiting
+                      ? (volume) => onSetParticipantVolume(tile.key, volume)
+                      : undefined
+                  }
                 />
               ))}
             </View>
@@ -1389,6 +1701,7 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     backgroundColor: '#2B2D31',
     overflow: 'visible',
+    position: 'relative',
   },
   tileVideo: {
     paddingHorizontal: 6,
@@ -1516,6 +1829,160 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '700',
     marginTop: -4,
+  },
+  tileMedia: {
+    position: 'relative',
+    width: '100%',
+    alignItems: 'center',
+  },
+  volumeChip: {
+    position: 'absolute',
+    top: 6,
+    right: 6,
+    zIndex: 4,
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(15, 16, 18, 0.72)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.14)',
+    ...Platform.select({
+      web: { backdropFilter: 'blur(8px)', cursor: 'pointer' } as object,
+      default: {},
+    }),
+  },
+  volumeChipMuted: {
+    backgroundColor: 'rgba(237, 66, 69, 0.92)',
+    borderColor: 'rgba(255,255,255,0.2)',
+  },
+  volumeChipOpen: {
+    borderColor: 'rgba(132, 185, 255, 0.65)',
+    backgroundColor: 'rgba(21, 122, 254, 0.28)',
+  },
+  volumeDockOverlay: {
+    position: 'absolute',
+    left: 8,
+    right: 8,
+    bottom: 8,
+    zIndex: 3,
+  },
+  volumeDockSide: {
+    position: 'absolute',
+    right: -4,
+    top: '50%',
+    marginTop: -72,
+    zIndex: 3,
+  },
+  volumeDock: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    borderRadius: 14,
+    backgroundColor: 'rgba(15, 16, 18, 0.82)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.12)',
+    ...Platform.select({
+      web: { backdropFilter: 'blur(12px)' } as object,
+      default: {},
+    }),
+  },
+  volumeDockHorizontal: {
+    width: '100%',
+  },
+  volumeDockVertical: {
+    flexDirection: 'column',
+    width: 44,
+    paddingVertical: 10,
+    paddingHorizontal: 8,
+    gap: 10,
+  },
+  volumeMuteBtn: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.08)',
+  },
+  volumeMuteBtnActive: {
+    backgroundColor: '#ED4245',
+  },
+  volumeTrackHit: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  volumeTrackHitHorizontal: {
+    height: 28,
+    minWidth: 64,
+  },
+  volumeTrackHitVertical: {
+    width: 28,
+    height: 96,
+    flex: 0,
+  },
+  volumeTrackRail: {
+    borderRadius: 999,
+    backgroundColor: 'rgba(255,255,255,0.16)',
+    overflow: 'hidden',
+  },
+  volumeTrackRailHorizontal: {
+    width: '100%',
+    height: 5,
+  },
+  volumeTrackRailVertical: {
+    width: 5,
+    height: '100%',
+    justifyContent: 'flex-end',
+  },
+  volumeTrackRailActiveHorizontal: {
+    height: 7,
+    backgroundColor: 'rgba(255,255,255,0.22)',
+  },
+  volumeTrackRailActiveVertical: {
+    width: 7,
+    backgroundColor: 'rgba(255,255,255,0.22)',
+  },
+  volumeFill: {
+    borderRadius: 999,
+    backgroundColor: '#4B99FF',
+  },
+  volumeFillMuted: {
+    backgroundColor: 'rgba(255,255,255,0.28)',
+  },
+  volumeThumb: {
+    position: 'absolute',
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 2,
+    borderColor: '#4B99FF',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.35,
+    shadowRadius: 2,
+    elevation: 3,
+  },
+  volumeThumbActive: {
+    borderColor: '#84B9FF',
+    transform: [{ scale: 1.12 }],
+  },
+  volumePercent: {
+    minWidth: 36,
+    textAlign: 'right',
+    color: '#DCDDDE',
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  volumePercentMuted: {
+    color: '#F23F43',
+    textAlign: 'center',
+    minWidth: 32,
   },
   controls: {
     flexDirection: 'row',

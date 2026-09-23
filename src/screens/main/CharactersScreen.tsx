@@ -14,6 +14,7 @@ import { Ionicons } from '@expo/vector-icons';
 
 import { CharacterCard } from '@/components/characters/CharacterCard';
 import { AuthorsBar } from '@/components/authors/AuthorsBar';
+import { PartnersTicker } from '@/components/partners/PartnersTicker';
 import { fetchMyRewards } from '@/services/rewards/rewardsApi';
 import { BASE_CHARACTER_SLOTS } from '@/data/rewards/catalog';
 import {
@@ -422,6 +423,8 @@ export default function CharactersScreen() {
             )}
 
             <AuthorsBar authors={authors} />
+
+            <PartnersTicker />
 
             <View style={styles.scopeSwitcher}>
               <Switcher

@@ -28,12 +28,19 @@ export function ThemeProvider({ children }) {
         }
         const root = document.documentElement;
         const body = document.body;
-        const bg = colorScheme === 'dark' ? '#000000' : '#FFFFFF';
-        const fg = colorScheme === 'dark' ? '#FFFFFF' : '#000000';
+        const palette = Palettes[colorScheme];
+        const bg = palette.background;
+        const fg = palette.text;
         root.style.colorScheme = colorScheme;
         root.dataset.theme = colorScheme;
         root.style.backgroundColor = bg;
         root.style.color = fg;
+        root.style.setProperty('--adventura-toast-bg', palette.surface);
+        root.style.setProperty('--adventura-toast-fg', palette.text);
+        root.style.setProperty('--adventura-toast-muted', palette.textSecondary);
+        root.style.setProperty('--adventura-toast-border', palette.border);
+        root.style.setProperty('--adventura-toast-action-bg', colorScheme === 'dark' ? 'rgba(21, 122, 254, 0.22)' : 'rgba(21, 122, 254, 0.12)');
+        root.style.setProperty('--adventura-toast-action-fg', colorScheme === 'dark' ? palette.primaryLight : palette.primary);
         if (body) {
             body.style.backgroundColor = bg;
             body.style.color = fg;

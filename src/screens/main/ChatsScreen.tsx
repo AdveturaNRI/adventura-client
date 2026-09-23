@@ -25,6 +25,7 @@ import { DeleteChatDialog } from '@/components/chats/DeleteChatDialog';
 import { MobileScreenHeader } from '@/components/navigation/MobileScreenHeader';
 import { UserAvatar } from '@/components/navigation/UserAvatar';
 import { useIsDesktopSidebarVisible } from '@/components/navigation/DesktopThemeToggle';
+import { PartnersTicker } from '@/components/partners/PartnersTicker';
 import { ScreenTransition } from '@/components/navigation/ScreenTransition';
 import { avatarFrameOuterSize } from '@/components/rewards/AvatarFrame';
 import { toast } from '@/components/ui';
@@ -50,6 +51,11 @@ import {
 import { ApiError } from '@/services/api/api-error';
 import { upsertWandererReaction, clearWandererReaction } from '@/services/profile/wanderersApi';
 import { diceRollPreviewText, parseDiceRollPayload } from '@/utils/chat-dice-roll';
+import {
+  getCachedConversations,
+  removeCachedConversation,
+  setCachedConversations,
+} from '@/utils/chat-thread-cache';
 import { localizeErrorMessage } from '@/utils/localizeError';
 
 function isGroupChat(item: ConversationListItem) {
@@ -74,6 +80,11 @@ function stableAvatarUrl(prevUrl?: string | null, nextUrl?: string | null) {
   return prevPath === nextPath ? prev : next;
 }
 
+/** Время активности для сортировки списка — превью события/сообщения, не «сырой» updatedAt. */
+function conversationActivityAt(item: ConversationListItem) {
+  return item.lastMessage?.createdAt ?? item.updatedAt;
+}
+
 function sortConversations(items: ConversationListItem[]) {
   return [...items].sort((left, right) => {
     const leftPinned = Boolean(left.isPinned);
@@ -88,8 +99,43 @@ function sortConversations(items: ConversationListItem[]) {
         return leftOrder - rightOrder;
       }
     }
-    return right.updatedAt.localeCompare(left.updatedAt);
+    return conversationActivityAt(right).localeCompare(conversationActivityAt(left));
   });
+}
+
+/**
+ * Не даём устаревшему conversation:updated / локальному publish
+ * откатить lastMessage и позицию после message:new (события избранного и т.п.).
+ */
+function mergeConversationListItem(
+  prev: ConversationListItem,
+  incoming: ConversationListItem,
+): ConversationListItem {
+  const nextPeer = incoming.peer;
+  const prevPeer = prev.peer;
+  const peer =
+    nextPeer && prevPeer && nextPeer.id === prevPeer.id
+      ? {
+          ...nextPeer,
+          avatarUrl: stableAvatarUrl(prevPeer.avatarUrl, nextPeer.avatarUrl),
+          avatarFrameId: nextPeer.avatarFrameId ?? prevPeer.avatarFrameId,
+          badges: nextPeer.badges ?? prevPeer.badges,
+          nickname: nextPeer.nickname || prevPeer.nickname,
+        }
+      : nextPeer;
+
+  const prevActivity = conversationActivityAt(prev);
+  const incomingActivity = conversationActivityAt(incoming);
+  const keepPrevActivity = prevActivity > incomingActivity;
+
+  return {
+    ...incoming,
+    peer,
+    isPinned: incoming.isPinned ?? prev.isPinned,
+    pinSortOrder: incoming.pinSortOrder ?? prev.pinSortOrder ?? null,
+    updatedAt: keepPrevActivity ? prev.updatedAt : incoming.updatedAt,
+    lastMessage: keepPrevActivity ? prev.lastMessage : incoming.lastMessage,
+  };
 }
 
 function conversationTitle(item: ConversationListItem) {
@@ -539,8 +585,10 @@ export default function ChatsScreen({ variant = 'page' }: ChatsScreenProps) {
   } = useRealtime();
   const { user } = useAuth();
 
-  const [items, setItems] = useState<ConversationListItem[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [items, setItems] = useState<ConversationListItem[]>(
+    () => getCachedConversations() ?? [],
+  );
+  const [loading, setLoading] = useState(() => !getCachedConversations());
   const [pendingDelete, setPendingDelete] = useState<ConversationListItem | null>(null);
   const [pendingBlock, setPendingBlock] = useState<ConversationListItem | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
@@ -557,12 +605,17 @@ export default function ChatsScreen({ variant = 'page' }: ChatsScreenProps) {
   const load = useCallback(async () => {
     try {
       const next = await listConversations();
+      setCachedConversations(next);
       setItems((prev) => {
         // Only merge onto conversations that still exist on the server.
         // Stale local rows (already deleted for everyone) must not resurrect.
         const merged = next.map((incoming) => {
           const local = prev.find((item) => item.id === incoming.id);
-          if (!local || local.updatedAt <= incoming.updatedAt) {
+          const localActivity = local
+            ? conversationActivityAt(local)
+            : '';
+          const incomingActivity = conversationActivityAt(incoming);
+          if (!local || localActivity <= incomingActivity) {
             return incoming;
           }
           return {
@@ -575,7 +628,9 @@ export default function ChatsScreen({ variant = 'page' }: ChatsScreenProps) {
             pinSortOrder: incoming.pinSortOrder,
           };
         });
-        return sortConversations(merged);
+        const sorted = sortConversations(merged);
+        setCachedConversations(sorted);
+        return sorted;
       });
     } catch (error) {
       toast.error(localizeErrorMessage(error, 'Не удалось загрузить чаты'));
@@ -597,32 +652,15 @@ export default function ChatsScreen({ variant = 'page' }: ChatsScreenProps) {
     setItems((prev) => {
       const exists = prev.some((item) => item.id === lastConversationUpdate.id);
       const next = exists
-        ? prev.map((item) => {
-            if (item.id !== lastConversationUpdate.id) {
-              return item;
-            }
-            const nextPeer = lastConversationUpdate.peer;
-            const prevPeer = item.peer;
-            const peer =
-              nextPeer && prevPeer && nextPeer.id === prevPeer.id
-                ? {
-                    ...nextPeer,
-                    avatarUrl: stableAvatarUrl(prevPeer.avatarUrl, nextPeer.avatarUrl),
-                    avatarFrameId: nextPeer.avatarFrameId ?? prevPeer.avatarFrameId,
-                    badges: nextPeer.badges ?? prevPeer.badges,
-                    nickname: nextPeer.nickname || prevPeer.nickname,
-                  }
-                : nextPeer;
-            return {
-              ...lastConversationUpdate,
-              peer,
-              isPinned: lastConversationUpdate.isPinned ?? item.isPinned,
-              pinSortOrder:
-                lastConversationUpdate.pinSortOrder ?? item.pinSortOrder ?? null,
-            };
-          })
+        ? prev.map((item) =>
+            item.id === lastConversationUpdate.id
+              ? mergeConversationListItem(item, lastConversationUpdate)
+              : item,
+          )
         : [lastConversationUpdate, ...prev];
-      return sortConversations(next);
+      const sorted = sortConversations(next);
+      setCachedConversations(sorted);
+      return sorted;
     });
   }, [lastConversationUpdate]);
 
@@ -712,7 +750,9 @@ export default function ChatsScreen({ variant = 'page' }: ChatsScreenProps) {
       };
 
       const without = prev.filter((item) => item.id !== lastMessage.conversationId);
-      return sortConversations([nextItem, ...without]);
+      const sorted = sortConversations([nextItem, ...without]);
+      setCachedConversations(sorted);
+      return sorted;
     });
   }, [lastMessage, load, user?.id]);
 
@@ -723,6 +763,7 @@ export default function ChatsScreen({ variant = 'page' }: ChatsScreenProps) {
     setItems((prev) =>
       prev.filter((item) => item.id !== lastConversationDeleted.conversationId),
     );
+    removeCachedConversation(lastConversationDeleted.conversationId);
   }, [lastConversationDeleted]);
 
   const handleDelete = useCallback(async (forEveryone: boolean) => {
@@ -733,6 +774,7 @@ export default function ChatsScreen({ variant = 'page' }: ChatsScreenProps) {
     setIsDeleting(true);
     // Optimistic local remove — chat may already be gone on the server (404).
     setItems((prev) => prev.filter((item) => item.id !== targetId));
+    removeCachedConversation(targetId);
     setPendingDelete(null);
     if (pathname?.includes(targetId)) {
       router.replace('/chats');
@@ -791,41 +833,45 @@ export default function ChatsScreen({ variant = 'page' }: ChatsScreenProps) {
     }
   }, []);
 
-  const handleFavorite = useCallback(
-    async (item: ConversationListItem) => {
-      if (!item.peer || item.isFavorite || item.blockedByMe || item.blockedMe) {
-        return;
-      }
-      try {
-        await upsertWandererReaction(item.peer.id, 'favorite');
-        const next = { ...item, isFavorite: true };
-        setItems((prev) => prev.map((row) => (row.id === next.id ? next : row)));
-        publishConversationUpdate(next);
-        toast.success(`${item.peer.nickname} добавлен в избранные`);
-      } catch (error) {
-        toast.error(localizeErrorMessage(error, 'Не удалось добавить в избранные'));
-      }
-    },
-    [publishConversationUpdate],
-  );
+  const handleFavorite = useCallback(async (item: ConversationListItem) => {
+    if (!item.peer || item.isFavorite || item.blockedByMe || item.blockedMe) {
+      return;
+    }
+    try {
+      await upsertWandererReaction(item.peer.id, 'favorite');
+      // Только флаг — lastMessage/позицию подтянет realtime (message:new).
+      // Нельзя публиковать снимок `item` до await: он затрёт событие и вернёт чат вниз.
+      setItems((prev) => {
+        const next = prev.map((row) =>
+          row.id === item.id ? { ...row, isFavorite: true } : row,
+        );
+        setCachedConversations(next);
+        return next;
+      });
+      toast.success(`${item.peer.nickname} добавлен в избранные`);
+    } catch (error) {
+      toast.error(localizeErrorMessage(error, 'Не удалось добавить в избранные'));
+    }
+  }, []);
 
-  const handleUnfavorite = useCallback(
-    async (item: ConversationListItem) => {
-      if (!item.peer || !item.isFavorite || item.blockedByMe || item.blockedMe) {
-        return;
-      }
-      try {
-        await clearWandererReaction(item.peer.id);
-        const next = { ...item, isFavorite: false };
-        setItems((prev) => prev.map((row) => (row.id === next.id ? next : row)));
-        publishConversationUpdate(next);
-        toast.success(`${item.peer.nickname} удалён из избранных`);
-      } catch (error) {
-        toast.error(localizeErrorMessage(error, 'Не удалось удалить из избранных'));
-      }
-    },
-    [publishConversationUpdate],
-  );
+  const handleUnfavorite = useCallback(async (item: ConversationListItem) => {
+    if (!item.peer || !item.isFavorite || item.blockedByMe || item.blockedMe) {
+      return;
+    }
+    try {
+      await clearWandererReaction(item.peer.id);
+      setItems((prev) => {
+        const next = prev.map((row) =>
+          row.id === item.id ? { ...row, isFavorite: false } : row,
+        );
+        setCachedConversations(next);
+        return next;
+      });
+      toast.success(`${item.peer.nickname} удалён из избранных`);
+    } catch (error) {
+      toast.error(localizeErrorMessage(error, 'Не удалось удалить из избранных'));
+    }
+  }, []);
 
   const handlePin = useCallback(
     async (item: ConversationListItem) => {
@@ -878,7 +924,9 @@ export default function ChatsScreen({ variant = 'page' }: ChatsScreenProps) {
       const pinned = data.filter((item) => item.isPinned);
       const unpinned = data
         .filter((item) => !item.isPinned)
-        .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+        .sort((left, right) =>
+          conversationActivityAt(right).localeCompare(conversationActivityAt(left)),
+        );
       const nextPinned = pinned.map((item, index) => ({
         ...item,
         pinSortOrder: index,
@@ -1161,6 +1209,8 @@ export default function ChatsScreen({ variant = 'page' }: ChatsScreenProps) {
             </Pressable>
           </View>
         )}
+
+        {!isRail ? <PartnersTicker /> : null}
 
         {loading ? (
           <View style={pageStyles.stateWrap}>

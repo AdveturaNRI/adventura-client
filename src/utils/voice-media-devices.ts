@@ -59,6 +59,8 @@ let primedMicInflight: Promise<MediaStream | null> | null = null;
 let primedMicReady: MediaStream | null = null;
 /** Last getUserMedia failure from a gesture prime (surfaces NotAllowedError instead of silent null). */
 let primedMicError: Error | null = null;
+/** Bumped on discard so late getUserMedia results are stopped instead of kept live. */
+let primedMicGeneration = 0;
 
 export function beginMicrophonePrimeFromGesture(): void {
   if (!canUseMediaDevices() || !navigator.mediaDevices.getUserMedia) {
@@ -75,6 +77,7 @@ export function beginMicrophonePrimeFromGesture(): void {
   }
 
   primedMicError = null;
+  const generation = primedMicGeneration;
 
   // CRITICAL (iOS Safari): getUserMedia must start in the same sync turn as the tap.
   // Any await before it (AudioContext.resume, network) drops user-activation → NotAllowedError.
@@ -98,10 +101,17 @@ export function beginMicrophonePrimeFromGesture(): void {
 
     try {
       const stream = await gumPromise;
+      if (generation !== primedMicGeneration) {
+        stopMediaStream(stream);
+        return null;
+      }
       primedMicReady = stream;
       primedMicError = null;
       return stream;
     } catch (error) {
+      if (generation !== primedMicGeneration) {
+        return null;
+      }
       const message = error instanceof Error ? error.message : String(error);
       const name = error instanceof DOMException ? error.name : '';
       if (name === 'NotAllowedError' || /not allowed by the user agent|permission/i.test(message)) {
@@ -111,7 +121,9 @@ export function beginMicrophonePrimeFromGesture(): void {
       }
       return null;
     } finally {
-      primedMicInflight = null;
+      if (generation === primedMicGeneration) {
+        primedMicInflight = null;
+      }
     }
   })();
 }
@@ -177,8 +189,10 @@ export function stopMediaStream(stream: MediaStream | null | undefined): void {
   }
 }
 
-/** Drop an unused primed stream (e.g. user cancelled before join). */
+/** Drop an unused primed stream (e.g. user cancelled before join / app focus). */
 export function discardPrimedMicrophone(): void {
+  primedMicGeneration += 1;
+  primedMicInflight = null;
   if (primedMicReady) {
     stopMediaStream(primedMicReady);
     primedMicReady = null;

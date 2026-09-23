@@ -24,6 +24,7 @@ import { DiceStage, type DiceStageHandle } from '@/components/dice/DiceStage';
 import type { DiceRollOutcome } from '@/components/dice/dice-stage.types';
 import { MobileScreenHeader } from '@/components/navigation/MobileScreenHeader';
 import { useIsDesktopSidebarVisible } from '@/components/navigation/DesktopThemeToggle';
+import { PartnersTicker } from '@/components/partners/PartnersTicker';
 import { ScreenTransition } from '@/components/navigation/ScreenTransition';
 import { FontSize, Spacing, type ThemeColors } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
@@ -775,8 +776,9 @@ function createStyles(colors: ThemeColors) {
     },
     colorBar: {
       paddingHorizontal: Spacing.sm,
-      paddingBottom: Spacing.sm,
-      gap: Spacing.sm,
+      paddingBottom: 4,
+      gap: 6,
+      flexShrink: 0,
     },
     colorBarCompact: {
       paddingHorizontal: 0,
@@ -787,16 +789,17 @@ function createStyles(colors: ThemeColors) {
       flexDirection: 'row',
       flexWrap: 'wrap',
       alignItems: 'center',
-      gap: 6,
+      gap: 8,
+      rowGap: 6,
     },
     controlsStripGroup: {
       flexDirection: 'row',
       alignItems: 'center',
-      gap: 4,
+      gap: 6,
       flexWrap: 'wrap',
     },
     modRow: {
-      gap: 6,
+      gap: 4,
       paddingHorizontal: 4,
     },
     modLabel: {
@@ -857,7 +860,7 @@ function createStyles(colors: ThemeColors) {
       color: colors.onPrimary,
     },
     speedRow: {
-      gap: 6,
+      gap: 4,
       paddingHorizontal: 4,
     },
     speedLabel: {
@@ -1652,25 +1655,17 @@ export default function DiceScreen() {
           }}
         />
       ) : null}
-      {compact ? (
-        <View style={styles.controlsStrip}>
-          <View style={styles.controlsStripGroup}>{modControls}</View>
-          <View style={styles.controlsStripGroup}>{modeChips}</View>
-          <View style={styles.controlsStripGroup}>{speedChips}</View>
+      <View style={styles.controlsStrip}>
+        <View style={styles.controlsStripGroup}>
+          {!compact ? <Text style={styles.modLabel}>Модификатор</Text> : null}
+          {modControls}
         </View>
-      ) : (
-        <>
-          <View style={styles.modRow}>
-            <Text style={styles.modLabel}>Модификатор</Text>
-            {modControls}
-          </View>
-          <View style={styles.modeRow}>{modeChips}</View>
-          <View style={styles.speedRow}>
-            <Text style={styles.speedLabel}>Анимация</Text>
-            {speedChips}
-          </View>
-        </>
-      )}
+        <View style={styles.controlsStripGroup}>{modeChips}</View>
+        <View style={styles.controlsStripGroup}>
+          {!compact ? <Text style={styles.speedLabel}>Анимация</Text> : null}
+          {speedChips}
+        </View>
+      </View>
     </View>
   );
 
@@ -1770,6 +1765,8 @@ export default function DiceScreen() {
       ) : (
         <MobileScreenHeader title="Дайсы" />
       )}
+
+      <PartnersTicker />
 
       {compact ? (
         <ScrollView

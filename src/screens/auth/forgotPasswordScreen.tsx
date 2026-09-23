@@ -1,8 +1,13 @@
 import { useState } from 'react';
-import { Pressable, StyleSheet, View } from 'react-native';
+import { Pressable, StyleSheet, useWindowDimensions, View } from 'react-native';
 import { Link, useRouter } from 'expo-router';
 
 import { AuthScreenLayout } from '@/components/auth/AuthScreenLayout';
+import {
+  AUTH_COMPACT_HEIGHT,
+  createAuthScreenLayoutStyles,
+} from '@/components/auth/auth-screen-layout.styles';
+import { useIsDesktopWeb } from '@/components/navigation/DesktopThemeToggle';
 import {
   Button,
   Caption,
@@ -17,27 +22,48 @@ import { forgotPassword } from '@/services/auth/authApi';
 import { localizeErrorMessage } from '@/utils/localizeError';
 import { getEmailError } from '@/utils/validateAuth';
 
-function createStyles(_colors: ThemeColors) {
+function createStyles(colors: ThemeColors, compact: boolean) {
   return StyleSheet.create({
     header: {
-      gap: Spacing.md,
+      gap: compact ? 10 : 14,
+      alignItems: 'center',
+    },
+    title: {
+      fontSize: compact ? 20 : 22,
+      lineHeight: compact ? 26 : 28,
+      fontWeight: '600',
+      letterSpacing: -0.3,
+      paddingHorizontal: Spacing.sm,
+    },
+    subtitle: {
+      textAlign: 'center',
+      color: colors.textMuted,
+      paddingHorizontal: Spacing.sm,
+      marginBottom: Spacing.xs,
     },
     form: {
-      gap: Spacing.md,
+      gap: compact ? 12 : Spacing.md,
+      width: '100%',
     },
     footer: {
       flexDirection: 'row',
       alignItems: 'center',
       justifyContent: 'center',
       gap: Spacing.sm,
-      paddingTop: Spacing.sm,
+      marginTop: Spacing.xs,
     },
   });
 }
 
 export default function ForgotPasswordScreen() {
   const router = useRouter();
-  const styles = useThemedStyles(createStyles);
+  const isDesktop = useIsDesktopWeb();
+  const { height } = useWindowDimensions();
+  const compact = height < AUTH_COMPACT_HEIGHT;
+  const styles = useThemedStyles((colors) => createStyles(colors, compact));
+  const layoutStyles = useThemedStyles((colors) =>
+    createAuthScreenLayoutStyles(colors, isDesktop, compact),
+  );
   const [email, setEmail] = useState('');
   const [error, setError] = useState<string | undefined>();
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -63,11 +89,11 @@ export default function ForgotPasswordScreen() {
   return (
     <AuthScreenLayout>
       <View style={styles.header}>
-        <H1>{'Восстановление\nпароля'}</H1>
-        <Caption>
+        <H1 style={styles.title}>Восстановление пароля</H1>
+        <Caption style={styles.subtitle}>
           {sent
-            ? 'Проверьте почту — если аккаунт существует, там будет ссылка на сброс (1 час).'
-            : 'Укажите email аккаунта. Мы отправим ссылку для сброса пароля.'}
+            ? 'Проверьте почту — если аккаунт есть, там будет ссылка на сброс (1 час).'
+            : 'Укажите email — пришлём ссылку для сброса пароля.'}
         </Caption>
       </View>
 
@@ -86,6 +112,7 @@ export default function ForgotPasswordScreen() {
             textContentType="emailAddress"
             placeholder="example@mail.com"
             error={error}
+            style={layoutStyles.softField}
           />
         </View>
       ) : null}
@@ -94,9 +121,14 @@ export default function ForgotPasswordScreen() {
         <Button
           label={isSubmitting ? 'Отправляем...' : 'Отправить ссылку'}
           onPress={handleSubmit}
+          style={layoutStyles.authButton}
         />
       ) : (
-        <Button label="Назад ко входу" onPress={() => router.replace('/auth/login')} />
+        <Button
+          label="Назад ко входу"
+          onPress={() => router.replace('/auth/login')}
+          style={layoutStyles.authButton}
+        />
       )}
 
       <View style={styles.footer}>

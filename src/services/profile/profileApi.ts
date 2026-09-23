@@ -58,7 +58,9 @@ let inflightProfileRequest: Promise<UserProfile> | null = null;
 
 export function getProfile() {
   if (!inflightProfileRequest) {
-    inflightProfileRequest = apiRequest<UserProfile>('/users/me').finally(() => {
+    inflightProfileRequest = apiRequest<UserProfile>('/users/me', {
+      skipLoading: true,
+    }).finally(() => {
       inflightProfileRequest = null;
     });
   }

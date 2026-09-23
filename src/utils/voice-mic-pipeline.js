@@ -40,15 +40,18 @@ export class AdventuraMicProcessor {
         this.gainValue = clampMicGain(gain);
         this.noiseSuppression = noiseSuppression;
     }
-    get usesKrisp() {
-        return this.usedKrisp;
+  get usesKrisp() {
+    return this.usedKrisp;
+  }
+  get noiseSuppressionEnabled() {
+    return this.noiseSuppression;
+  }
+  setGain(gain) {
+    this.gainValue = clampMicGain(gain);
+    if (this.gainNode) {
+      this.gainNode.gain.value = this.gainValue;
     }
-    setGain(gain) {
-        this.gainValue = clampMicGain(gain);
-        if (this.gainNode) {
-            this.gainNode.gain.value = this.gainValue;
-        }
-    }
+  }
     async init(opts) {
         this.ctx = opts.audioContext;
         let inputTrack = opts.track;
@@ -140,10 +143,18 @@ export async function applyMicPipelineToRoom(room, opts) {
     const existing = typeof track.getProcessor === 'function' ? track.getProcessor() : null;
     if (existing?.name === 'adventura-mic') {
         const current = existing;
-        if (typeof current.setGain === 'function') {
-            current.setGain(micGain);
+        if (current.noiseSuppressionEnabled === noiseSuppression) {
+            if (typeof current.setGain === 'function') {
+                current.setGain(micGain);
+            }
+            return { usedKrisp: current.usesKrisp };
         }
-        return { usedKrisp: current.usesKrisp };
+        try {
+            await track.stopProcessor();
+        }
+        catch {
+            // continue and attach a fresh processor
+        }
     }
     const processor = new AdventuraMicProcessor(micGain, noiseSuppression);
     try {
@@ -158,5 +169,59 @@ export async function applyMicPipelineToRoom(room, opts) {
             // ignore
         }
         return { usedKrisp: false };
+    }
+}
+export async function syncVoicePrefsToRoom(room, opts) {
+    const micGain = clampMicGain(opts?.micGain ?? MIC_GAIN_DEFAULT);
+    const noiseSuppression = opts?.noiseSuppression ?? NOISE_SUPPRESSION_DEFAULT;
+    const deviceId = opts?.deviceId?.trim() || null;
+    if (deviceId) {
+        try {
+            await room.switchActiveDevice('audioinput', deviceId);
+        }
+        catch {
+            // device may have been unplugged — keep current mic
+        }
+    }
+    const pub = room.localParticipant.getTrackPublication(Track.Source.Microphone);
+    const track = pub?.track;
+    if (track && typeof track.applyConstraints === 'function') {
+        try {
+            await track.applyConstraints({
+                noiseSuppression,
+                echoCancellation: true,
+                autoGainControl: Math.abs(micGain - 1) < 0.05,
+                voiceIsolation: false,
+            });
+        }
+        catch {
+            // mobile Safari rejects some constraint updates mid-call
+        }
+    }
+    if (room.localParticipant.isMicrophoneEnabled && Platform.OS === 'web') {
+        // Reuse applyMicPipelineToRoom's processor attach path via a lightweight re-set
+        const existing = typeof track?.getProcessor === 'function' ? track.getProcessor() : null;
+        if (existing?.name === 'adventura-mic' && existing.noiseSuppressionEnabled === noiseSuppression) {
+            if (typeof existing.setGain === 'function') {
+                existing.setGain(micGain);
+            }
+            return;
+        }
+        if (track && typeof track.setProcessor === 'function') {
+            try {
+                if (existing) {
+                    await track.stopProcessor();
+                }
+            }
+            catch {
+                // ignore
+            }
+            try {
+                await track.setProcessor(new AdventuraMicProcessor(micGain, noiseSuppression));
+            }
+            catch {
+                // ignore
+            }
+        }
     }
 }
