@@ -57,7 +57,7 @@ const FOLDER_CARD_WIDTH_MOBILE = '47%' as const;
 const DRAG_MIME = 'application/x-adventura-music-track';
 const IS_WEB = Platform.OS === 'web';
 
-type LinkSourceKind = 'yandex' | 'google' | 'direct';
+type LinkSourceKind = 'yandex' | 'direct';
 
 const LINK_SOURCES: {
   key: LinkSourceKind;
@@ -70,12 +70,6 @@ const LINK_SOURCES: {
     label: 'Яндекс Диск',
     hint: 'Публичная ссылка на файл — играет напрямую с Диска',
     placeholder: 'https://disk.yandex.ru/d/…',
-  },
-  {
-    key: 'google',
-    label: 'Google Диск',
-    hint: 'Ссылка на файл с доступом «все, у кого есть ссылка»',
-    placeholder: 'https://drive.google.com/file/d/…',
   },
   {
     key: 'direct',
@@ -93,13 +87,8 @@ function looksLikeLinkSource(url: string, kind: LinkSourceKind): boolean {
       host === 'disk.yandex.com' ||
       host === 'yadi.sk' ||
       host.endsWith('.disk.yandex.net');
-    const isGoogle =
-      host === 'drive.google.com' ||
-      host === 'docs.google.com' ||
-      host === 'drive.usercontent.google.com';
     if (kind === 'yandex') return isYandex;
-    if (kind === 'google') return isGoogle;
-    return !isYandex && !isGoogle;
+    return !isYandex;
   } catch {
     return false;
   }
@@ -1134,7 +1123,6 @@ export default function MusicLibraryScreen() {
     if (!looksLikeLinkSource(url, linkSource)) {
       const labels: Record<LinkSourceKind, string> = {
         yandex: 'Яндекс Диска',
-        google: 'Google Диска',
         direct: 'прямую ссылку на файл',
       };
       toast.error(`Это не похоже на ссылку ${labels[linkSource]}`);
@@ -1627,7 +1615,7 @@ export default function MusicLibraryScreen() {
                       />
                       <Text style={styles.emptyText}>
                         Пока пусто. Загрузите файл с устройства или добавьте
-                        ссылку (Яндекс Диск, Google Диск, прямой mp3) — до 20 МБ
+                        ссылку (Яндекс Диск или прямой mp3) — до 20 МБ
                         на файл.
                       </Text>
                       <Button
@@ -1726,7 +1714,7 @@ export default function MusicLibraryScreen() {
                 <View style={styles.choiceCopy}>
                   <Text style={styles.choiceTitle}>По ссылке</Text>
                   <Text style={styles.choiceMeta}>
-                    Яндекс Диск, Google Диск или прямая ссылка на mp3
+                    Яндекс Диск или прямая ссылка на mp3
                   </Text>
                 </View>
                 <Ionicons name="chevron-forward" size={18} color={colors.primary} />
