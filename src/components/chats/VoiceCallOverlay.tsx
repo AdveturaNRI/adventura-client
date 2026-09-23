@@ -1,5 +1,5 @@
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   ActivityIndicator,
   Animated,
@@ -23,11 +23,15 @@ import { NameWithBadges } from '@/components/rewards/RewardBadge';
 import { UserAvatar } from '@/components/navigation/UserAvatar';
 import type { RewardBadgeType } from '@/data/rewards/catalog';
 import { VoiceCallDiceLayer } from '@/components/chats/VoiceCallDiceLayer';
+import { CallBardSheet } from '@/components/chats/CallBardSheet';
+import type { CallMusicQueueEntry } from '@/hooks/use-call-shared-music';
 import { CallVideoView } from '@/components/chats/CallVideoView';
 import { FontSize, Radius, Spacing } from '@/constants/theme';
 import { useProfile } from '@/context/ProfileContext';
 import type { ChatLiveVoiceParticipant, ChatLiveVoiceStatus } from '@/hooks/use-chat-live-voice';
 import type { VideoTrack } from 'livekit-client';
+
+export const BARD_TILE_KEY = 'bard';
 
 type OverlayTile = {
   key: string;
@@ -46,6 +50,9 @@ type OverlayTile = {
   frameId?: string | null;
   /** Local playback gain 0…1 (remote only). */
   volume?: number;
+  isBard?: boolean;
+  bardPlaque?: string | null;
+  bardPlaying?: boolean;
 };
 
 export type VoiceCallWaitingPeer = {
@@ -87,6 +94,35 @@ type Props = {
   onExpand?: () => void;
   onUrgentRequest?: () => void;
   onSetParticipantVolume?: (identity: string, volume: number) => void;
+  canControlMusic?: boolean;
+  bardPresent?: boolean;
+  bardTrackTitle?: string | null;
+  bardPlaying?: boolean;
+  bardTrackId?: string | null;
+  bardCurrentEntryId?: string | null;
+  bardQueue?: CallMusicQueueEntry[];
+  bardPositionSec?: number;
+  bardDurationSec?: number;
+  bardLocalVolume?: number;
+  bardGlobalVolume?: number;
+  bardLocalDisplayName?: string;
+  onSummonBard?: () => void;
+  onDismissBard?: () => void;
+  onSetBardLocalVolume?: (volume: number) => void;
+  onEnqueueBardTrack?: (
+    trackId: string,
+    title: string,
+    durationSec: number | null,
+  ) => void;
+  onPlayBardQueueEntry?: (entryId: string) => void;
+  onRemoveBardQueueEntry?: (entryId: string) => void;
+  onToggleBardPlay?: () => void;
+  onSeekBard?: (positionSec: number) => void;
+  onStopBardTrack?: () => void;
+  onSetBardGlobalVolume?: (volume: number) => void;
+  onRequestBardSync?: () => void;
+  /** Unlock + retry Bard audio (web autoplay) from a user gesture. */
+  onResumeBardAudio?: () => void;
 };
 
 /** Survives expand/collapse while the call is up. */
@@ -242,6 +278,166 @@ function UrgentPulseRings({ size }: { size: number }) {
   );
 }
 
+/** Soft blue pulse + border shimmer while Bard is playing. */
+function BardPlayingAura({ size, active }: { size: number; active: boolean }) {
+  const pulseA = useRef(new Animated.Value(0)).current;
+  const pulseB = useRef(new Animated.Value(0)).current;
+  const shimmer = useRef(new Animated.Value(0)).current;
+  const breath = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    if (!active) {
+      pulseA.setValue(0);
+      pulseB.setValue(0);
+      shimmer.setValue(0);
+      breath.setValue(0);
+      return;
+    }
+
+    const makePulse = (value: Animated.Value, delayMs: number) =>
+      Animated.loop(
+        Animated.sequence([
+          Animated.delay(delayMs),
+          Animated.timing(value, {
+            toValue: 1,
+            duration: 1400,
+            easing: Easing.out(Easing.cubic),
+            useNativeDriver: true,
+          }),
+          Animated.timing(value, {
+            toValue: 0,
+            duration: 0,
+            useNativeDriver: true,
+          }),
+        ]),
+      );
+
+    const shimmerLoop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(shimmer, {
+          toValue: 1,
+          duration: 700,
+          easing: Easing.inOut(Easing.sin),
+          useNativeDriver: true,
+        }),
+        Animated.timing(shimmer, {
+          toValue: 0,
+          duration: 700,
+          easing: Easing.inOut(Easing.sin),
+          useNativeDriver: true,
+        }),
+      ]),
+    );
+
+    const breathLoop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(breath, {
+          toValue: 1,
+          duration: 1100,
+          easing: Easing.inOut(Easing.quad),
+          useNativeDriver: true,
+        }),
+        Animated.timing(breath, {
+          toValue: 0,
+          duration: 1100,
+          easing: Easing.inOut(Easing.quad),
+          useNativeDriver: true,
+        }),
+      ]),
+    );
+
+    const loopA = makePulse(pulseA, 0);
+    const loopB = makePulse(pulseB, 700);
+    loopA.start();
+    loopB.start();
+    shimmerLoop.start();
+    breathLoop.start();
+    return () => {
+      loopA.stop();
+      loopB.stop();
+      shimmerLoop.stop();
+      breathLoop.stop();
+      pulseA.setValue(0);
+      pulseB.setValue(0);
+      shimmer.setValue(0);
+      breath.setValue(0);
+    };
+  }, [active, breath, pulseA, pulseB, shimmer]);
+
+  if (!active) {
+    return null;
+  }
+
+  const ringStyle = (value: Animated.Value) => ({
+    width: size,
+    height: size,
+    borderRadius: size / 2,
+    opacity: value.interpolate({
+      inputRange: [0, 0.2, 1],
+      outputRange: [0.5, 0.28, 0],
+    }),
+    transform: [
+      {
+        scale: value.interpolate({
+          inputRange: [0, 1],
+          outputRange: [1, 1.48],
+        }),
+      },
+    ],
+  });
+
+  return (
+    <View pointerEvents="none" style={[styles.pulseLayer, { width: size, height: size }]}>
+      <Animated.View style={[styles.bardPulseRing, ringStyle(pulseA)]} />
+      <Animated.View style={[styles.bardPulseRing, ringStyle(pulseB)]} />
+      <Animated.View
+        style={[
+          styles.bardShimmerRing,
+          {
+            width: size,
+            height: size,
+            borderRadius: size / 2,
+            opacity: shimmer.interpolate({
+              inputRange: [0, 1],
+              outputRange: [0.35, 0.95],
+            }),
+            transform: [
+              {
+                scale: breath.interpolate({
+                  inputRange: [0, 1],
+                  outputRange: [1, 1.04],
+                }),
+              },
+            ],
+          },
+        ]}
+      />
+      <Animated.View
+        style={[
+          styles.bardCoreGlow,
+          {
+            width: size * 0.72,
+            height: size * 0.72,
+            borderRadius: (size * 0.72) / 2,
+            opacity: breath.interpolate({
+              inputRange: [0, 1],
+              outputRange: [0.22, 0.42],
+            }),
+            transform: [
+              {
+                scale: breath.interpolate({
+                  inputRange: [0, 1],
+                  outputRange: [0.92, 1.06],
+                }),
+              },
+            ],
+          },
+        ]}
+      />
+    </View>
+  );
+}
+
 function clamp01(value: number): number {
   if (!Number.isFinite(value)) {
     return 1;
@@ -268,16 +464,23 @@ function ParticipantVolumeDock({
   onChange,
   orientation,
   participantName,
+  caption,
 }: {
   value: number;
   onChange: (next: number) => void;
   orientation: 'horizontal' | 'vertical';
   participantName: string;
+  /** Visible Discord-style label above the slider. */
+  caption?: string;
 }) {
-  const trackBoxRef = useRef({ x: 0, y: 0, width: 1, height: 1 });
+  const trackSizeRef = useRef({ width: 1, height: 1 });
   const [dragging, setDragging] = useState(false);
   const beforeMuteRef = useRef(1);
   const appear = useRef(new Animated.Value(0)).current;
+  const onChangeRef = useRef(onChange);
+  onChangeRef.current = onChange;
+  const valueRef = useRef(value);
+  valueRef.current = value;
 
   useEffect(() => {
     appear.setValue(0);
@@ -289,33 +492,23 @@ function ParticipantVolumeDock({
     }).start();
   }, [appear]);
 
-  const applyFromPage = (pageX: number, pageY: number) => {
-    const box = trackBoxRef.current;
+  const applyFromLocal = (locationX: number, locationY: number) => {
+    const { width, height } = trackSizeRef.current;
+    let next: number;
     if (orientation === 'vertical') {
-      onChange(clamp01(1 - (pageY - box.y) / box.height));
+      next = 1 - locationY / Math.max(1, height);
+    } else {
+      next = locationX / Math.max(1, width);
+    }
+    if (!Number.isFinite(next)) {
       return;
     }
-    onChange(clamp01((pageX - box.x) / box.width));
+    onChangeRef.current(Math.min(1, Math.max(0, next)));
   };
 
   const onTrackLayout = (event: LayoutChangeEvent) => {
-    const target = event.target as unknown as {
-      measureInWindow?: (cb: (x: number, y: number, w: number, h: number) => void) => void;
-    };
-    if (typeof target?.measureInWindow === 'function') {
-      target.measureInWindow((x, y, w, h) => {
-        trackBoxRef.current = {
-          x,
-          y,
-          width: Math.max(1, w),
-          height: Math.max(1, h),
-        };
-      });
-      return;
-    }
     const { width, height } = event.nativeEvent.layout;
-    trackBoxRef.current = {
-      ...trackBoxRef.current,
+    trackSizeRef.current = {
       width: Math.max(1, width),
       height: Math.max(1, height),
     };
@@ -323,11 +516,11 @@ function ParticipantVolumeDock({
 
   const onGrant = (event: GestureResponderEvent) => {
     setDragging(true);
-    applyFromPage(event.nativeEvent.pageX, event.nativeEvent.pageY);
+    applyFromLocal(event.nativeEvent.locationX, event.nativeEvent.locationY);
   };
 
   const onMove = (event: GestureResponderEvent) => {
-    applyFromPage(event.nativeEvent.pageX, event.nativeEvent.pageY);
+    applyFromLocal(event.nativeEvent.locationX, event.nativeEvent.locationY);
   };
 
   const onRelease = () => {
@@ -351,10 +544,18 @@ function ParticipantVolumeDock({
   return (
     <Animated.View
       pointerEvents="box-none"
-      accessibilityLabel={`Громкость ${participantName}: ${fill}%`}
+      accessibilityLabel={
+        caption
+          ? `${caption}: ${fill}%`
+          : `Громкость ${participantName}: ${fill}%`
+      }
+      {...(Platform.OS === 'web' && caption
+        ? ({ title: caption } as object)
+        : null)}
       style={[
         styles.volumeDock,
         isVertical ? styles.volumeDockVertical : styles.volumeDockHorizontal,
+        caption ? styles.volumeDockWithCaption : null,
         {
           opacity: appear,
           transform: [
@@ -380,11 +581,25 @@ function ParticipantVolumeDock({
           ],
         },
       ]}>
+      {caption ? (
+        <Text style={styles.volumeCaption} numberOfLines={1}>
+          {caption}
+        </Text>
+      ) : null}
+      <View
+        style={[
+          styles.volumeDockControls,
+          isVertical ? styles.volumeDockControlsVertical : styles.volumeDockControlsHorizontal,
+        ]}>
       <Pressable
         accessibilityRole="button"
-        accessibilityLabel={muted ? 'Включить звук у себя' : 'Выключить звук у себя'}
+        accessibilityLabel={muted ? 'Включить звук' : 'Выключить звук'}
+        accessibilityHint="Только у тебя"
         hitSlop={6}
         onPress={toggleMute}
+        {...(Platform.OS === 'web'
+          ? ({ title: muted ? 'Включить звук' : 'Выключить звук' } as object)
+          : null)}
         style={({ pressed }) => [
           styles.volumeMuteBtn,
           muted && styles.volumeMuteBtnActive,
@@ -401,6 +616,9 @@ function ParticipantVolumeDock({
         onLayout={onTrackLayout}
         onStartShouldSetResponder={() => true}
         onMoveShouldSetResponder={() => true}
+        onStartShouldSetResponderCapture={() => true}
+        onMoveShouldSetResponderCapture={() => true}
+        onResponderTerminationRequest={() => false}
         onResponderGrant={onGrant}
         onResponderMove={onMove}
         onResponderRelease={onRelease}
@@ -409,7 +627,10 @@ function ParticipantVolumeDock({
           style={[
             styles.volumeTrackRail,
             isVertical ? styles.volumeTrackRailVertical : styles.volumeTrackRailHorizontal,
-            dragging && (isVertical ? styles.volumeTrackRailActiveVertical : styles.volumeTrackRailActiveHorizontal),
+            dragging &&
+              (isVertical
+                ? styles.volumeTrackRailActiveVertical
+                : styles.volumeTrackRailActiveHorizontal),
           ]}>
           <View
             style={[
@@ -438,6 +659,7 @@ function ParticipantVolumeDock({
         numberOfLines={1}>
         {muted ? 'выкл' : `${fill}%`}
       </Text>
+      </View>
     </Animated.View>
   );
 }
@@ -450,6 +672,8 @@ function ParticipantTile({
   volumeOpen,
   onToggleVolume,
   onVolumeChange,
+  onPress,
+  onOpenMenu,
 }: {
   tile: OverlayTile;
   avatarSize: number;
@@ -458,6 +682,8 @@ function ParticipantTile({
   volumeOpen?: boolean;
   onToggleVolume?: () => void;
   onVolumeChange?: (volume: number) => void;
+  onPress?: () => void;
+  onOpenMenu?: () => void;
 }) {
   const avatarOuter = avatarFrameOuterSize(avatarSize);
   const ringBox = avatarOuter + 8;
@@ -469,6 +695,48 @@ function ParticipantTile({
   // Narrow tiles: vertical dock on the side; wide / video: horizontal under media.
   const volumeOrientation: 'horizontal' | 'vertical' =
     !showVideo && tileWidth < 168 ? 'vertical' : 'horizontal';
+  const volumeCaption = tile.isBard ? 'Громкость у тебя' : 'Громкость пользователя';
+  const volumeChipTip = tile.isBard
+    ? 'Громкость у тебя'
+    : `Громкость · ${tile.name}`;
+
+  const openMenu = () => {
+    onOpenMenu?.();
+  };
+
+  const mediaPressHandlers =
+    onPress || onOpenMenu
+      ? {
+          accessibilityRole: 'button' as const,
+          accessibilityLabel: tile.isBard
+            ? onPress
+              ? 'Бард — открыть плеер'
+              : 'Бард'
+            : `Меню ${tile.name}`,
+          accessibilityHint: onOpenMenu
+            ? 'Удерживайте, чтобы открыть меню'
+            : undefined,
+          onPress,
+          onLongPress: onOpenMenu ? openMenu : undefined,
+          delayLongPress: onOpenMenu ? 350 : undefined,
+          // @ts-expect-error RN Web: native context menu
+          onContextMenu: onOpenMenu
+            ? (event: GestureResponderEvent) => {
+                event.preventDefault?.();
+                openMenu();
+              }
+            : undefined,
+        }
+      : null;
+
+  const wrapMenuHit = (node: ReactNode) =>
+    mediaPressHandlers ? (
+      <Pressable {...mediaPressHandlers} style={styles.tileMediaMenuHit}>
+        {node}
+      </Pressable>
+    ) : (
+      <View style={styles.tileMediaMenuHit}>{node}</View>
+    );
 
   return (
     <View
@@ -478,155 +746,236 @@ function ParticipantTile({
         showVideo ? styles.tileVideo : null,
         tile.waiting && styles.tileWaiting,
         tile.urgent && styles.tileUrgent,
+        tile.isBard && styles.tileBard,
       ]}>
-      <View style={styles.tileMedia}>
-        {showVideo ? (
-          <View
-            style={[
-              styles.videoFrame,
-              {
-                height: videoHeight ?? 180,
-                borderColor: tile.urgent
-                  ? '#ED4245'
-                  : tile.speaking
-                    ? '#23A559'
-                    : 'rgba(255,255,255,0.08)',
-              },
-            ]}>
-            <CallVideoView track={tile.videoTrack} mirror={tile.isLocal} />
-            {tile.muted ? (
-              <View style={styles.videoMuteBadge}>
-                <Ionicons name="mic-off" size={12} color="#FFFFFF" />
-              </View>
-            ) : null}
-            {tile.urgent ? (
-              <View style={styles.videoUrgentChip} pointerEvents="none">
-                <Text style={styles.urgentBubbleText}>срочная заявка</Text>
-              </View>
-            ) : null}
-            {canAdjustVolume && volumeOpen && onVolumeChange ? (
-              <View style={styles.volumeDockOverlay} pointerEvents="box-none">
-                <ParticipantVolumeDock
-                  value={volume}
-                  onChange={onVolumeChange}
-                  orientation="horizontal"
-                  participantName={tile.name}
-                />
-              </View>
-            ) : null}
-          </View>
-        ) : (
-          <View style={[styles.avatarWrap, { width: ringBox + 28, height: ringBox + 28 }]}>
-            {tile.urgent ? <UrgentPulseRings size={ringBox} /> : null}
-            {!tile.urgent && tile.waiting && !tile.connecting ? (
-              <WaitingPulseRings size={ringBox} />
-            ) : null}
-            <View
-              style={[
-                styles.avatarRing,
-                {
-                  width: ringBox,
-                  height: ringBox,
-                  borderRadius: ringBox / 2,
-                  borderColor: tile.urgent
-                    ? '#ED4245'
-                    : tile.speaking
-                      ? '#23A559'
-                      : tile.waiting
-                        ? 'rgba(21, 122, 254, 0.85)'
-                        : 'transparent',
-                },
-              ]}>
-              <View style={[styles.avatarSlot, { width: avatarOuter, height: avatarOuter }]}>
-                <UserAvatar
-                  nickname={tile.name}
-                  avatarUrl={tile.avatarUrl}
-                  size={avatarSize}
-                  badges={tile.badges}
-                  frameId={tile.frameId}
-                />
-              </View>
-              {tile.connecting ? (
-                <View style={styles.connectingOverlay} pointerEvents="none">
-                  <ActivityIndicator size="small" color="#FFFFFF" />
-                </View>
-              ) : null}
-              {tile.muted && !tile.waiting ? (
-                <View style={styles.muteBadge}>
-                  <Ionicons name="mic-off" size={12} color="#FFFFFF" />
+      {/*
+        Menu hit-target is only the media (no nested volume Pressables).
+        Safari/RN-web: outer Pressable wrapping volume chip → nested <button>.
+      */}
+      <View style={styles.tilePressable}>
+        <View style={styles.tileMedia}>
+          {showVideo ? (
+            <View style={styles.tileMediaMenuHost}>
+              {wrapMenuHit(
+                <View
+                  style={[
+                    styles.videoFrame,
+                    {
+                      height: videoHeight ?? 180,
+                      borderColor: tile.urgent
+                        ? '#ED4245'
+                        : tile.speaking
+                          ? '#23A559'
+                          : 'rgba(255,255,255,0.08)',
+                    },
+                  ]}>
+                  <CallVideoView track={tile.videoTrack} mirror={tile.isLocal} />
+                  {tile.muted ? (
+                    <View style={styles.videoMuteBadge}>
+                      <Ionicons name="mic-off" size={12} color="#FFFFFF" />
+                    </View>
+                  ) : null}
+                  {tile.urgent ? (
+                    <View style={styles.videoUrgentChip} pointerEvents="none">
+                      <Text style={styles.urgentBubbleText}>срочная заявка</Text>
+                    </View>
+                  ) : null}
+                </View>,
+              )}
+              {canAdjustVolume && volumeOpen && onVolumeChange ? (
+                <View style={styles.volumeDockOverlay} pointerEvents="box-none">
+                  <ParticipantVolumeDock
+                    value={volume}
+                    onChange={onVolumeChange}
+                    orientation="horizontal"
+                    participantName={tile.name}
+                    caption={volumeCaption}
+                  />
                 </View>
               ) : null}
             </View>
-            {tile.urgent ? (
-              <View style={styles.urgentBubble} pointerEvents="none">
-                <Text style={styles.urgentBubbleText}>срочная заявка</Text>
-              </View>
-            ) : null}
-            {canAdjustVolume && volumeOpen && onVolumeChange && volumeOrientation === 'vertical' ? (
-              <View style={styles.volumeDockSide} pointerEvents="box-none">
-                <ParticipantVolumeDock
-                  value={volume}
-                  onChange={onVolumeChange}
-                  orientation="vertical"
-                  participantName={tile.name}
-                />
-              </View>
-            ) : null}
-          </View>
-        )}
+          ) : (
+            <View style={[styles.avatarWrap, { width: ringBox + 28, height: ringBox + 28 }]}>
+              {wrapMenuHit(
+                <>
+                  {tile.urgent ? <UrgentPulseRings size={ringBox} /> : null}
+                  {!tile.urgent && tile.waiting && !tile.connecting ? (
+                    <WaitingPulseRings size={ringBox} />
+                  ) : null}
+                  {tile.isBard ? (
+                    <BardPlayingAura size={ringBox} active={Boolean(tile.bardPlaying)} />
+                  ) : null}
+                  <View
+                    style={[
+                      styles.avatarRing,
+                      tile.isBard && styles.bardRing,
+                      tile.isBard && tile.bardPlaying && styles.bardRingPlaying,
+                      {
+                        width: ringBox,
+                        height: ringBox,
+                        borderRadius: ringBox / 2,
+                        borderColor: tile.isBard
+                          ? tile.bardPlaying
+                            ? 'rgba(132, 185, 255, 0.95)'
+                            : 'rgba(21, 122, 254, 0.75)'
+                          : tile.urgent
+                            ? '#ED4245'
+                            : tile.speaking
+                              ? '#23A559'
+                              : tile.waiting
+                                ? 'rgba(21, 122, 254, 0.85)'
+                                : 'transparent',
+                      },
+                    ]}>
+                    <View style={[styles.avatarSlot, { width: avatarOuter, height: avatarOuter }]}>
+                      {tile.isBard ? (
+                        <View
+                          style={[
+                            styles.bardAvatar,
+                            tile.bardPlaying && styles.bardAvatarPlaying,
+                            {
+                              width: avatarSize,
+                              height: avatarSize,
+                              borderRadius: avatarSize / 2,
+                            },
+                          ]}>
+                          <View style={styles.bardAvatarInner}>
+                            <Ionicons
+                              name={tile.bardPlaying ? 'musical-notes' : 'musical-note'}
+                              size={Math.round(avatarSize * 0.4)}
+                              color={tile.bardPlaying ? '#E8F2FF' : '#84B9FF'}
+                            />
+                          </View>
+                        </View>
+                      ) : (
+                        <UserAvatar
+                          nickname={tile.name}
+                          avatarUrl={tile.avatarUrl}
+                          size={avatarSize}
+                          badges={tile.badges}
+                          frameId={tile.frameId}
+                        />
+                      )}
+                    </View>
+                    {tile.connecting ? (
+                      <View style={styles.connectingOverlay} pointerEvents="none">
+                        <ActivityIndicator size="small" color="#FFFFFF" />
+                      </View>
+                    ) : null}
+                    {tile.muted && !tile.waiting && !tile.isBard ? (
+                      <View style={styles.muteBadge}>
+                        <Ionicons name="mic-off" size={12} color="#FFFFFF" />
+                      </View>
+                    ) : null}
+                  </View>
+                  {tile.isBard ? (
+                    <View
+                      style={[styles.bardPlaque, tile.bardPlaying && styles.bardPlaquePlaying]}
+                      pointerEvents="none">
+                      <View
+                        style={[
+                          styles.bardPlaqueIcon,
+                          tile.bardPlaying && styles.bardPlaqueIconPlaying,
+                        ]}>
+                        <Ionicons
+                          name={tile.bardPlaying ? 'play' : 'musical-note'}
+                          size={10}
+                          color="#FFFFFF"
+                        />
+                      </View>
+                      <Text style={styles.bardPlaqueText} numberOfLines={1}>
+                        {tile.bardPlaque?.trim() || 'Выбери трек'}
+                      </Text>
+                    </View>
+                  ) : null}
+                  {tile.urgent ? (
+                    <View style={styles.urgentBubble} pointerEvents="none">
+                      <Text style={styles.urgentBubbleText}>срочная заявка</Text>
+                    </View>
+                  ) : null}
+                </>,
+              )}
+              {canAdjustVolume &&
+              volumeOpen &&
+              onVolumeChange &&
+              volumeOrientation === 'vertical' ? (
+                <View style={styles.volumeDockSide} pointerEvents="box-none">
+                  <ParticipantVolumeDock
+                    value={volume}
+                    onChange={onVolumeChange}
+                    orientation="vertical"
+                    participantName={tile.name}
+                    caption={volumeCaption}
+                  />
+                </View>
+              ) : null}
+            </View>
+          )}
 
-        {canAdjustVolume ? (
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={
-              volumeOpen
-                ? `Скрыть громкость ${tile.name}`
-                : `Громкость ${tile.name} у себя`
-            }
-            accessibilityState={{ expanded: Boolean(volumeOpen) }}
-            hitSlop={6}
-            onPress={onToggleVolume}
-            style={({ pressed }) => [
-              styles.volumeChip,
-              mutedLocally && styles.volumeChipMuted,
-              volumeOpen && styles.volumeChipOpen,
-              pressed && styles.pressed,
-            ]}>
-            <Ionicons
-              name={volumeIconName(volume)}
-              size={13}
-              color={mutedLocally ? '#FFFFFF' : volumeOpen ? '#84B9FF' : '#E3E5E8'}
-            />
-          </Pressable>
+          {canAdjustVolume ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={
+                volumeOpen
+                  ? `Скрыть громкость ${tile.name}`
+                  : volumeChipTip
+              }
+              accessibilityHint={
+                tile.isBard
+                  ? 'Только у тебя, на остальных не влияет'
+                  : 'Только у тебя, собеседник себя не слышит тише'
+              }
+              accessibilityState={{ expanded: Boolean(volumeOpen) }}
+              hitSlop={6}
+              onPress={onToggleVolume}
+              {...(Platform.OS === 'web'
+                ? ({ title: volumeChipTip } as object)
+                : null)}
+              style={({ pressed }) => [
+                styles.volumeChip,
+                mutedLocally && styles.volumeChipMuted,
+                volumeOpen && styles.volumeChipOpen,
+                pressed && styles.pressed,
+              ]}>
+              <Ionicons
+                name={volumeIconName(volume)}
+                size={13}
+                color={mutedLocally ? '#FFFFFF' : volumeOpen ? '#84B9FF' : '#E3E5E8'}
+              />
+            </Pressable>
+          ) : null}
+        </View>
+
+        {!tile.isBard ? (
+          <NameWithBadges
+            name={tile.isLocal ? `${tile.name} (вы)` : tile.name}
+            badges={tile.badges}
+            textStyle={styles.tileName}
+            badgeSize={12}
+            layout="stack"
+            align="center"
+          />
+        ) : null}
+        {tile.connecting ? (
+          <Text style={styles.tileHint}>подключение…</Text>
+        ) : tile.waiting && !tile.urgent ? (
+          <Text style={styles.tileHint}>ожидание</Text>
+        ) : null}
+
+        {canAdjustVolume &&
+        volumeOpen &&
+        onVolumeChange &&
+        !showVideo &&
+        volumeOrientation === 'horizontal' ? (
+          <ParticipantVolumeDock
+            value={volume}
+            onChange={onVolumeChange}
+            orientation="horizontal"
+            participantName={tile.name}
+            caption={volumeCaption}
+          />
         ) : null}
       </View>
-
-      <NameWithBadges
-        name={tile.isLocal ? `${tile.name} (вы)` : tile.name}
-        badges={tile.badges}
-        textStyle={styles.tileName}
-        badgeSize={12}
-        layout="stack"
-        align="center"
-      />
-      {tile.connecting ? (
-        <Text style={styles.tileHint}>подключение…</Text>
-      ) : tile.waiting && !tile.urgent ? (
-        <Text style={styles.tileHint}>ожидание</Text>
-      ) : null}
-
-      {canAdjustVolume &&
-      volumeOpen &&
-      onVolumeChange &&
-      !showVideo &&
-      volumeOrientation === 'horizontal' ? (
-        <ParticipantVolumeDock
-          value={volume}
-          onChange={onVolumeChange}
-          orientation="horizontal"
-          participantName={tile.name}
-        />
-      ) : null}
     </View>
   );
 }
@@ -750,6 +1099,30 @@ export function VoiceCallOverlay({
   onExpand,
   onUrgentRequest,
   onSetParticipantVolume,
+  canControlMusic = false,
+  bardPresent = false,
+  bardTrackTitle = null,
+  bardPlaying = false,
+  bardTrackId = null,
+  bardCurrentEntryId = null,
+  bardQueue = [],
+  bardPositionSec = 0,
+  bardDurationSec = 0,
+  bardLocalVolume = 1,
+  bardGlobalVolume = 1,
+  bardLocalDisplayName = 'Участник',
+  onSummonBard,
+  onDismissBard,
+  onSetBardLocalVolume,
+  onEnqueueBardTrack,
+  onPlayBardQueueEntry,
+  onRemoveBardQueueEntry,
+  onToggleBardPlay,
+  onSeekBard,
+  onStopBardTrack,
+  onSetBardGlobalVolume,
+  onRequestBardSync,
+  onResumeBardAudio,
 }: Props) {
   const insets = useSafeAreaInsets();
   const isDesktop = useIsDesktopWeb();
@@ -760,6 +1133,7 @@ export function VoiceCallOverlay({
   const miniSizeRef = useRef({ width: 280, height: 56 });
   const suppressExpandRef = useRef(false);
   const [volumeOpenId, setVolumeOpenId] = useState<string | null>(null);
+  const [bardSheetOpen, setBardSheetOpen] = useState(false);
   const failed = status === 'error';
   const mediaReady = status === 'connected';
   const linking = status === 'connecting';
@@ -770,6 +1144,9 @@ export function VoiceCallOverlay({
   const connectPulse = useRef(new Animated.Value(1)).current;
   // Пока звонок на экране — не ждём LiveKit `connected` / ответ собеседника.
   const canRollDice = Boolean(conversationId?.trim()) && status !== 'error';
+  const showMusicControls = canControlMusic && mediaReady;
+  /** Non-controllers open the sheet via the note button when Bard is already present. */
+  const showBardOpenButton = mediaReady && bardPresent && !canControlMusic;
 
   useEffect(() => {
     if (!linking) {
@@ -823,11 +1200,18 @@ export function VoiceCallOverlay({
     if (!visible) {
       setDiceOpen(false);
       setVolumeOpenId(null);
+      setBardSheetOpen(false);
       savedMiniOffset = { x: 0, y: 0 };
       miniOffsetRef.current = savedMiniOffset;
       setMiniOffset(savedMiniOffset);
     }
   }, [visible]);
+
+  useEffect(() => {
+    if (!bardPresent) {
+      setBardSheetOpen(false);
+    }
+  }, [bardPresent]);
 
   const beginMiniDrag = useCallback(
     (clientX: number, clientY: number) => {
@@ -914,7 +1298,23 @@ export function VoiceCallOverlay({
       });
       liveIds.add(peer.id);
     }
-    // Local first, then live remotes, waiting last.
+    if (bardPresent) {
+      live.push({
+        key: BARD_TILE_KEY,
+        name: 'Бард',
+        avatarUrl: null,
+        speaking: Boolean(bardPlaying),
+        muted: false,
+        cameraOn: false,
+        videoTrack: null,
+        isLocal: false,
+        isBard: true,
+        bardPlaque: bardTrackTitle,
+        bardPlaying,
+        volume: clamp01(bardLocalVolume),
+      });
+    }
+    // Local first, then live remotes, bard near end, waiting last.
     return live.sort((a, b) => {
       if (a.isLocal !== b.isLocal) {
         return a.isLocal ? -1 : 1;
@@ -922,21 +1322,38 @@ export function VoiceCallOverlay({
       if (Boolean(a.waiting) !== Boolean(b.waiting)) {
         return a.waiting ? 1 : -1;
       }
+      if (Boolean(a.isBard) !== Boolean(b.isBard)) {
+        return a.isBard ? 1 : -1;
+      }
       return a.name.localeCompare(b.name, 'ru');
     });
-  }, [participants, profileAvatarUrl, urgentById, volumeById, waitingPeers]);
+  }, [
+    bardLocalVolume,
+    bardPlaying,
+    bardPresent,
+    bardTrackTitle,
+    participants,
+    profileAvatarUrl,
+    urgentById,
+    volumeById,
+    waitingPeers,
+  ]);
 
   useEffect(() => {
     if (!volumeOpenId) {
       return;
     }
     const stillThere = tiles.some(
-      (tile) => tile.key === volumeOpenId && !tile.isLocal && !tile.waiting,
+      (tile) =>
+        tile.key === volumeOpenId &&
+        !tile.isLocal &&
+        !tile.waiting &&
+        (tile.isBard ? Boolean(onSetBardLocalVolume) : true),
     );
     if (!stillThere) {
       setVolumeOpenId(null);
     }
-  }, [tiles, volumeOpenId]);
+  }, [onSetBardLocalVolume, tiles, volumeOpenId]);
 
   const liveCount = participants.length;
   const localUrgent = participants.some((p) => p.isLocal && Boolean(urgentById[p.identity]));
@@ -1295,16 +1712,33 @@ export function VoiceCallOverlay({
                   videoHeight={layout.videoHeight}
                   volumeOpen={volumeOpenId === tile.key}
                   onToggleVolume={
-                    onSetParticipantVolume && !tile.isLocal && !tile.waiting
-                      ? () =>
-                          setVolumeOpenId((current) =>
-                            current === tile.key ? null : tile.key,
-                          )
-                      : undefined
+                    tile.isBard
+                      ? onSetBardLocalVolume
+                        ? () =>
+                            setVolumeOpenId((current) =>
+                              current === tile.key ? null : tile.key,
+                            )
+                        : undefined
+                      : onSetParticipantVolume && !tile.isLocal && !tile.waiting
+                        ? () =>
+                            setVolumeOpenId((current) =>
+                              current === tile.key ? null : tile.key,
+                            )
+                        : undefined
                   }
                   onVolumeChange={
-                    onSetParticipantVolume && !tile.isLocal && !tile.waiting
-                      ? (volume) => onSetParticipantVolume(tile.key, volume)
+                    tile.isBard
+                      ? onSetBardLocalVolume
+                      : onSetParticipantVolume && !tile.isLocal && !tile.waiting
+                        ? (volume) => onSetParticipantVolume(tile.key, volume)
+                        : undefined
+                  }
+                  onPress={
+                    tile.isBard
+                      ? () => {
+                          onResumeBardAudio?.();
+                          setBardSheetOpen(true);
+                        }
                       : undefined
                   }
                 />
@@ -1397,6 +1831,32 @@ export function VoiceCallOverlay({
               </Pressable>
             ) : null}
 
+            {showMusicControls || showBardOpenButton ? (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={
+                  bardPresent
+                    ? 'Очередь и библиотека Барда'
+                    : 'Призвать Барда'
+                }
+                accessibilityState={{ selected: bardPresent }}
+                onPress={() => {
+                  onResumeBardAudio?.();
+                  if (bardPresent) {
+                    setBardSheetOpen(true);
+                    return;
+                  }
+                  onSummonBard?.();
+                }}
+                style={({ pressed }) => [
+                  styles.controlBtn,
+                  bardPresent ? styles.controlBtnMusicOn : styles.controlBtnSecondary,
+                  pressed && styles.pressed,
+                ]}>
+                <Ionicons name="musical-notes" size={22} color="#FFFFFF" />
+              </Pressable>
+            ) : null}
+
             {onUrgentRequest ? (
               <Pressable
                 accessibilityRole="button"
@@ -1431,6 +1891,31 @@ export function VoiceCallOverlay({
       </View>
     </Modal>
     {diceLayer}
+    <CallBardSheet
+      visible={bardSheetOpen && bardPresent}
+      canControl={canControlMusic}
+      localDisplayName={bardLocalDisplayName}
+      trackId={bardTrackId}
+      trackTitle={bardTrackTitle}
+      currentEntryId={bardCurrentEntryId}
+      playing={bardPlaying}
+      positionSec={bardPositionSec}
+      durationSec={bardDurationSec}
+      globalVolume={bardGlobalVolume}
+      queue={bardQueue}
+      onClose={() => setBardSheetOpen(false)}
+      onEnqueueTrack={(trackId, title, durationSec) =>
+        onEnqueueBardTrack?.(trackId, title, durationSec)
+      }
+      onPlayQueueEntry={(entryId) => onPlayBardQueueEntry?.(entryId)}
+      onRemoveQueueEntry={(entryId) => onRemoveBardQueueEntry?.(entryId)}
+      onTogglePlay={() => onToggleBardPlay?.()}
+      onSeek={(positionSec) => onSeekBard?.(positionSec)}
+      onStopTrack={() => onStopBardTrack?.()}
+      onGlobalVolumeChange={(volume) => onSetBardGlobalVolume?.(volume)}
+      onDismissBard={() => onDismissBard?.()}
+      onRequestSync={() => onRequestBardSync?.()}
+    />
     </>
   );
 }
@@ -1747,6 +2232,108 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(237, 66, 69, 0.45)',
   },
+  tileBard: {
+    backgroundColor: 'rgba(21, 122, 254, 0.1)',
+    borderWidth: 1,
+    borderColor: 'rgba(132, 185, 255, 0.28)',
+  },
+  tilePressable: {
+    alignItems: 'center',
+    width: '100%',
+  },
+  tileMediaMenuHost: {
+    width: '100%',
+    position: 'relative',
+  },
+  tileMediaMenuHit: {
+    alignItems: 'center',
+    width: '100%',
+  },
+  bardRing: {
+    borderWidth: 2.5,
+    backgroundColor: 'rgba(12, 24, 42, 0.55)',
+  },
+  bardRingPlaying: {
+    borderWidth: 2.5,
+    shadowColor: '#157AFE',
+    shadowOpacity: 0.55,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 0 },
+    elevation: 6,
+  },
+  bardAvatar: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(21, 122, 254, 0.28)',
+    borderWidth: 1,
+    borderColor: 'rgba(132, 185, 255, 0.35)',
+  },
+  bardAvatarPlaying: {
+    backgroundColor: 'rgba(21, 122, 254, 0.42)',
+    borderColor: 'rgba(180, 214, 255, 0.65)',
+  },
+  bardAvatarInner: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  bardPlaque: {
+    position: 'absolute',
+    bottom: 0,
+    left: 2,
+    right: 2,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    paddingLeft: 4,
+    paddingRight: 8,
+    paddingVertical: 3,
+    borderRadius: 999,
+    backgroundColor: 'rgba(17, 74, 160, 0.92)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(132, 185, 255, 0.45)',
+  },
+  bardPlaquePlaying: {
+    backgroundColor: 'rgba(21, 122, 254, 0.98)',
+    borderColor: 'rgba(205, 226, 255, 0.7)',
+    shadowColor: '#157AFE',
+    shadowOpacity: 0.4,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 2 },
+  },
+  bardPlaqueIcon: {
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.14)',
+  },
+  bardPlaqueIconPlaying: {
+    backgroundColor: 'rgba(255,255,255,0.22)',
+  },
+  bardPlaqueText: {
+    flex: 1,
+    color: '#FFFFFF',
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 0.1,
+  },
+  bardPulseRing: {
+    position: 'absolute',
+    borderWidth: 2,
+    borderColor: 'rgba(132, 185, 255, 0.7)',
+    backgroundColor: 'transparent',
+  },
+  bardShimmerRing: {
+    position: 'absolute',
+    borderWidth: 2,
+    borderColor: 'rgba(180, 214, 255, 0.95)',
+    backgroundColor: 'transparent',
+  },
+  bardCoreGlow: {
+    position: 'absolute',
+    backgroundColor: 'rgba(21, 122, 254, 0.55)',
+  },
   avatarWrap: {
     alignItems: 'center',
     justifyContent: 'center',
@@ -1890,12 +2477,33 @@ const styles = StyleSheet.create({
       default: {},
     }),
   },
+  volumeDockWithCaption: {
+    flexDirection: 'column',
+    alignItems: 'stretch',
+    gap: 6,
+  },
+  volumeCaption: {
+    color: '#B5BAC1',
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  volumeDockControls: {
+    alignItems: 'center',
+    gap: 8,
+  },
+  volumeDockControlsHorizontal: {
+    flexDirection: 'row',
+    width: '100%',
+  },
+  volumeDockControlsVertical: {
+    flexDirection: 'column',
+  },
   volumeDockHorizontal: {
     width: '100%',
   },
   volumeDockVertical: {
     flexDirection: 'column',
-    width: 44,
+    width: 52,
     paddingVertical: 10,
     paddingHorizontal: 8,
     gap: 10,
@@ -2009,6 +2617,9 @@ const styles = StyleSheet.create({
   },
   controlBtnUrgent: {
     backgroundColor: '#ED4245',
+  },
+  controlBtnMusicOn: {
+    backgroundColor: '#157AFE',
   },
   controlBtnHangup: {
     backgroundColor: '#ED4245',

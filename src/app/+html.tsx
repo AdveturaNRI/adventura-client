@@ -128,6 +128,85 @@ html[data-theme="dark"] .adventura-toast {
   --adventura-toast-action-bg: rgba(21, 122, 254, 0.22);
   --adventura-toast-action-fg: #84b9ff;
 }
+
+/*
+ * Notification cards + wanderers list: same Safari Pressable→white <button> bug.
+ * Shell View keeps surface; inner buttons stay transparent.
+ */
+.adventura-notification-card {
+  -webkit-appearance: none !important;
+  appearance: none !important;
+  background-image: none !important;
+  background: var(--adventura-notif-bg, #1c1c1e) !important;
+  background-color: var(--adventura-notif-bg, #1c1c1e) !important;
+  border-color: var(--adventura-notif-border, #2c2c2e) !important;
+  color: var(--adventura-notif-fg, #ffffff) !important;
+}
+
+.adventura-notification-card [role="button"],
+.adventura-notification-card [role="link"],
+.adventura-notification-card button {
+  -webkit-appearance: none !important;
+  appearance: none !important;
+  background-image: none !important;
+  color: inherit !important;
+  box-shadow: none !important;
+}
+
+.adventura-notification-card > [role="button"],
+.adventura-notification-card > button {
+  background: transparent !important;
+  background-color: transparent !important;
+  border: none !important;
+}
+
+.adventura-notification-title,
+.adventura-notification-message {
+  color: var(--adventura-notif-fg, #ffffff) !important;
+}
+
+.adventura-notification-actor {
+  color: #157afe !important;
+}
+
+.adventura-notification-action {
+  color: var(--adventura-notif-action, #9a7518) !important;
+}
+
+.adventura-notification-add {
+  background: rgba(212, 175, 55, 0.14) !important;
+  background-color: rgba(212, 175, 55, 0.14) !important;
+  border-color: rgba(201, 162, 39, 0.45) !important;
+}
+
+.adventura-notification-muted {
+  color: var(--adventura-notif-muted, #8e8e93) !important;
+}
+
+html[data-theme="light"] .adventura-notification-card {
+  --adventura-notif-bg: #ffffff;
+  --adventura-notif-fg: #000000;
+  --adventura-notif-muted: #727272;
+  --adventura-notif-border: #f6f6f6;
+}
+
+html[data-theme="dark"] .adventura-notification-card {
+  --adventura-notif-bg: #1c1c1e;
+  --adventura-notif-fg: #ffffff;
+  --adventura-notif-muted: #8e8e93;
+  --adventura-notif-border: #2c2c2e;
+}
+
+.adventura-wanderer-list-card > [role="button"],
+.adventura-wanderer-list-card > button {
+  -webkit-appearance: none !important;
+  appearance: none !important;
+  background: transparent !important;
+  background-color: transparent !important;
+  background-image: none !important;
+  border: none !important;
+  box-shadow: none !important;
+}
 `;
 
 /** Official snippet when ID is known at build time (helps Metrika HTML checker). */

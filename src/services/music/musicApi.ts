@@ -16,6 +16,8 @@ export type MusicTrack = {
   durationSec: number | null;
   source?: 'upload' | 'external';
   url: string | null;
+  /** Belongs to at least one folder — hide from root library list. */
+  inFolder?: boolean;
   createdAt: string;
   updatedAt: string;
 };
@@ -23,14 +25,17 @@ export type MusicTrack = {
 export type MusicPlaylistSummary = {
   id: string;
   title: string;
+  parentId?: string | null;
   sortOrder: number;
   trackCount: number;
+  folderCount?: number;
   createdAt: string;
   updatedAt: string;
 };
 
 export type MusicPlaylistDetail = MusicPlaylistSummary & {
   tracks: MusicTrack[];
+  children?: MusicPlaylistSummary[];
 };
 
 export type MusicQuota = {
@@ -251,10 +256,13 @@ export function listMusicPlaylists() {
   return apiRequest<MusicPlaylistSummary[]>('/music/playlists');
 }
 
-export function createMusicPlaylist(title: string) {
+export function createMusicPlaylist(title: string, parentId?: string | null) {
   return apiRequest<MusicPlaylistDetail>('/music/playlists', {
     method: 'POST',
-    body: { title },
+    body: {
+      title,
+      ...(parentId?.trim() ? { parentId: parentId.trim() } : {}),
+    },
   });
 }
 

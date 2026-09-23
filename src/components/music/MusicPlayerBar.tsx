@@ -30,6 +30,10 @@ type MusicPlayerBarProps = {
   onActiveTrackChange?: (
     info: { trackId: string; playing: boolean } | null,
   ) => void;
+  /** Floating pill — for mobile so the full dock doesn't block the screen. */
+  compact?: boolean;
+  onExpand?: () => void;
+  onCollapse?: () => void;
 };
 
 function formatTime(value: number) {
@@ -123,6 +127,53 @@ function createStyles(colors: ThemeColors) {
       borderWidth: 2,
       borderColor: colors.surface,
     },
+    pill: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+      maxWidth: 280,
+      paddingLeft: 6,
+      paddingRight: 8,
+      paddingVertical: 6,
+      borderRadius: 999,
+      backgroundColor: colors.surface,
+      borderWidth: 1,
+      borderColor: colors.borderLight,
+      shadowColor: '#0F172A',
+      shadowOpacity: 0.16,
+      shadowRadius: 14,
+      shadowOffset: { width: 0, height: 6 },
+      elevation: 10,
+    },
+    pillPlay: {
+      width: 36,
+      height: 36,
+      borderRadius: 18,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: colors.primary,
+    },
+    pillCopy: {
+      flex: 1,
+      minWidth: 0,
+      gap: 1,
+    },
+    pillTitle: {
+      fontSize: FontSize.caption,
+      fontWeight: '700',
+      color: colors.text,
+    },
+    pillMeta: {
+      fontSize: 10,
+      color: colors.textMuted,
+      fontVariant: ['tabular-nums'],
+    },
+    pillClose: {
+      width: 28,
+      height: 28,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
   });
 }
 
@@ -130,6 +181,9 @@ export function MusicPlayerBar({
   session,
   onClose,
   onActiveTrackChange,
+  compact = false,
+  onExpand,
+  onCollapse,
 }: MusicPlayerBarProps) {
   return (
     <ActiveMusicPlayerBar
@@ -137,6 +191,9 @@ export function MusicPlayerBar({
       session={session}
       onClose={onClose}
       onActiveTrackChange={onActiveTrackChange}
+      compact={compact}
+      onExpand={onExpand}
+      onCollapse={onCollapse}
     />
   );
 }
@@ -145,12 +202,18 @@ function ActiveMusicPlayerBar({
   session,
   onClose,
   onActiveTrackChange,
+  compact,
+  onExpand,
+  onCollapse,
 }: {
   session: MusicPlaybackSession;
   onClose: () => void;
   onActiveTrackChange?: (
     info: { trackId: string; playing: boolean } | null,
   ) => void;
+  compact: boolean;
+  onExpand?: () => void;
+  onCollapse?: () => void;
 }) {
   const colors = useTheme();
   const styles = useThemedStyles(createStyles);
@@ -359,6 +422,73 @@ function ActiveMusicPlayerBar({
     !(status.didJustFinish && !canNext);
   const thumbLeft = seekWidth * progressRatio;
 
+  const togglePlay = () => {
+    if (showLoader) return;
+    if (showsPause) {
+      setPlayRequested(false);
+      player.pause();
+      return;
+    }
+    setPlayRequested(true);
+    if (urlError) {
+      void loadTrackAt(index, true);
+      return;
+    }
+    player.play();
+  };
+
+  const handleClose = () => {
+    setPlayRequested(false);
+    player.pause();
+    onClose();
+  };
+
+  if (compact) {
+    return (
+      <View style={styles.pill}>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={
+            showLoader ? 'Загрузка' : showsPause ? 'Пауза' : 'Воспроизвести'
+          }
+          disabled={showLoader && !urlError}
+          onPress={togglePlay}
+          style={styles.pillPlay}>
+          {showLoader ? (
+            <ActivityIndicator size="small" color="#FFFFFF" />
+          ) : (
+            <Ionicons
+              name={showsPause ? 'pause' : 'play'}
+              size={16}
+              color="#FFFFFF"
+            />
+          )}
+        </Pressable>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Развернуть плеер"
+          onPress={onExpand}
+          style={styles.pillCopy}>
+          <Text numberOfLines={1} style={styles.pillTitle}>
+            {active.title}
+          </Text>
+          <Text numberOfLines={1} style={styles.pillMeta}>
+            {showLoader
+              ? 'Загрузка…'
+              : `${index + 1}/${queue.length}${showsPause ? ' · играет' : ''}`}
+          </Text>
+        </Pressable>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Закрыть плеер"
+          onPress={handleClose}
+          style={styles.pillClose}>
+          <Ionicons name="close" size={18} color={colors.textMuted} />
+        </Pressable>
+      </View>
+    );
+  }
+
   return (
     <View style={styles.root}>
       <View style={styles.row}>
@@ -384,20 +514,7 @@ function ActiveMusicPlayerBar({
             showLoader ? 'Загрузка' : showsPause ? 'Пауза' : 'Воспроизвести'
           }
           disabled={showLoader && !urlError}
-          onPress={() => {
-            if (showLoader) return;
-            if (showsPause) {
-              setPlayRequested(false);
-              player.pause();
-              return;
-            }
-            setPlayRequested(true);
-            if (urlError) {
-              void loadTrackAt(index, true);
-              return;
-            }
-            player.play();
-          }}
+          onPress={togglePlay}
           style={styles.playButton}>
           {showLoader ? (
             <ActivityIndicator size="small" color="#FFFFFF" />
@@ -437,14 +554,19 @@ function ActiveMusicPlayerBar({
                 : `${index + 1}/${queue.length}`}
           </Text>
         </View>
+        {onCollapse ? (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Свернуть плеер"
+            onPress={onCollapse}
+            style={styles.iconButton}>
+            <Ionicons name="chevron-down" size={20} color={colors.textMuted} />
+          </Pressable>
+        ) : null}
         <Pressable
           accessibilityRole="button"
           accessibilityLabel="Закрыть плеер"
-          onPress={() => {
-            setPlayRequested(false);
-            player.pause();
-            onClose();
-          }}
+          onPress={handleClose}
           style={styles.iconButton}>
           <Ionicons name="close" size={20} color={colors.textMuted} />
         </Pressable>

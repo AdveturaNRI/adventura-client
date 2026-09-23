@@ -14,10 +14,6 @@ import {
   View,
 } from 'react-native';
 
-import {
-  MusicPlayerBar,
-  type MusicPlaybackSession,
-} from '@/components/music/MusicPlayerBar';
 import { MobileScreenHeader } from '@/components/navigation/MobileScreenHeader';
 import {
   useIsDesktopSidebarVisible,
@@ -26,6 +22,7 @@ import {
 import { ScreenTransition } from '@/components/navigation/ScreenTransition';
 import { Button, Input, toast } from '@/components/ui';
 import { FontSize, Spacing, type ThemeColors } from '@/constants/theme';
+import { useMusicPlayer } from '@/context/MusicPlayerContext';
 import { useTheme } from '@/hooks/use-theme';
 import { useThemedStyles } from '@/hooks/use-themed-styles';
 import { useMainScreenStyles } from '@/screens/main/main-screen.styles';
@@ -601,47 +598,72 @@ function createStyles(colors: ThemeColors, isDesktopWeb: boolean) {
       maxWidth: 400,
       lineHeight: FontSize.label * 1.45,
     },
-    folderOpenHeader: {
+    explorerBar: {
       flexDirection: 'row',
-      alignItems: isDesktopWeb ? 'center' : 'flex-start',
-      gap: Spacing.md,
-      marginBottom: Spacing.md,
-      padding: Spacing.md,
-      borderRadius: 16,
+      alignItems: 'center',
+      gap: 6,
+      marginBottom: Spacing.sm,
+      paddingVertical: 4,
+      flexWrap: 'wrap',
+    },
+    explorerCrumb: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+      flexShrink: 1,
+      flexWrap: 'wrap',
+      flex: 1,
+      minWidth: 0,
+    },
+    explorerCrumbBtn: {
+      paddingVertical: 4,
+      paddingHorizontal: 2,
+      maxWidth: 180,
+    },
+    explorerCrumbText: {
+      fontSize: FontSize.label,
+      fontWeight: '600',
+      color: colors.primary,
+    },
+    explorerCrumbCurrent: {
+      fontSize: FontSize.label,
+      fontWeight: '700',
+      color: colors.text,
+    },
+    explorerSep: {
+      fontSize: FontSize.caption,
+      color: colors.textMuted,
+    },
+    explorerList: {
+      gap: 6,
+    },
+    explorerFolderRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: Spacing.sm,
+      paddingVertical: isDesktopWeb ? 10 : 12,
+      paddingHorizontal: Spacing.md,
+      borderRadius: 12,
       borderWidth: 1,
       borderColor: colors.borderLight,
-      backgroundColor: 'rgba(21, 122, 254, 0.06)',
+      backgroundColor: colors.surface,
     },
-    folderOpenIcon: {
-      width: 56,
-      height: 56,
-      borderRadius: 14,
+    explorerFolderRowDrop: {
+      borderColor: colors.primary,
+      backgroundColor: 'rgba(21, 122, 254, 0.08)',
+    },
+    explorerFolderIcon: {
+      width: 36,
+      height: 36,
+      borderRadius: 10,
       alignItems: 'center',
       justifyContent: 'center',
       backgroundColor: 'rgba(21, 122, 254, 0.12)',
     },
-    folderOpenCopy: {
+    explorerFolderBody: {
       flex: 1,
       minWidth: 0,
-      gap: 4,
-    },
-    folderOpenActions: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: Spacing.sm,
-      flexShrink: 0,
-    },
-    backLink: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 4,
-      marginBottom: Spacing.sm,
-      alignSelf: 'flex-start',
-    },
-    backLinkText: {
-      fontSize: FontSize.label,
-      fontWeight: '600',
-      color: colors.primary,
+      gap: 2,
     },
     modalOverlay: {
       flex: 1,
@@ -770,13 +792,6 @@ function createStyles(colors: ThemeColors, isDesktopWeb: boolean) {
       fontSize: 11,
       color: colors.textMuted,
       textAlign: 'center',
-    },
-    playerDock: {
-      marginTop: 'auto' as const,
-      borderRadius: isDesktopWeb ? 14 : 0,
-      overflow: 'hidden',
-      borderWidth: isDesktopWeb ? 1 : 0,
-      borderColor: colors.borderLight,
     },
   });
 }
@@ -969,8 +984,95 @@ function FolderCard({
         <Text style={styles.folderMeta}>
           {isDropTarget
             ? 'Отпустите сюда'
-            : `${playlist.trackCount} ${trackWord(playlist.trackCount)}`}
+            : [
+                `${playlist.trackCount} ${trackWord(playlist.trackCount)}`,
+                playlist.folderCount
+                  ? `${playlist.folderCount} ${playlist.folderCount === 1 ? 'папка' : 'папок'}`
+                  : null,
+              ]
+                .filter(Boolean)
+                .join(' · ')}
         </Text>
+      </Pressable>
+    </View>
+  );
+}
+
+type FolderRowProps = {
+  playlist: MusicPlaylistSummary;
+  colors: ThemeColors;
+  styles: ReturnType<typeof createStyles>;
+  isDropTarget: boolean;
+  isDraggingTrack: boolean;
+  onHover: (playlistId: string | null) => void;
+  onDropTrack: (playlistId: string, trackId: string) => void;
+  onOpen: () => void;
+  onDelete: () => void;
+};
+
+function FolderRow({
+  playlist,
+  colors,
+  styles,
+  isDropTarget,
+  isDraggingTrack,
+  onHover,
+  onDropTrack,
+  onOpen,
+  onDelete,
+}: FolderRowProps) {
+  const dropRef = useWebDropTarget(IS_WEB, playlist.id, onHover, onDropTrack);
+  const blockNestedPress = isDraggingTrack;
+
+  return (
+    <View
+      ref={IS_WEB ? dropRef : undefined}
+      style={[
+        styles.explorerFolderRow,
+        isDropTarget ? styles.explorerFolderRowDrop : null,
+      ]}>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={`Папка ${playlist.title}`}
+        onPress={onOpen}
+        disabled={blockNestedPress}
+        style={({ pressed }) => [
+          { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm, flex: 1, minWidth: 0 },
+          pressed && !isDropTarget ? { opacity: 0.85 } : null,
+        ]}>
+        <View style={styles.explorerFolderIcon}>
+          <Ionicons
+            name={isDropTarget ? 'folder-open' : 'folder'}
+            size={20}
+            color={colors.primary}
+          />
+        </View>
+        <View style={styles.explorerFolderBody}>
+          <Text numberOfLines={1} style={styles.rowTitle}>
+            {playlist.title}
+          </Text>
+          <Text style={styles.rowMeta}>
+            {isDropTarget
+              ? 'Отпустите сюда'
+              : [
+                  `${playlist.trackCount} ${trackWord(playlist.trackCount)}`,
+                  playlist.folderCount
+                    ? `${playlist.folderCount} ${playlist.folderCount === 1 ? 'папка' : 'папок'}`
+                    : null,
+                ]
+                  .filter(Boolean)
+                  .join(' · ')}
+          </Text>
+        </View>
+        <Ionicons name="chevron-forward" size={16} color={colors.textMuted} />
+      </Pressable>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel="Удалить папку"
+        onPress={onDelete}
+        disabled={blockNestedPress}
+        style={styles.iconBtn}>
+        <Ionicons name="trash-outline" size={18} color={colors.destructive} />
       </Pressable>
     </View>
   );
@@ -989,16 +1091,15 @@ export default function MusicLibraryScreen() {
   const [activePlaylist, setActivePlaylist] = useState<MusicPlaylistDetail | null>(
     null,
   );
+  /** Breadcrumb of open folders (root → … → current). */
+  const [folderPath, setFolderPath] = useState<
+    Array<{ id: string; title: string }>
+  >([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [uploadProgress, setUploadProgress] = useState<number | null>(null);
   const [uploadFileName, setUploadFileName] = useState<string | null>(null);
-  const [session, setSession] = useState<MusicPlaybackSession | null>(null);
-  const [activePlayback, setActivePlayback] = useState<{
-    trackId: string;
-    playing: boolean;
-  } | null>(null);
-  const sessionSeqRef = useRef(0);
+  const { activePlayback, session, startPlayback } = useMusicPlayer();
 
   const [createOpen, setCreateOpen] = useState(false);
   const [playlistTitle, setPlaylistTitle] = useState('');
@@ -1053,31 +1154,41 @@ export default function MusicLibraryScreen() {
     }, [load]),
   );
 
-  const playableTracks = useMemo(
-    () => tracks.filter((track) => Boolean(track.url)),
+  /** Root list: only tracks that are not in any folder. */
+  const rootTracks = useMemo(
+    () => tracks.filter((track) => !track.inFolder),
     [tracks],
   );
 
-  const startPlayback = useCallback(
-    (queue: MusicTrack[], startIndex: number, label?: string) => {
-      if (!queue.length) {
-        toast.error('Нет треков для воспроизведения');
-        return;
-      }
-      const target = queue[startIndex] ?? queue[0];
-      const index = Math.max(
-        0,
-        queue.findIndex((track) => track.id === target?.id),
+  const rootPlaylists = useMemo(
+    () => playlists.filter((playlist) => !playlist.parentId),
+    [playlists],
+  );
+
+  const folderChildren = activePlaylist?.children ?? [];
+  const createParentId = activePlaylist?.id ?? null;
+
+  const putTrackInPlaylist = useCallback(
+    async (playlistId: string, trackId: string) => {
+      const detail = await addTrackToPlaylist(playlistId, trackId);
+      setPlaylists((prev) =>
+        prev.map((item) =>
+          item.id === detail.id
+            ? { ...item, trackCount: detail.trackCount }
+            : item,
+        ),
       );
-      sessionSeqRef.current += 1;
-      setSession({
-        id: sessionSeqRef.current,
-        tracks: queue,
-        startIndex: index >= 0 ? index : 0,
-        label,
-      });
+      setTracks((prev) =>
+        prev.map((track) =>
+          track.id === trackId ? { ...track, inFolder: true } : track,
+        ),
+      );
+      if (activePlaylist?.id === detail.id) {
+        setActivePlaylist(detail);
+      }
+      return detail;
     },
-    [],
+    [activePlaylist],
   );
 
   const handleUpload = useCallback(() => {
@@ -1114,8 +1225,13 @@ export default function MusicLibraryScreen() {
           onProgress: (percent) => setUploadProgress(percent),
         });
         setTracks((prev) => [track, ...prev]);
+        if (activePlaylist) {
+          await putTrackInPlaylist(activePlaylist.id, track.id);
+          toast.success('Трек загружен в папку');
+        } else {
+          toast.success('Трек загружен');
+        }
         await refreshQuota();
-        toast.success('Трек загружен');
       } catch (error) {
         toast.error(localizeErrorMessage(error, 'Не удалось загрузить трек'));
       } finally {
@@ -1124,7 +1240,7 @@ export default function MusicLibraryScreen() {
         setUploadFileName(null);
       }
     })();
-  }, [busy, quota, refreshQuota]);
+  }, [activePlaylist, busy, putTrackInPlaylist, quota, refreshQuota]);
 
   const closeUrlModal = useCallback(() => {
     setUrlOpen(false);
@@ -1167,16 +1283,29 @@ export default function MusicLibraryScreen() {
           externalTitle.trim() || undefined,
         );
         setTracks((prev) => [track, ...prev]);
+        if (activePlaylist) {
+          await putTrackInPlaylist(activePlaylist.id, track.id);
+          toast.success('Трек добавлен в папку');
+        } else {
+          toast.success('Трек добавлен по ссылке');
+        }
         await refreshQuota();
         closeUrlModal();
-        toast.success('Трек добавлен по ссылке');
       } catch (error) {
         toast.error(localizeErrorMessage(error, 'Не удалось добавить трек'));
       } finally {
         setBusy(false);
       }
     })();
-  }, [closeUrlModal, externalTitle, externalUrl, linkSource, refreshQuota]);
+  }, [
+    activePlaylist,
+    closeUrlModal,
+    externalTitle,
+    externalUrl,
+    linkSource,
+    putTrackInPlaylist,
+    refreshQuota,
+  ]);
 
   const handleDeleteTrack = useCallback(
     (track: MusicTrack) => {
@@ -1224,13 +1353,44 @@ export default function MusicLibraryScreen() {
       toast.error('Укажите название');
       return;
     }
+    const parentId = createParentId;
     void (async () => {
       try {
         setBusy(true);
-        const playlist = await createMusicPlaylist(title);
-        setPlaylists((prev) => [...prev, playlist]);
+        const playlist = await createMusicPlaylist(title, parentId);
+        setPlaylists((prev) => {
+          const without = prev.filter((item) => item.id !== playlist.id);
+          return [...without, playlist];
+        });
+        if (parentId) {
+          setActivePlaylist((current) => {
+            if (!current || current.id !== parentId) {
+              return current;
+            }
+            const children = [
+              ...(current.children ?? []).filter((item) => item.id !== playlist.id),
+              playlist,
+            ];
+            return {
+              ...current,
+              children,
+              folderCount: children.length,
+            };
+          });
+          setPlaylists((prev) =>
+            prev.map((item) =>
+              item.id === parentId
+                ? { ...item, folderCount: (item.folderCount ?? 0) + 1 }
+                : item,
+            ),
+          );
+        }
         setPlaylistTitle('');
         setCreateOpen(false);
+        setFolderPath((path) => [
+          ...path,
+          { id: playlist.id, title: playlist.title },
+        ]);
         setActivePlaylist(playlist);
         toast.success('Папка создана');
       } catch (error) {
@@ -1239,20 +1399,46 @@ export default function MusicLibraryScreen() {
         setBusy(false);
       }
     })();
-  }, [playlistTitle]);
+  }, [createParentId, playlistTitle]);
 
-  const handleOpenPlaylist = useCallback((playlistId: string) => {
-    void (async () => {
-      try {
-        setBusy(true);
-        setActivePlaylist(await getMusicPlaylist(playlistId));
-      } catch (error) {
-        toast.error(localizeErrorMessage(error, 'Не удалось открыть папку'));
-      } finally {
-        setBusy(false);
-      }
-    })();
-  }, []);
+  const handleOpenPlaylist = useCallback(
+    (playlistId: string, titleHint?: string) => {
+      void (async () => {
+        try {
+          setBusy(true);
+          const detail = await getMusicPlaylist(playlistId);
+          setActivePlaylist(detail);
+          setFolderPath((path) => {
+            const idx = path.findIndex((item) => item.id === playlistId);
+            if (idx >= 0) {
+              return path.slice(0, idx + 1);
+            }
+            // Opening from root replaces the breadcrumb; nested open appends.
+            if (path.length === 0) {
+              return [
+                {
+                  id: detail.id,
+                  title: detail.title || titleHint || 'Папка',
+                },
+              ];
+            }
+            return [
+              ...path,
+              {
+                id: detail.id,
+                title: detail.title || titleHint || 'Папка',
+              },
+            ];
+          });
+        } catch (error) {
+          toast.error(localizeErrorMessage(error, 'Не удалось открыть папку'));
+        } finally {
+          setBusy(false);
+        }
+      })();
+    },
+    [],
+  );
 
   const handleDeletePlaylist = useCallback(
     (playlist: MusicPlaylistSummary | MusicPlaylistDetail) => {
@@ -1265,10 +1451,19 @@ export default function MusicLibraryScreen() {
         try {
           setBusy(true);
           await deleteMusicPlaylist(playlist.id);
-          setPlaylists((prev) => prev.filter((item) => item.id !== playlist.id));
-          if (activePlaylist?.id === playlist.id) {
+          setPlaylists((prev) =>
+            prev.filter(
+              (item) => item.id !== playlist.id && item.parentId !== playlist.id,
+            ),
+          );
+          if (
+            activePlaylist?.id === playlist.id ||
+            folderPath.some((item) => item.id === playlist.id)
+          ) {
             setActivePlaylist(null);
+            setFolderPath([]);
           }
+          void load();
           toast.success('Папка удалена');
         } catch (error) {
           toast.error(localizeErrorMessage(error, 'Не удалось удалить папку'));
@@ -1277,25 +1472,7 @@ export default function MusicLibraryScreen() {
         }
       })();
     },
-    [activePlaylist],
-  );
-
-  const putTrackInPlaylist = useCallback(
-    async (playlistId: string, trackId: string) => {
-      const detail = await addTrackToPlaylist(playlistId, trackId);
-      setPlaylists((prev) =>
-        prev.map((item) =>
-          item.id === detail.id
-            ? { ...item, trackCount: detail.trackCount }
-            : item,
-        ),
-      );
-      if (activePlaylist?.id === detail.id) {
-        setActivePlaylist(detail);
-      }
-      return detail;
-    },
-    [activePlaylist],
+    [activePlaylist, folderPath, load],
   );
 
   const handleAddToPlaylist = useCallback(
@@ -1351,6 +1528,9 @@ export default function MusicLibraryScreen() {
                 : item,
             ),
           );
+          // Refresh so inFolder is correct if the track is still in another folder.
+          const library = await listMusicTracks();
+          setTracks(library.tracks);
         } catch (error) {
           toast.error(localizeErrorMessage(error, 'Не удалось убрать трек'));
         } finally {
@@ -1380,7 +1560,7 @@ export default function MusicLibraryScreen() {
     setDropTargetId(playlistId);
   }, []);
 
-  const toolbarActions = !activePlaylist ? (
+  const toolbarActions = (
     <View style={styles.toolbar}>
       <Button
         label={
@@ -1400,7 +1580,7 @@ export default function MusicLibraryScreen() {
         disabled={busy}
       />
     </View>
-  ) : null;
+  );
 
   return (
     <ScreenTransition>
@@ -1493,13 +1673,56 @@ export default function MusicLibraryScreen() {
         ) : null}
 
         {activePlaylist ? (
-          <Pressable
-            accessibilityRole="button"
-            onPress={() => setActivePlaylist(null)}
-            style={styles.backLink}>
-            <Ionicons name="chevron-back" size={16} color={colors.primary} />
-            <Text style={styles.backLinkText}>Библиотека</Text>
-          </Pressable>
+          <View style={styles.explorerBar}>
+            <View style={styles.explorerCrumb}>
+              <Pressable
+                accessibilityRole="button"
+                onPress={() => {
+                  setActivePlaylist(null);
+                  setFolderPath([]);
+                }}
+                style={styles.explorerCrumbBtn}>
+                <Text style={styles.explorerCrumbText}>Библиотека</Text>
+              </Pressable>
+              {folderPath.map((crumb, index) => {
+                const isLast = index === folderPath.length - 1;
+                return (
+                  <View
+                    key={crumb.id}
+                    style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                    <Text style={styles.explorerSep}>/</Text>
+                    {isLast ? (
+                      <Text numberOfLines={1} style={styles.explorerCrumbCurrent}>
+                        {crumb.title}
+                      </Text>
+                    ) : (
+                      <Pressable
+                        accessibilityRole="button"
+                        onPress={() =>
+                          handleOpenPlaylist(crumb.id, crumb.title)
+                        }
+                        style={styles.explorerCrumbBtn}>
+                        <Text numberOfLines={1} style={styles.explorerCrumbText}>
+                          {crumb.title}
+                        </Text>
+                      </Pressable>
+                    )}
+                  </View>
+                );
+              })}
+            </View>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Удалить папку"
+              onPress={() => handleDeletePlaylist(activePlaylist)}
+              style={styles.iconBtn}>
+              <Ionicons
+                name="trash-outline"
+                size={18}
+                color={colors.destructive}
+              />
+            </Pressable>
+          </View>
         ) : null}
 
         {loading ? (
@@ -1507,57 +1730,46 @@ export default function MusicLibraryScreen() {
         ) : (
           <ScrollView
             style={styles.mainPane}
-            contentContainerStyle={styles.libraryContent}>
+            contentContainerStyle={[
+              styles.libraryContent,
+              session ? { paddingBottom: 120 } : null,
+            ]}>
             {activePlaylist ? (
-              <>
-                <View style={styles.folderOpenHeader}>
-                  <View style={styles.folderOpenIcon}>
-                    <Ionicons name="folder-open" size={28} color={colors.primary} />
-                  </View>
-                  <View style={styles.folderOpenCopy}>
-                    <Text numberOfLines={2} style={styles.rowTitle}>
-                      {activePlaylist.title}
-                    </Text>
-                    <Text style={styles.rowMeta}>
-                      {activePlaylist.trackCount}{' '}
-                      {trackWord(activePlaylist.trackCount)}
-                    </Text>
-                  </View>
-                  <View style={styles.folderOpenActions}>
-                    <Button
-                      label="Играть"
-                      variant="outline"
-                      onPress={() =>
-                        startPlayback(
-                          activePlaylist.tracks,
-                          0,
-                          activePlaylist.title,
-                        )
-                      }
-                      disabled={!activePlaylist.tracks.length}
-                    />
-                    <Pressable
-                      accessibilityRole="button"
-                      accessibilityLabel="Удалить папку"
-                      onPress={() => handleDeletePlaylist(activePlaylist)}
-                      style={styles.iconBtn}>
-                      <Ionicons
-                        name="trash-outline"
-                        size={20}
-                        color={colors.destructive}
-                      />
-                    </Pressable>
-                  </View>
-                </View>
-                {!activePlaylist.tracks.length ? (
+              <View style={styles.section}>
+                {IS_WEB && draggingTrackId ? (
+                  <Text style={styles.sectionHint}>
+                    Потяните трек на папку
+                  </Text>
+                ) : null}
+                {!folderChildren.length && !activePlaylist.tracks.length ? (
                   <View style={styles.empty}>
+                    <Ionicons
+                      name="folder-open-outline"
+                      size={36}
+                      color={colors.primary}
+                    />
                     <Text style={styles.emptyText}>
-                      В папке пока пусто. Вернитесь в библиотеку и перетащите
-                      трек сюда или нажмите иконку папки у трека.
+                      Папка пуста. Загрузите трек или создайте вложенную папку.
                     </Text>
                   </View>
                 ) : (
-                  <View style={styles.tracksList}>
+                  <View style={styles.explorerList}>
+                    {folderChildren.map((playlist) => (
+                      <FolderRow
+                        key={playlist.id}
+                        playlist={playlist}
+                        colors={colors}
+                        styles={styles}
+                        isDropTarget={dropTargetId === playlist.id}
+                        isDraggingTrack={Boolean(draggingTrackId)}
+                        onHover={handleFolderHover}
+                        onDropTrack={handleDropTrackOnPlaylist}
+                        onOpen={() =>
+                          handleOpenPlaylist(playlist.id, playlist.title)
+                        }
+                        onDelete={() => handleDeletePlaylist(playlist)}
+                      />
+                    ))}
                     {activePlaylist.tracks.map((track) => {
                       const index = activePlaylist.tracks.findIndex(
                         (item) => item.id === track.id,
@@ -1592,20 +1804,20 @@ export default function MusicLibraryScreen() {
                     })}
                   </View>
                 )}
-              </>
+              </View>
             ) : (
               <>
                 <View style={styles.section}>
                   <View style={styles.sectionHeader}>
                     <Text style={styles.sectionTitle}>Папки</Text>
-                    {IS_WEB && tracks.length > 0 ? (
+                    {IS_WEB && rootTracks.length > 0 ? (
                       <Text style={styles.sectionHint}>
                         Потяните трек на папку
                       </Text>
                     ) : null}
                   </View>
                   <View style={styles.folderGrid}>
-                    {playlists.map((playlist) => (
+                    {rootPlaylists.map((playlist) => (
                       <FolderCard
                         key={playlist.id}
                         playlist={playlist}
@@ -1615,7 +1827,9 @@ export default function MusicLibraryScreen() {
                         isDraggingTrack={Boolean(draggingTrackId)}
                         onHover={handleFolderHover}
                         onDropTrack={handleDropTrackOnPlaylist}
-                        onOpen={() => handleOpenPlaylist(playlist.id)}
+                        onOpen={() =>
+                          handleOpenPlaylist(playlist.id, playlist.title)
+                        }
                         onDelete={() => handleDeletePlaylist(playlist)}
                       />
                     ))}
@@ -1635,7 +1849,8 @@ export default function MusicLibraryScreen() {
                 <View style={styles.section}>
                   <View style={styles.sectionHeader}>
                     <Text style={styles.sectionTitle}>
-                      Треки{tracks.length ? ` · ${tracks.length}` : ''}
+                      Треки
+                      {rootTracks.length ? ` · ${rootTracks.length}` : ''}
                     </Text>
                   </View>
                   {!tracks.length ? (
@@ -1655,10 +1870,20 @@ export default function MusicLibraryScreen() {
                         onPress={() => setAddOpen(true)}
                       />
                     </View>
+                  ) : !rootTracks.length ? (
+                    <View style={styles.empty}>
+                      <Text style={styles.emptyText}>
+                        Все треки лежат в папках. Откройте папку или загрузите
+                        новый файл.
+                      </Text>
+                    </View>
                   ) : (
                     <View style={styles.tracksList}>
-                      {tracks.map((track) => {
-                        const index = playableTracks.findIndex(
+                      {rootTracks.map((track) => {
+                        const playableRoot = rootTracks.filter((item) =>
+                          Boolean(item.url),
+                        );
+                        const index = playableRoot.findIndex(
                           (item) => item.id === track.id,
                         );
                         return (
@@ -1678,7 +1903,7 @@ export default function MusicLibraryScreen() {
                             onDragEnd={clearDragState}
                             onPlay={() =>
                               startPlayback(
-                                playableTracks,
+                                playableRoot,
                                 Math.max(0, index),
                                 'Библиотека',
                               )
@@ -1695,19 +1920,6 @@ export default function MusicLibraryScreen() {
             )}
           </ScrollView>
         )}
-
-        {session ? (
-          <View style={styles.playerDock}>
-            <MusicPlayerBar
-              session={session}
-              onActiveTrackChange={setActivePlayback}
-              onClose={() => {
-                setSession(null);
-                setActivePlayback(null);
-              }}
-            />
-          </View>
-        ) : null}
       </View>
 
       <Modal

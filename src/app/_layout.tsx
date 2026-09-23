@@ -16,6 +16,7 @@ import { ProfileProvider } from '@/context/ProfileContext';
 import { PushPromptProvider } from '@/context/PushPromptContext';
 import { RealtimeProvider } from '@/context/RealtimeContext';
 import { VoiceCallProvider } from '@/context/VoiceCallContext';
+import { MusicPlayerProvider } from '@/context/MusicPlayerContext';
 import { AuthorsProvider } from '@/context/AuthorsContext';
 import { useTheme, useThemePreference } from '@/hooks/use-theme';
 import { registerLivekitGlobals } from '@/services/livekit/platform';
@@ -79,7 +80,9 @@ function AppRouteProviders() {
         <ProfileProvider>
           <AuthorsProvider>
             <VoiceCallProvider>
-              <PushPromptProvider>{navigator}</PushPromptProvider>
+              <MusicPlayerProvider>
+                <PushPromptProvider>{navigator}</PushPromptProvider>
+              </MusicPlayerProvider>
             </VoiceCallProvider>
           </AuthorsProvider>
         </ProfileProvider>

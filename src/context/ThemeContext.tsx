@@ -82,6 +82,11 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
       '--adventura-toast-action-fg',
       colorScheme === 'dark' ? palette.primaryLight : palette.primary,
     );
+    root.style.setProperty('--adventura-notif-bg', palette.surface);
+    root.style.setProperty('--adventura-notif-fg', palette.text);
+    root.style.setProperty('--adventura-notif-muted', palette.textMuted);
+    root.style.setProperty('--adventura-notif-border', palette.borderLight);
+    root.style.setProperty('--adventura-notif-action', '#9A7518');
     if (body) {
       body.style.backgroundColor = bg;
       body.style.color = fg;
