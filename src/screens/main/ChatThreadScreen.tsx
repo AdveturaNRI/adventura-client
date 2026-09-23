@@ -3354,7 +3354,10 @@ export default function ChatThreadScreen() {
                     ? ongoingVoiceCall.conversationTitle || title
                     : ongoingVoiceCall.fromNickname,
                   ongoingVoiceCall.fromAvatarUrl,
-                  { isGroup: ongoingVoiceCall.isGroup },
+                  {
+                    isGroup: ongoingVoiceCall.isGroup,
+                    myRole: ongoingVoiceCall.isGroup ? myGroupRole : null,
+                  },
                 ).finally(() => setJoiningOngoingVoice(false));
                 return;
               }
@@ -3387,6 +3390,7 @@ export default function ChatThreadScreen() {
                   {
                     isGroup,
                     ringingPeers,
+                    myRole: isGroup ? myGroupRole : null,
                   },
                 );
                 if (isGroup && ringingPeers.length === 0) {
@@ -3463,7 +3467,10 @@ export default function ChatThreadScreen() {
                     ? ongoingVoiceCall.conversationTitle || title
                     : ongoingVoiceCall.fromNickname,
                   ongoingVoiceCall.fromAvatarUrl,
-                  { isGroup: ongoingVoiceCall.isGroup },
+                  {
+                    isGroup: ongoingVoiceCall.isGroup,
+                    myRole: ongoingVoiceCall.isGroup ? myGroupRole : null,
+                  },
                 ).finally(() => setJoiningOngoingVoice(false));
               }}
               style={({ pressed }) => [

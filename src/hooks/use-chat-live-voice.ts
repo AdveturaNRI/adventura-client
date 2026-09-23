@@ -60,6 +60,11 @@ type JoinLiveOptions = {
   primedMic?: MediaStream | null;
 };
 
+export type RoomDataHandler = (
+  payload: Uint8Array,
+  participant?: RemoteParticipant,
+) => void;
+
 type UseChatLiveVoiceResult = {
   status: ChatLiveVoiceStatus;
   error: string | null;
@@ -78,6 +83,10 @@ type UseChatLiveVoiceResult = {
   toggleCamera: () => Promise<void>;
   sendUrgentRequest: () => Promise<void>;
   setParticipantVolume: (identity: string, volume: number) => void;
+  /** Reliable LiveKit data publish (topic + JSON body). No-op if not connected. */
+  publishRoomData: (topic: string, payload: object) => Promise<void>;
+  /** Subscribe to a data topic; returns unsubscribe. Urgent stays internal. */
+  subscribeRoomData: (topic: string, handler: RoomDataHandler) => () => void;
 };
 
 function parseAvatarFromMetadata(raw: string | undefined): string | null {
@@ -286,6 +295,50 @@ export function useChatLiveVoice(conversationId: string | null): UseChatLiveVoic
   const urgentByIdRef = useRef<Record<string, boolean>>({});
   urgentByIdRef.current = urgentById;
   const lastUrgentSentAtRef = useRef(0);
+  const dataHandlersRef = useRef<Map<string, Set<RoomDataHandler>>>(new Map());
+
+  const subscribeRoomData = useCallback((topic: string, handler: RoomDataHandler) => {
+    const key = topic.trim();
+    if (!key) {
+      return () => undefined;
+    }
+    let set = dataHandlersRef.current.get(key);
+    if (!set) {
+      set = new Set();
+      dataHandlersRef.current.set(key, set);
+    }
+    set.add(handler);
+    return () => {
+      const current = dataHandlersRef.current.get(key);
+      if (!current) {
+        return;
+      }
+      current.delete(handler);
+      if (current.size === 0) {
+        dataHandlersRef.current.delete(key);
+      }
+    };
+  }, []);
+
+  const publishRoomData = useCallback(async (topic: string, payload: object) => {
+    const room = roomRef.current;
+    if (!room || room.state !== ConnectionState.Connected) {
+      return;
+    }
+    const key = topic.trim();
+    if (!key) {
+      return;
+    }
+    const bytes = new TextEncoder().encode(JSON.stringify(payload));
+    try {
+      await room.localParticipant.publishData(bytes, {
+        reliable: true,
+        topic: key,
+      });
+    } catch (error) {
+      console.warn('[voice] publishData failed', key, error);
+    }
+  }, []);
 
   const setUrgent = useCallback((identity: string, active: boolean, playSound: boolean) => {
     if (!identity) {
@@ -460,7 +513,18 @@ export function useChatLiveVoice(conversationId: string | null): UseChatLiveVoic
         .on(
           RoomEvent.DataReceived,
           (payload: Uint8Array, participant?: RemoteParticipant | undefined, _kind?: unknown, topic?: string) => {
-            if (topic && topic !== URGENT_TOPIC) {
+            const topicKey = typeof topic === 'string' ? topic.trim() : '';
+            if (topicKey && topicKey !== URGENT_TOPIC) {
+              const handlers = dataHandlersRef.current.get(topicKey);
+              if (handlers?.size) {
+                for (const handler of handlers) {
+                  try {
+                    handler(payload, participant);
+                  } catch {
+                    // ignore subscriber errors
+                  }
+                }
+              }
               return;
             }
             try {
@@ -835,5 +899,7 @@ export function useChatLiveVoice(conversationId: string | null): UseChatLiveVoic
     toggleCamera,
     sendUrgentRequest,
     setParticipantVolume,
+    publishRoomData,
+    subscribeRoomData,
   };
 }

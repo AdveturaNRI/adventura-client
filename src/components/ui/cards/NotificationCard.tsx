@@ -35,18 +35,21 @@ function createStyles(colors: ThemeColors) {
       borderWidth: 1,
       borderColor: colors.borderLight,
       backgroundColor: colors.surface,
-      paddingVertical: Spacing.md,
-      paddingHorizontal: Spacing.md,
-      gap: Spacing.sm,
       shadowColor: colors.shadow,
       shadowOffset: { width: 0, height: 4 },
       shadowOpacity: 0.06,
       shadowRadius: 12,
       elevation: 2,
+      overflow: 'hidden',
     },
     cardUnread: {
       borderColor: colors.primary,
       backgroundColor: colors.surfaceMuted,
+    },
+    cardInner: {
+      paddingVertical: Spacing.md,
+      paddingHorizontal: Spacing.md,
+      gap: Spacing.sm,
     },
     cardPressable: {
       ...Platform.select({
@@ -296,6 +299,23 @@ export function NotificationCard({
   const colors = useTheme();
   const styles = useThemedStyles(createStyles);
   const isFavorite = variant === 'favorite' || variant === 'returned';
+  const cardBg = unread ? colors.surfaceMuted : colors.surface;
+  const cardBorder = unread ? colors.primary : colors.borderLight;
+
+  // Web: Safari paints Pressable as a white <button>; keep surface/text on a View shell.
+  const webThemeVars =
+    Platform.OS === 'web'
+      ? ({
+          ['--adventura-notif-bg']: cardBg,
+          ['--adventura-notif-fg']: colors.text,
+          ['--adventura-notif-muted']: colors.textMuted,
+          ['--adventura-notif-border']: cardBorder,
+          ['--adventura-notif-action']: '#9A7518',
+          backgroundColor: cardBg,
+          color: colors.text,
+          borderColor: cardBorder,
+        } as Record<string, string>)
+      : null;
 
   const content = (
     <>
@@ -322,25 +342,59 @@ export function NotificationCard({
                   style={({ pressed, hovered }: { pressed: boolean; hovered?: boolean }) => [
                     styles.actorNamePressable,
                     (pressed || hovered) && styles.actorNamePressableHover,
+                    Platform.OS === 'web'
+                      ? ({ backgroundColor: 'transparent', background: 'transparent' } as object)
+                      : null,
                   ]}>
-                  <Text style={[styles.actorName, styles.actorNameInteractive]} numberOfLines={1}>
+                  <Text
+                    {...(Platform.OS === 'web'
+                      ? ({ className: 'adventura-notification-actor' } as object)
+                      : null)}
+                    style={[styles.actorName, styles.actorNameInteractive]}
+                    numberOfLines={1}>
                     {actorName}
                   </Text>
                 </Pressable>
               ) : (
-                <Text style={styles.actorName} numberOfLines={1}>
+                <Text
+                  {...(Platform.OS === 'web'
+                    ? ({ className: 'adventura-notification-title' } as object)
+                    : null)}
+                  style={styles.actorName}
+                  numberOfLines={1}>
                   {actorName}
                 </Text>
               )}
-              <Text style={styles.message}>
-                <Text style={styles.actionText}>{actionText}</Text>
+              <Text
+                {...(Platform.OS === 'web'
+                  ? ({ className: 'adventura-notification-message' } as object)
+                  : null)}
+                style={styles.message}>
+                <Text
+                  {...(Platform.OS === 'web'
+                    ? ({ className: 'adventura-notification-action' } as object)
+                    : null)}
+                  style={styles.actionText}>
+                  {actionText}
+                </Text>
                 {messageText}
               </Text>
-              {subject ? <Text style={styles.subject}>{subject}</Text> : null}
+              {subject ? (
+                <Text
+                  {...(Platform.OS === 'web'
+                    ? ({ className: 'adventura-notification-title' } as object)
+                    : null)}
+                  style={styles.subject}>
+                  {subject}
+                </Text>
+              ) : null}
             </View>
 
             {onButtonPress ? (
               <Pressable
+                {...(Platform.OS === 'web'
+                  ? ({ className: 'adventura-notification-add' } as object)
+                  : null)}
                 accessibilityRole="button"
                 onPress={(event) => {
                   event.stopPropagation?.();
@@ -351,7 +405,13 @@ export function NotificationCard({
                   pressed && styles.actionButtonPressed,
                 ]}>
                 <MaterialCommunityIcons name="crown" size={13} color="#9A7518" />
-                <Text style={styles.actionButtonLabel}>{buttonLabel}</Text>
+                <Text
+                  {...(Platform.OS === 'web'
+                    ? ({ className: 'adventura-notification-action' } as object)
+                    : null)}
+                  style={styles.actionButtonLabel}>
+                  {buttonLabel}
+                </Text>
               </Pressable>
             ) : null}
           </View>
@@ -365,7 +425,13 @@ export function NotificationCard({
       </View>
 
       <View style={styles.footerRow}>
-        <Text style={styles.timestamp}>{timestamp}</Text>
+        <Text
+          {...(Platform.OS === 'web'
+            ? ({ className: 'adventura-notification-muted' } as object)
+            : null)}
+          style={styles.timestamp}>
+          {timestamp}
+        </Text>
         {onDeletePress ? (
           <Pressable
             accessibilityRole="button"
@@ -378,6 +444,9 @@ export function NotificationCard({
             style={({ pressed }) => [
               styles.deleteButton,
               pressed && styles.deleteButtonPressed,
+              Platform.OS === 'web'
+                ? ({ backgroundColor: 'transparent', background: 'transparent' } as object)
+                : null,
             ]}>
             <Ionicons name="trash-outline" size={15} color={colors.destructive} />
           </Pressable>
@@ -386,22 +455,37 @@ export function NotificationCard({
     </>
   );
 
-  if (onPress) {
-    return (
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel={`Открыть: ${subject || actorName}`}
-        onPress={onPress}
-        style={({ pressed }) => [
-          styles.card,
-          unread && styles.cardUnread,
-          styles.cardPressable,
-          pressed && styles.cardPressed,
-        ]}>
-        {content}
-      </Pressable>
-    );
-  }
+  const shellStyle = [
+    styles.card,
+    unread && styles.cardUnread,
+    webThemeVars,
+    { backgroundColor: cardBg, borderColor: cardBorder },
+  ];
 
-  return <View style={[styles.card, unread && styles.cardUnread]}>{content}</View>;
+  return (
+    <View
+      {...(Platform.OS === 'web'
+        ? ({ className: 'adventura-notification-card' } as object)
+        : null)}
+      style={shellStyle}>
+      {onPress ? (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={`Открыть: ${subject || actorName}`}
+          onPress={onPress}
+          style={({ pressed }) => [
+            styles.cardInner,
+            styles.cardPressable,
+            Platform.OS === 'web'
+              ? ({ backgroundColor: 'transparent', background: 'transparent' } as object)
+              : null,
+            pressed && styles.cardPressed,
+          ]}>
+          {content}
+        </Pressable>
+      ) : (
+        <View style={styles.cardInner}>{content}</View>
+      )}
+    </View>
+  );
 }

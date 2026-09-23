@@ -1169,20 +1169,33 @@ export function WandererDeck({
                           ? { width: listDeckSize.width, height: listDeckSize.height }
                           : { width: '100%' }),
                     ]}>
-                    <Pressable
-                      accessibilityRole="button"
-                      accessibilityLabel={`Анкета ${item.nickname}`}
-                      onPress={() => router.push(`/users/${item.id}`)}
+                    <View
+                      {...(Platform.OS === 'web'
+                        ? ({ className: 'adventura-wanderer-list-card' } as object)
+                        : null)}
                       style={styles.listCardPressable}>
-                      <UserCard
-                        {...cardProps}
-                        layout={listLayout}
-                        deckSize={listDeckSize ?? undefined}
-                        deckFill={isDesktopWeb}
-                        size="compact"
-                        showVisibility={false}
-                      />
-                    </Pressable>
+                      <Pressable
+                        accessibilityRole="button"
+                        accessibilityLabel={`Анкета ${item.nickname}`}
+                        onPress={() => router.push(`/users/${item.id}`)}
+                        style={
+                          Platform.OS === 'web'
+                            ? ({
+                                backgroundColor: 'transparent',
+                                background: 'transparent',
+                              } as object)
+                            : undefined
+                        }>
+                        <UserCard
+                          {...cardProps}
+                          layout={listLayout}
+                          deckSize={listDeckSize ?? undefined}
+                          deckFill={isDesktopWeb}
+                          size="compact"
+                          showVisibility={false}
+                        />
+                      </Pressable>
+                    </View>
                     <View
                       ref={(node) => {
                         cardMenuTriggerRefs.current[item.id] = node;

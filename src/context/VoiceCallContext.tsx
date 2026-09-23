@@ -21,12 +21,14 @@ import {
   type ChatLiveVoiceParticipant,
   type ChatLiveVoiceStatus,
 } from '@/hooks/use-chat-live-voice';
+import { useCallSharedMusic } from '@/hooks/use-call-shared-music';
 import {
   acceptChatVoiceCall,
   declineChatVoiceCall,
   endChatVoiceCall,
   inviteChatVoiceCall,
   joinChatVoiceCall,
+  listChatMembers,
   type VoiceCallPeer,
 } from '@/services/chats/chatsApi';
 import type { CallInvitePayload } from '@/services/realtime/socket';
@@ -52,6 +54,8 @@ export type VoiceCallRingingPeer = {
   connecting?: boolean;
 };
 
+export type VoiceCallGroupRole = 'owner' | 'admin' | 'member';
+
 type VoiceCallContextValue = {
   phase: VoiceCallPhase;
   callId: string | null;
@@ -59,6 +63,7 @@ type VoiceCallContextValue = {
   peerName: string | null;
   peerAvatarUrl: string | null;
   isGroup: boolean;
+  myRole: VoiceCallGroupRole | null;
   minimized: boolean;
   liveStatus: ChatLiveVoiceStatus;
   liveError: string | null;
@@ -70,14 +75,18 @@ type VoiceCallContextValue = {
     conversationId: string,
     peerName?: string | null,
     peerAvatarUrl?: string | null,
-    opts?: { isGroup?: boolean; ringingPeers?: VoiceCallRingingPeer[] },
+    opts?: {
+      isGroup?: boolean;
+      ringingPeers?: VoiceCallRingingPeer[];
+      myRole?: VoiceCallGroupRole | null;
+    },
   ) => Promise<void>;
   joinOngoingCall: (
     conversationId: string,
     callId: string,
     peerName?: string | null,
     peerAvatarUrl?: string | null,
-    opts?: { isGroup?: boolean },
+    opts?: { isGroup?: boolean; myRole?: VoiceCallGroupRole | null },
   ) => Promise<void>;
   hangup: () => Promise<void>;
   toggleMute: () => Promise<void>;
@@ -99,6 +108,7 @@ type Session = {
   peerAvatarUrl: string | null;
   callerName: string | null;
   isGroup: boolean;
+  myRole: VoiceCallGroupRole | null;
   ringingPeers: VoiceCallRingingPeer[];
   phase: Exclude<VoiceCallPhase, 'idle'>;
 };
@@ -111,6 +121,7 @@ type PendingInvite = {
   peerAvatarUrl: string | null;
   callerName: string | null;
   isGroup: boolean;
+  myRole: VoiceCallGroupRole | null;
 };
 
 function inviteFromPayload(invite: CallInvitePayload): PendingInvite {
@@ -125,6 +136,7 @@ function inviteFromPayload(invite: CallInvitePayload): PendingInvite {
     peerAvatarUrl: invite.fromAvatarUrl,
     callerName: invite.fromNickname,
     isGroup,
+    myRole: null,
   };
 }
 
@@ -141,6 +153,25 @@ function mapInviteRinging(peers?: VoiceCallPeer[] | VoiceCallRingingPeer[]): Voi
 
 function dropRingingPeer(peers: VoiceCallRingingPeer[], userId: string) {
   return peers.filter((peer) => peer.userId !== userId);
+}
+
+async function resolveGroupRole(
+  conversationId: string,
+  userId: string | undefined,
+): Promise<VoiceCallGroupRole> {
+  if (!userId) {
+    return 'member';
+  }
+  try {
+    const members = await listChatMembers(conversationId);
+    const mine = members.find((member) => member.id === userId);
+    if (mine?.role === 'owner' || mine?.role === 'admin' || mine?.role === 'member') {
+      return mine.role;
+    }
+  } catch {
+    // keep conservative default
+  }
+  return 'member';
 }
 
 export function VoiceCallProvider({ children }: { children: ReactNode }) {
@@ -185,7 +216,25 @@ export function VoiceCallProvider({ children }: { children: ReactNode }) {
     toggleCamera,
     sendUrgentRequest,
     setParticipantVolume,
+    publishRoomData,
+    subscribeRoomData,
   } = useChatLiveVoice(liveConversationId);
+
+  const canControlMusic =
+    !session?.isGroup || session.myRole === 'owner' || session.myRole === 'admin';
+
+  const musicEnabled =
+    session?.phase === 'outgoing' || session?.phase === 'active';
+
+  const sharedMusic = useCallSharedMusic({
+    enabled: musicEnabled,
+    liveStatus,
+    canControl: canControlMusic,
+    localDisplayName: user?.nickname?.trim() || 'Участник',
+    deafened,
+    publishRoomData,
+    subscribeRoomData,
+  });
 
   const clearPendingInvite = useCallback(() => {
     pendingInviteRef.current = null;
@@ -236,6 +285,7 @@ export function VoiceCallProvider({ children }: { children: ReactNode }) {
         peerAvatarUrl: parked.peerAvatarUrl,
         callerName: parked.callerName,
         isGroup: parked.isGroup,
+        myRole: parked.myRole,
         ringingPeers: [],
         phase: 'incoming',
       };
@@ -249,6 +299,10 @@ export function VoiceCallProvider({ children }: { children: ReactNode }) {
     async (invite: PendingInvite) => {
       // Prefer stream started in onPressIn; fall back to getUserMedia now.
       const primedMic = await takePrimedMicrophone();
+      let myRole = invite.myRole;
+      if (invite.isGroup && !myRole) {
+        myRole = await resolveGroupRole(invite.conversationId, user?.id);
+      }
       const next: Session = {
         callId: invite.callId,
         conversationId: invite.conversationId,
@@ -257,6 +311,7 @@ export function VoiceCallProvider({ children }: { children: ReactNode }) {
         peerAvatarUrl: invite.peerAvatarUrl,
         callerName: invite.callerName,
         isGroup: invite.isGroup,
+        myRole: invite.isGroup ? myRole ?? 'member' : null,
         ringingPeers: [],
         phase: 'active',
       };
@@ -273,7 +328,7 @@ export function VoiceCallProvider({ children }: { children: ReactNode }) {
         toast.error(localizeErrorMessage(error, 'Не удалось принять звонок'));
       }
     },
-    [clearSession, join],
+    [clearSession, join, user?.id],
   );
 
   const startCall = useCallback(
@@ -281,7 +336,11 @@ export function VoiceCallProvider({ children }: { children: ReactNode }) {
       conversationId: string,
       peerName?: string | null,
       peerAvatarUrl?: string | null,
-      opts?: { isGroup?: boolean; ringingPeers?: VoiceCallRingingPeer[] },
+      opts?: {
+        isGroup?: boolean;
+        ringingPeers?: VoiceCallRingingPeer[];
+        myRole?: VoiceCallGroupRole | null;
+      },
     ) => {
       if (sessionRef.current) {
         toast.info('Сначала завершите текущий звонок');
@@ -294,6 +353,11 @@ export function VoiceCallProvider({ children }: { children: ReactNode }) {
           mapInviteRinging(ringing).length > 0
             ? mapInviteRinging(ringing)
             : mapInviteRinging(opts?.ringingPeers);
+        const group = opts?.isGroup ?? Boolean(isGroup);
+        let myRole: VoiceCallGroupRole | null = group ? opts?.myRole ?? null : null;
+        if (group && !myRole) {
+          myRole = await resolveGroupRole(conversationId, user?.id);
+        }
         const next: Session = {
           callId,
           conversationId,
@@ -301,7 +365,8 @@ export function VoiceCallProvider({ children }: { children: ReactNode }) {
           peerName: peerName?.trim() || 'Собеседник',
           peerAvatarUrl: peerAvatarUrl ?? null,
           callerName: null,
-          isGroup: opts?.isGroup ?? Boolean(isGroup),
+          isGroup: group,
+          myRole: group ? myRole ?? 'member' : null,
           ringingPeers,
           phase: 'outgoing',
         };
@@ -320,7 +385,7 @@ export function VoiceCallProvider({ children }: { children: ReactNode }) {
         toast.error(localizeErrorMessage(error, 'Не удалось начать звонок'));
       }
     },
-    [join, leave],
+    [join, leave, user?.id],
   );
 
   const joinOngoingCall = useCallback(
@@ -329,7 +394,7 @@ export function VoiceCallProvider({ children }: { children: ReactNode }) {
       callId: string,
       peerName?: string | null,
       peerAvatarUrl?: string | null,
-      opts?: { isGroup?: boolean },
+      opts?: { isGroup?: boolean; myRole?: VoiceCallGroupRole | null },
     ) => {
       if (sessionRef.current) {
         toast.info('Сначала завершите текущий звонок');
@@ -338,6 +403,11 @@ export function VoiceCallProvider({ children }: { children: ReactNode }) {
       const primedMic = await takePrimedMicrophone();
       try {
         await joinChatVoiceCall(conversationId, callId);
+        const group = opts?.isGroup ?? true;
+        let myRole: VoiceCallGroupRole | null = group ? opts?.myRole ?? null : null;
+        if (group && !myRole) {
+          myRole = await resolveGroupRole(conversationId, user?.id);
+        }
         const next: Session = {
           callId,
           conversationId,
@@ -345,7 +415,8 @@ export function VoiceCallProvider({ children }: { children: ReactNode }) {
           peerName: peerName?.trim() || 'Голосовой чат',
           peerAvatarUrl: peerAvatarUrl ?? null,
           callerName: null,
-          isGroup: opts?.isGroup ?? true,
+          isGroup: group,
+          myRole: group ? myRole ?? 'member' : null,
           ringingPeers: [],
           phase: 'active',
         };
@@ -362,7 +433,7 @@ export function VoiceCallProvider({ children }: { children: ReactNode }) {
         toast.error(localizeErrorMessage(error, 'Не удалось войти в звонок'));
       }
     },
-    [join, leave],
+    [join, leave, user?.id],
   );
 
   const hangup = useCallback(async () => {
@@ -399,6 +470,7 @@ export function VoiceCallProvider({ children }: { children: ReactNode }) {
       peerAvatarUrl: current.peerAvatarUrl,
       callerName: current.callerName,
       isGroup: current.isGroup,
+      myRole: current.myRole,
     };
     await enterCallFromInvite(invite);
   }, [clearPendingInvite, clearSession, enterCallFromInvite]);
@@ -502,6 +574,7 @@ export function VoiceCallProvider({ children }: { children: ReactNode }) {
           peerAvatarUrl: nextInvite.peerAvatarUrl,
           callerName: nextInvite.callerName,
           isGroup: nextInvite.isGroup,
+          myRole: nextInvite.myRole,
           ringingPeers: [],
           phase: 'incoming',
         };
@@ -636,6 +709,7 @@ export function VoiceCallProvider({ children }: { children: ReactNode }) {
             peerAvatarUrl: nextParked.peerAvatarUrl,
             callerName: nextParked.callerName,
             isGroup: nextParked.isGroup,
+            myRole: nextParked.myRole,
             ringingPeers: [],
             phase: 'incoming',
           };
@@ -826,6 +900,7 @@ export function VoiceCallProvider({ children }: { children: ReactNode }) {
       peerName: session?.peerName ?? null,
       peerAvatarUrl: session?.peerAvatarUrl ?? null,
       isGroup: session?.isGroup ?? false,
+      myRole: session?.myRole ?? null,
       minimized,
       liveStatus,
       liveError,
@@ -851,6 +926,7 @@ export function VoiceCallProvider({ children }: { children: ReactNode }) {
       session?.peerName,
       session?.peerAvatarUrl,
       session?.isGroup,
+      session?.myRole,
       minimized,
       liveStatus,
       liveError,
@@ -919,6 +995,31 @@ export function VoiceCallProvider({ children }: { children: ReactNode }) {
           onSetParticipantVolume={setParticipantVolume}
           conversationId={session?.conversationId ?? null}
           diceSenderNickname={user?.nickname ?? 'Вы'}
+          canControlMusic={canControlMusic}
+          bardPresent={sharedMusic.snapshot.bardPresent}
+          bardTrackTitle={sharedMusic.snapshot.trackTitle}
+          bardPlaying={sharedMusic.snapshot.playing}
+          bardTrackId={sharedMusic.snapshot.trackId}
+          bardCurrentEntryId={sharedMusic.snapshot.currentEntryId}
+          bardQueue={sharedMusic.snapshot.queue}
+          bardPositionSec={sharedMusic.livePositionSec}
+          bardDurationSec={sharedMusic.durationSec}
+          bardLocalVolume={sharedMusic.localVolume}
+          bardGlobalVolume={sharedMusic.snapshot.globalVolume}
+          bardLocalDisplayName={sharedMusic.localDisplayName}
+          onSummonBard={() => void sharedMusic.summonBard()}
+          onDismissBard={() => void sharedMusic.dismissBard()}
+          onSetBardLocalVolume={sharedMusic.setLocalVolume}
+          onEnqueueBardTrack={(trackId, title, durationSec) =>
+            void sharedMusic.enqueueTrack(trackId, title, durationSec)
+          }
+          onPlayBardQueueEntry={(entryId) => void sharedMusic.playQueueEntry(entryId)}
+          onRemoveBardQueueEntry={(entryId) => void sharedMusic.removeQueueEntry(entryId)}
+          onToggleBardPlay={() => void sharedMusic.togglePlay()}
+          onSeekBard={(positionSec) => void sharedMusic.seek(positionSec)}
+          onStopBardTrack={() => void sharedMusic.stopTrack()}
+          onSetBardGlobalVolume={(volume) => void sharedMusic.setGlobalVolume(volume)}
+          onRequestBardSync={() => sharedMusic.requestSync()}
         />
         {children}
         <IncomingCallModal
