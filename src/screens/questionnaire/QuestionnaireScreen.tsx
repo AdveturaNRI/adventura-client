@@ -70,6 +70,7 @@ import {
   saveQuestionnaireToServer,
 } from '@/services/profile/profileApi';
 import { localizeErrorMessage } from '@/utils/localizeError';
+import { trackVkEvent, VK_PIXEL_EVENTS } from '@/services/analytics/vk-pixel';
 
 import { useQuestionnaireScreenStyles, getQuestionnaireColumnWidth } from './questionnaire-screen.styles';
 
@@ -328,6 +329,8 @@ export default function QuestionnaireScreen() {
       let savedStepIndex = stepIndex;
       let nextUiStepIndex = stepIndex;
       const savedProfileCardUri = savedDraft?.profileCardUri ?? null;
+      const wasQuestionnaireComplete =
+        (profile?.questionnaireCompletionPercent ?? 0) >= 100;
 
       try {
         if (mode === 'exit') {
@@ -343,6 +346,11 @@ export default function QuestionnaireScreen() {
             savedProfileCardUri,
           });
           await applySavedProfile(profile);
+          if (!wasQuestionnaireComplete) {
+            // The server only emits PROFILE_CREATED on the incomplete → complete
+            // transition. Keep the browser goal aligned with that business event.
+            trackVkEvent(VK_PIXEL_EVENTS.profileCreated);
+          }
           toast.success(QUESTIONNAIRE_FINISHED_TOAST);
           allowLeaveWithoutPromptRef.current = true;
           router.replace(QUESTIONNAIRE_AFTER_FINISH_HREF);
@@ -403,6 +411,7 @@ export default function QuestionnaireScreen() {
       applySavedProfile,
       draft,
       isSaving,
+      profile,
       router,
       savedDraft,
       stepIndex,

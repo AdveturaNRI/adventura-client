@@ -25,6 +25,7 @@ import {
   hitYandexMetrika,
   reachYandexMetrikaGoal,
 } from "@/services/analytics/yandex-metrika";
+import { trackVkEvent, VK_PIXEL_EVENTS } from "@/services/analytics/vk-pixel";
 import {
   getMarketingAnonymousId,
   parseMarketingQuery,
@@ -331,6 +332,7 @@ export default function PublicLandingRoute() {
             idempotencyKey: key,
           });
           reachYandexMetrikaGoal("landing_cta_click");
+          trackVkEvent(VK_PIXEL_EVENTS.landingCta);
         }
       } catch {
         // ignore analytics failures
