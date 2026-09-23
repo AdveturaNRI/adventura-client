@@ -50,12 +50,11 @@ export default function LoginScreen() {
   const router = useRouter();
   const params = useLocalSearchParams<{ next?: string | string[] }>();
   const nextParam = Array.isArray(params.next) ? params.next[0] : params.next;
-  const { signIn, signInAsGuest } = useAuth();
+  const { signIn } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [errors, setErrors] = useState<LoginErrors>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [isGuestSubmitting, setIsGuestSubmitting] = useState(false);
   const styles = useThemedStyles(createStyles);
 
   const handleSubmit = async () => {
@@ -80,22 +79,6 @@ export default function LoginScreen() {
       setEmail('');
       setPassword('');
       setErrors({});
-      router.replace(resolvePostLoginHref(nextParam));
-    }
-  };
-
-  const handleGuestLogin = async () => {
-    if (isSubmitting || isGuestSubmitting) {
-      return;
-    }
-
-    setIsGuestSubmitting(true);
-
-    const ok = await signInAsGuest();
-
-    setIsGuestSubmitting(false);
-
-    if (ok) {
       router.replace(resolvePostLoginHref(nextParam));
     }
   };
@@ -165,14 +148,8 @@ export default function LoginScreen() {
       />
 
       <OauthButtons
-        disabled={isSubmitting || isGuestSubmitting}
+        disabled={isSubmitting}
         onSuccess={() => router.replace(resolvePostLoginHref(nextParam))}
-      />
-
-      <Button
-        variant="outline"
-        label={isGuestSubmitting ? 'Создаём гостя...' : 'Войти как гость'}
-        onPress={handleGuestLogin}
       />
 
       <View style={styles.footer}>

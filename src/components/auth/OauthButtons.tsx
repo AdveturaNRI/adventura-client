@@ -1,6 +1,6 @@
 import { StyleSheet, View } from 'react-native';
 
-import { Button } from '@/components/ui';
+import { SocialButton } from '@/components/ui';
 import { Spacing, type ThemeColors } from '@/constants/theme';
 import { useAuth } from '@/context/AuthContext';
 import { useThemedStyles } from '@/hooks/use-themed-styles';
@@ -37,9 +37,8 @@ export function OauthButtons({ disabled, onSuccess }: OauthButtonsProps) {
   return (
     <View style={styles.root}>
       {showVk ? (
-        <Button
-          variant="outline"
-          label="Войти через VK ID"
+        <SocialButton
+          provider="vk"
           disabled={disabled}
           onPress={async () => {
             const ok = await signInWithVk();
@@ -48,9 +47,8 @@ export function OauthButtons({ disabled, onSuccess }: OauthButtonsProps) {
         />
       ) : null}
       {showYandex ? (
-        <Button
-          variant="outline"
-          label="Войти через Яндекс ID"
+        <SocialButton
+          provider="yandex"
           disabled={disabled}
           onPress={async () => {
             const ok = await signInWithYandex();

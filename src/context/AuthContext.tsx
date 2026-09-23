@@ -12,7 +12,6 @@ import { Platform } from 'react-native';
 import { toast } from '@/components/ui/feedback/toast';
 import {
   fetchCurrentUser,
-  guestLogin,
   linkVkAccount,
   linkYandexAccount,
   loginUser,
@@ -76,7 +75,6 @@ type AuthContextValue = {
   isAuthenticated: boolean;
   redirectToQuestionnaire: boolean;
   signIn: (email: string, password: string) => Promise<boolean>;
-  signInAsGuest: () => Promise<boolean>;
   signInWithVk: () => Promise<boolean>;
   signInWithYandex: () => Promise<boolean>;
   linkVk: () => Promise<boolean>;
@@ -377,27 +375,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [],
   );
 
-  const signInAsGuest = useCallback(async () => {
-    try {
-      const response = await guestLogin();
-      await saveAuthSession(
-        response.accessToken,
-        response.refreshToken,
-        response.user,
-      );
-      setToken(response.accessToken);
-      setUser(response.user);
-      setRedirectToQuestionnaire(true);
-      trackUserSessionStarted('guest');
-      toast.success(`Добро пожаловать, ${response.user.nickname}!`);
-      return true;
-    } catch (error) {
-      const message = localizeErrorMessage(error, 'Не удалось войти как гость');
-      toast.error(message);
-      return false;
-    }
-  }, []);
-
   const signOut = useCallback(async () => {
     try {
       const { disableWebPush } = await import('@/services/push/webPush');
@@ -432,7 +409,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       isAuthenticated: Boolean(token && user),
       redirectToQuestionnaire,
       signIn,
-      signInAsGuest,
       signInWithVk,
       signInWithYandex,
       linkVk,
@@ -450,7 +426,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       isLoading,
       redirectToQuestionnaire,
       signIn,
-      signInAsGuest,
       signInWithVk,
       signInWithYandex,
       linkVk,
