@@ -1077,8 +1077,8 @@ export function VoiceCallProvider({ children }: { children: ReactNode }) {
           }}
           onDismissBard={() => void sharedMusic.dismissBard()}
           onSetBardLocalVolume={sharedMusic.setLocalVolume}
-          onEnqueueBardTrack={(trackId, title, durationSec) =>
-            void sharedMusic.enqueueTrack(trackId, title, durationSec)
+          onEnqueueBardTrack={(trackId, title, durationSec, playUrl) =>
+            void sharedMusic.enqueueTrack(trackId, title, durationSec, playUrl)
           }
           onPlayBardQueueEntry={(entryId) => void sharedMusic.playQueueEntry(entryId)}
           onRemoveBardQueueEntry={(entryId) => void sharedMusic.removeQueueEntry(entryId)}

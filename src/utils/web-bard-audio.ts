@@ -1,4 +1,8 @@
-import { resolvePlayableMusicUrl } from '@/utils/music-playable-url';
+import {
+  getCachedPlayableMusicUrl,
+  resolvePlayableMusicUrl,
+  warmPlayableMusicUrl,
+} from '@/utils/music-playable-url';
 
 const SILENT_WAV =
   'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=';
@@ -31,8 +35,9 @@ function getAudioContextConstructor(): typeof AudioContext | null {
 }
 
 /**
- * One persistent HTMLAudioElement + GainNode for call Bard on web.
- * expo-audio replace() recreates the element and kills iOS unlock — we never do that.
+ * One persistent HTMLAudioElement for call Bard on web.
+ * Play starts from the signed URL immediately (no full-file download first).
+ * Blob/GainNode warm runs in the background for Safari volume.
  */
 export class WebBardAudioEngine {
   private readonly audio: HTMLAudioElement;
@@ -45,13 +50,14 @@ export class WebBardAudioEngine {
   private listeners = new Set<StatusListener>();
   private ended = false;
   private disposed = false;
+  /** True after a successful play() inside a user gesture (or unlock). */
+  private unlocked = false;
 
   constructor() {
     this.audio = new Audio();
     this.audio.preload = 'auto';
     this.audio.setAttribute('playsinline', 'true');
     this.audio.setAttribute('webkit-playsinline', 'true');
-    // crossOrigin set per-src in setSource — anonymous on non-CORS CDN = silent fail.
 
     this.audio.addEventListener('timeupdate', this.emitStatus);
     this.audio.addEventListener('play', this.emitStatus);
@@ -90,7 +96,7 @@ export class WebBardAudioEngine {
 
   /**
    * Must run inside a user gesture (Accept / Play / enqueue tap).
-   * Unlocks THIS element + AudioContext for later remote starts.
+   * Never pause real track audio — only the silent unlock clip.
    */
   unlockFromGesture() {
     if (this.disposed) {
@@ -99,9 +105,9 @@ export class WebBardAudioEngine {
     this.ensureContext();
     void this.ctx?.resume().catch(() => undefined);
 
-    const src = this.audio.src;
-    const empty = !src || src === window.location.href;
-    if (empty) {
+    const src = this.audio.getAttribute('src') || this.audio.src || '';
+    const needsSilent = !src || src === window.location.href || src.startsWith('data:');
+    if (needsSilent) {
       this.audio.src = SILENT_WAV;
       try {
         this.audio.load();
@@ -113,9 +119,15 @@ export class WebBardAudioEngine {
     void this.audio
       .play()
       .then(() => {
-        if (empty || this.audio.src.startsWith('data:')) {
+        this.unlocked = true;
+        // Pause ONLY if we are still on the silent unlock clip.
+        if ((this.audio.src || '').startsWith('data:')) {
           this.audio.pause();
-          this.audio.currentTime = 0;
+          try {
+            this.audio.currentTime = 0;
+          } catch {
+            // ignore
+          }
         }
       })
       .catch(() => undefined);
@@ -126,6 +138,10 @@ export class WebBardAudioEngine {
     this.applyVolume();
   }
 
+  /**
+   * Load + play ASAP. Uses cached blob if ready, otherwise the remote URL
+   * (progressive) so the first tap is not blocked by a full download.
+   */
   async load(params: {
     key: string;
     playUrl: string;
@@ -138,20 +154,29 @@ export class WebBardAudioEngine {
     const gen = ++this.loadGen;
     this.ended = false;
 
-    const playable = await resolvePlayableMusicUrl(params.playUrl);
-    if (gen !== this.loadGen || this.disposed) {
+    const remote = params.playUrl.trim();
+    if (!remote) {
       return false;
     }
+
+    // Kick blob warm in background (Safari volume via GainNode later).
+    warmPlayableMusicUrl(remote);
+
+    const playable = getCachedPlayableMusicUrl(remote) ?? remote;
 
     this.ensureContext();
     void this.ctx?.resume().catch(() => undefined);
 
-    const same = this.loadedKey === params.key && this.audio.src && !this.audio.src.startsWith('data:');
+    const same =
+      this.loadedKey === params.key &&
+      Boolean(this.audio.src) &&
+      !this.audio.src.startsWith('data:');
+
     if (!same) {
-      await this.setSource(playable, gen);
-      if (gen !== this.loadGen || this.disposed) {
-        return false;
-      }
+      // Set src immediately — do NOT wait for full buffer before play().
+      // iOS requires play() to start in the user-gesture turn; waiting for
+      // canplay after network kills that unlock.
+      this.applySourceUrl(playable);
       this.loadedKey = params.key;
       this.ensureGainGraph();
     }
@@ -160,7 +185,7 @@ export class WebBardAudioEngine {
 
     const seekTo = Math.max(0, params.positionSec);
     try {
-      if (Math.abs(this.audio.currentTime - seekTo) > 0.35) {
+      if (seekTo > 0.05 && this.audio.readyState >= 1) {
         this.audio.currentTime = seekTo;
       }
     } catch {
@@ -173,7 +198,36 @@ export class WebBardAudioEngine {
       return true;
     }
 
-    return this.play();
+    // Start play NOW (gesture still valid if caller didn't await network).
+    const ok = await this.play();
+    if (!ok && gen === this.loadGen) {
+      // Media not ready yet — retry when it can play.
+      await new Promise<void>((resolve) => {
+        const onReady = () => {
+          cleanup();
+          resolve();
+        };
+        const cleanup = () => {
+          this.audio.removeEventListener('canplay', onReady);
+          this.audio.removeEventListener('loadeddata', onReady);
+        };
+        this.audio.addEventListener('canplay', onReady, { once: true });
+        this.audio.addEventListener('loadeddata', onReady, { once: true });
+        if (this.audio.readyState >= 2) {
+          cleanup();
+          resolve();
+          return;
+        }
+        setTimeout(() => {
+          cleanup();
+          resolve();
+        }, 2000);
+      });
+      if (gen === this.loadGen) {
+        return this.play();
+      }
+    }
+    return ok;
   }
 
   async play(): Promise<boolean> {
@@ -186,6 +240,7 @@ export class WebBardAudioEngine {
     this.applyVolume();
     try {
       await this.audio.play();
+      this.unlocked = true;
       this.emitStatus();
       return !this.audio.paused;
     } catch {
@@ -329,6 +384,36 @@ export class WebBardAudioEngine {
     this.audio.muted = next < 0.001;
   }
 
+  private applySourceUrl(url: string) {
+    if (url.startsWith('blob:') || url.startsWith('data:')) {
+      this.audio.crossOrigin = 'anonymous';
+    } else {
+      this.audio.removeAttribute('crossorigin');
+    }
+
+    if (this.source) {
+      try {
+        this.source.disconnect();
+      } catch {
+        // ignore
+      }
+      try {
+        this.gain?.disconnect();
+      } catch {
+        // ignore
+      }
+      this.source = null;
+      this.gain = null;
+    }
+
+    this.audio.src = url;
+    try {
+      this.audio.load();
+    } catch {
+      // ignore
+    }
+  }
+
   private setSource(url: string, gen: number): Promise<void> {
     return new Promise((resolve, reject) => {
       if (gen !== this.loadGen || this.disposed) {
@@ -336,44 +421,48 @@ export class WebBardAudioEngine {
         return;
       }
 
-      const onReady = () => {
+      let settled = false;
+      const finish = (ok: boolean) => {
+        if (settled) {
+          return;
+        }
+        settled = true;
         cleanup();
-        resolve();
+        if (ok) {
+          resolve();
+        } else {
+          reject(new Error('audio load failed'));
+        }
       };
-      const onError = () => {
-        cleanup();
-        reject(new Error('audio load failed'));
-      };
+
+      const onReady = () => finish(true);
+      const onError = () => finish(false);
       const cleanup = () => {
         this.audio.removeEventListener('canplay', onReady);
         this.audio.removeEventListener('loadeddata', onReady);
+        this.audio.removeEventListener('canplaythrough', onReady);
         this.audio.removeEventListener('error', onError);
       };
 
-      this.audio.addEventListener('canplay', onReady, { once: true });
-      this.audio.addEventListener('loadeddata', onReady, { once: true });
-      this.audio.addEventListener('error', onError, { once: true });
+      this.audio.addEventListener('canplay', onReady);
+      this.audio.addEventListener('loadeddata', onReady);
+      this.audio.addEventListener('canplaythrough', onReady);
+      this.audio.addEventListener('error', onError);
 
-      if (url.startsWith('blob:') || url.startsWith('data:')) {
-        this.audio.crossOrigin = 'anonymous';
-      } else {
-        this.audio.removeAttribute('crossorigin');
-      }
+      this.applySourceUrl(url);
 
-      this.audio.src = url;
-      try {
-        this.audio.load();
-      } catch {
-        cleanup();
-        reject(new Error('audio load failed'));
+      if (this.audio.readyState >= 2) {
+        finish(true);
         return;
       }
 
-      // Already buffered (blob cache hit).
-      if (this.audio.readyState >= 2) {
-        cleanup();
-        resolve();
-      }
+      setTimeout(() => {
+        if (!settled && gen === this.loadGen && this.audio.readyState >= 1) {
+          finish(true);
+        } else if (!settled) {
+          finish(this.audio.readyState >= 1);
+        }
+      }, 2500);
     });
   }
 }

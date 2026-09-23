@@ -113,6 +113,7 @@ type Props = {
     trackId: string,
     title: string,
     durationSec: number | null,
+    playUrl?: string | null,
   ) => void;
   onPlayBardQueueEntry?: (entryId: string) => void;
   onRemoveBardQueueEntry?: (entryId: string) => void;
@@ -1904,8 +1905,8 @@ export function VoiceCallOverlay({
       globalVolume={bardGlobalVolume}
       queue={bardQueue}
       onClose={() => setBardSheetOpen(false)}
-      onEnqueueTrack={(trackId, title, durationSec) =>
-        onEnqueueBardTrack?.(trackId, title, durationSec)
+      onEnqueueTrack={(trackId, title, durationSec, playUrl) =>
+        onEnqueueBardTrack?.(trackId, title, durationSec, playUrl)
       }
       onPlayQueueEntry={(entryId) => onPlayBardQueueEntry?.(entryId)}
       onRemoveQueueEntry={(entryId) => onRemoveBardQueueEntry?.(entryId)}
@@ -1915,6 +1916,7 @@ export function VoiceCallOverlay({
       onGlobalVolumeChange={(volume) => onSetBardGlobalVolume?.(volume)}
       onDismissBard={() => onDismissBard?.()}
       onRequestSync={() => onRequestBardSync?.()}
+      onAudioGesture={() => onResumeBardAudio?.()}
     />
     </>
   );

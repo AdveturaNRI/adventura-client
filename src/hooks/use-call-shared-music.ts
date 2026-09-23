@@ -208,6 +208,7 @@ export type UseCallSharedMusicResult = {
     trackId: string,
     trackTitle?: string | null,
     durationSec?: number | null,
+    playUrl?: string | null,
   ) => Promise<void>;
   removeQueueEntry: (entryId: string) => Promise<void>;
   playQueueEntry: (entryId: string) => Promise<void>;
@@ -488,7 +489,7 @@ export function useCallSharedMusic({
   const commitLocal = useCallback(
     async (
       patch: Partial<CallMusicSnapshot>,
-      opts?: { allowAnyone?: boolean; bumpQueue?: boolean },
+      opts?: { allowAnyone?: boolean; bumpQueue?: boolean; publish?: boolean },
     ) => {
       if (!opts?.allowAnyone && !canControlRef.current) {
         return;
@@ -514,7 +515,11 @@ export function useCallSharedMusic({
       }
       snapshotRef.current = next;
       setSnapshot(next);
-      await publishSnapshot(next, opts);
+      if (opts?.publish === false) {
+        return;
+      }
+      // Don't block local play on network — publish in the background.
+      void publishSnapshot(next, opts);
     },
     [publishSnapshot],
   );
@@ -700,7 +705,12 @@ export function useCallSharedMusic({
   }, [commitLocal, stopLocalPlayback]);
 
   const enqueueTrack = useCallback(
-    async (trackId: string, trackTitle?: string | null, durationSec?: number | null) => {
+    async (
+      trackId: string,
+      trackTitle?: string | null,
+      durationSec?: number | null,
+      knownPlayUrl?: string | null,
+    ) => {
       if (!snapshotRef.current.bardPresent) {
         return;
       }
@@ -708,25 +718,49 @@ export function useCallSharedMusic({
       if (!id) {
         return;
       }
+      // Gesture turn — unlock BEFORE any await.
       resumeFromGesture();
-      let playUrl: string | null = null;
+
+      let playUrl = knownPlayUrl?.trim() || null;
       let title = trackTitle?.trim() || null;
       let duration = durationSec ?? null;
-      try {
-        const fresh = await getMusicTrack(id);
-        playUrl = fresh.url;
-        if (!title && fresh.title) {
-          title = fresh.title;
+
+      if (!playUrl) {
+        try {
+          const fresh = await getMusicTrack(id);
+          playUrl = fresh.url;
+          if (!title && fresh.title) {
+            title = fresh.title;
+          }
+          if (duration == null && fresh.durationSec != null) {
+            duration = fresh.durationSec;
+          }
+        } catch {
+          return;
         }
-        if (duration == null && fresh.durationSec != null) {
-          duration = fresh.durationSec;
-        }
-      } catch {
-        return;
+      } else {
+        // Refresh signed URL in background — don't block first play.
+        void getMusicTrack(id)
+          .then((fresh) => {
+            if (fresh.url && fresh.url !== playUrl) {
+              // Keep queue entry URL fresh for peers if ours was stale.
+              const current = snapshotRef.current;
+              if (current.trackId === id && current.playUrl === playUrl) {
+                void commitLocal({
+                  playUrl: fresh.url,
+                  positionSec: readLocalPosition(),
+                  playing: current.playing,
+                });
+              }
+            }
+          })
+          .catch(() => undefined);
       }
+
       if (!playUrl) {
         return;
       }
+
       const entry: CallMusicQueueEntry = {
         entryId: newEntryId(),
         trackId: id,
@@ -737,7 +771,8 @@ export function useCallSharedMusic({
       };
       const queue = [...snapshotRef.current.queue, entry];
       if (canControlRef.current) {
-        await commitLocal(
+        // Local state + play in the same turn as the tap (no await publish).
+        void commitLocal(
           {
             queue,
             currentEntryId: entry.entryId,
@@ -749,12 +784,12 @@ export function useCallSharedMusic({
           },
           { bumpQueue: true },
         );
-        await loadFromPlayUrl(entry.trackId, entry.playUrl, true, 0, Date.now());
+        void loadFromPlayUrl(entry.trackId, entry.playUrl, true, 0, Date.now());
         return;
       }
-      await commitLocal({ queue }, { allowAnyone: true, bumpQueue: true });
+      void commitLocal({ queue }, { allowAnyone: true, bumpQueue: true });
     },
-    [commitLocal, loadFromPlayUrl, resumeFromGesture],
+    [commitLocal, loadFromPlayUrl, readLocalPosition, resumeFromGesture],
   );
 
   const removeQueueEntry = useCallback(
@@ -827,7 +862,7 @@ export function useCallSharedMusic({
         return;
       }
       resumeFromGesture();
-      await commitLocal({
+      void commitLocal({
         currentEntryId: entry.entryId,
         trackId: entry.trackId,
         trackTitle: entry.title,
@@ -835,7 +870,7 @@ export function useCallSharedMusic({
         playing: true,
         positionSec: 0,
       });
-      await loadFromPlayUrl(entry.trackId, entry.playUrl, true, 0, Date.now());
+      void loadFromPlayUrl(entry.trackId, entry.playUrl, true, 0, Date.now());
     },
     [commitLocal, loadFromPlayUrl, resumeFromGesture],
   );
@@ -856,23 +891,20 @@ export function useCallSharedMusic({
     try {
       resumeFromGesture();
       const positionSec = readLocalPosition();
+      const snap = snapshotRef.current;
 
-      // Shared intent only — never flip to pause just because local audio failed to start.
-      if (!snapshotRef.current.playing) {
-        await commitLocal({ playing: true, positionSec });
-        const snap = snapshotRef.current;
-        if (snap.trackId && snap.playUrl) {
-          const key = `${snap.trackId}::${snap.playUrl}`;
-          if (loadedKeyRef.current !== key) {
-            await loadFromPlayUrl(snap.trackId, snap.playUrl, true, positionSec, Date.now());
-          } else {
-            await ensurePlaying();
-          }
+      if (!snap.playing) {
+        void commitLocal({ playing: true, positionSec });
+        const key = `${snap.trackId}::${snap.playUrl}`;
+        if (loadedKeyRef.current !== key) {
+          void loadFromPlayUrl(snap.trackId!, snap.playUrl!, true, positionSec, Date.now());
+        } else {
+          void ensurePlaying();
         }
         return;
       }
 
-      await commitLocal({ playing: false, positionSec });
+      void commitLocal({ playing: false, positionSec });
       pauseLocal();
     } finally {
       toggleInFlightRef.current = false;

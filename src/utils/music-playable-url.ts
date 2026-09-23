@@ -53,10 +53,26 @@ async function fetchProxiedBlob(playUrl: string): Promise<Blob> {
   return response.blob();
 }
 
+/** Sync — only returns a blob URL if already warmed. Never blocks first play. */
+export function getCachedPlayableMusicUrl(playUrl: string): string | null {
+  const trimmed = playUrl.trim();
+  if (!trimmed) {
+    return null;
+  }
+  return blobCache.get(trimmed) ?? null;
+}
+
+/** Fire-and-forget warm for GainNode / Safari volume. */
+export function warmPlayableMusicUrl(playUrl: string) {
+  if (!canUseBlobPlayback()) {
+    return;
+  }
+  void resolvePlayableMusicUrl(playUrl);
+}
+
 /**
- * Resolve a remote music URL to a same-origin blob: URL so Safari can use
- * WebAudio GainNode for volume (HTMLMediaElement.volume is ignored on iOS).
- * Falls back to the original URL if both direct CORS fetch and API proxy fail.
+ * Resolve to a same-origin blob URL when possible (for GainNode volume).
+ * Callers that need instant play must use getCachedPlayableMusicUrl / remote URL first.
  */
 export async function resolvePlayableMusicUrl(playUrl: string): Promise<string> {
   const trimmed = playUrl.trim();
@@ -79,7 +95,6 @@ export async function resolvePlayableMusicUrl(playUrl: string): Promise<string> 
 
   const task = (async () => {
     let blob: Blob | null = null;
-    // Prefer API proxy first — signed S3/Disk URLs often lack CORS; proxy is same-origin to our API.
     try {
       blob = await fetchProxiedBlob(trimmed);
     } catch {

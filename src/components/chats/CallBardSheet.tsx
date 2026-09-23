@@ -26,6 +26,7 @@ import {
   type MusicTrack,
 } from '@/services/music/musicApi';
 import { localizeErrorMessage } from '@/utils/localizeError';
+import { warmPlayableMusicUrl } from '@/utils/music-playable-url';
 
 type Props = {
   visible: boolean;
@@ -40,7 +41,12 @@ type Props = {
   globalVolume: number;
   queue: CallMusicQueueEntry[];
   onClose: () => void;
-  onEnqueueTrack: (trackId: string, title: string, durationSec: number | null) => void;
+  onEnqueueTrack: (
+    trackId: string,
+    title: string,
+    durationSec: number | null,
+    playUrl?: string | null,
+  ) => void;
   onPlayQueueEntry: (entryId: string) => void;
   onRemoveQueueEntry: (entryId: string) => void;
   onTogglePlay: () => void;
@@ -49,6 +55,8 @@ type Props = {
   onGlobalVolumeChange: (volume: number) => void;
   onDismissBard?: () => void;
   onRequestSync?: () => void;
+  /** Unlock web audio inside press-in (iOS Safari). */
+  onAudioGesture?: () => void;
 };
 
 type LibraryBrowse =
@@ -113,6 +121,7 @@ export function CallBardSheet({
   onGlobalVolumeChange,
   onDismissBard,
   onRequestSync,
+  onAudioGesture,
 }: Props) {
   const isDesktop = useIsDesktopWeb();
   const insets = useSafeAreaInsets();
@@ -157,6 +166,11 @@ export function CallBardSheet({
       ]);
       setTracks(tracksPayload.tracks);
       setPlaylists(nextPlaylists);
+      for (const track of tracksPayload.tracks) {
+        if (track.url) {
+          warmPlayableMusicUrl(track.url);
+        }
+      }
     } catch (err) {
       setError(localizeErrorMessage(err, 'Не удалось загрузить библиотеку'));
       setTracks([]);
@@ -383,7 +397,10 @@ export function CallBardSheet({
           ? `Добавить и включить ${track.title}`
           : `Добавить ${track.title} в очередь`
       }
-      onPress={() => onEnqueueTrack(track.id, track.title, track.durationSec ?? null)}
+      onPressIn={() => onAudioGesture?.()}
+      onPress={() =>
+        onEnqueueTrack(track.id, track.title, track.durationSec ?? null, track.url)
+      }
       style={({ pressed }) => [styles.row, pressed && styles.pressed]}>
       <Ionicons
         name={canControl ? 'play-circle-outline' : 'add-circle-outline'}
@@ -439,6 +456,7 @@ export function CallBardSheet({
                   accessibilityRole="button"
                   accessibilityLabel={playing ? 'Пауза' : 'Играть'}
                   disabled={!trackId}
+                  onPressIn={() => onAudioGesture?.()}
                   onPress={onTogglePlay}
                   style={({ pressed }) => [
                     styles.transportBtn,
@@ -537,6 +555,7 @@ export function CallBardSheet({
                     <Pressable
                       accessibilityRole="button"
                       disabled={!canControl}
+                      onPressIn={() => onAudioGesture?.()}
                       onPress={() => {
                         if (canControl) {
                           onPlayQueueEntry(entry.entryId);
