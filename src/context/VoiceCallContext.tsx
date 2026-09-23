@@ -226,7 +226,9 @@ export function VoiceCallProvider({ children }: { children: ReactNode }) {
     !session?.isGroup || session.myRole === 'owner' || session.myRole === 'admin';
 
   const musicEnabled =
-    session?.phase === 'outgoing' || session?.phase === 'active';
+    session?.phase === 'outgoing' ||
+    session?.phase === 'active' ||
+    session?.phase === 'incoming';
 
   const sharedMusic = useCallSharedMusic({
     enabled: musicEnabled,

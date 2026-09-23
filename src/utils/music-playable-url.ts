@@ -79,11 +79,12 @@ export async function resolvePlayableMusicUrl(playUrl: string): Promise<string> 
 
   const task = (async () => {
     let blob: Blob | null = null;
+    // Prefer API proxy first — signed S3/Disk URLs often lack CORS; proxy is same-origin to our API.
     try {
-      blob = await fetchDirectBlob(trimmed);
+      blob = await fetchProxiedBlob(trimmed);
     } catch {
       try {
-        blob = await fetchProxiedBlob(trimmed);
+        blob = await fetchDirectBlob(trimmed);
       } catch {
         blob = null;
       }
