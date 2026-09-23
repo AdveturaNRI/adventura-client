@@ -579,6 +579,16 @@ function createStyles(colors: ThemeColors, isDesktopWeb: boolean) {
       justifyContent: 'center',
       backgroundColor: 'rgba(21, 122, 254, 0.12)',
     },
+    playChipActive: {
+      backgroundColor: colors.primary,
+    },
+    rowActive: {
+      borderColor: 'rgba(21, 122, 254, 0.35)',
+      backgroundColor: 'rgba(21, 122, 254, 0.06)',
+    },
+    rowTitleActive: {
+      color: colors.primary,
+    },
     empty: {
       paddingVertical: Spacing.xl,
       alignItems: 'center',
@@ -776,6 +786,8 @@ type TrackRowProps = {
   track: MusicTrack;
   colors: ThemeColors;
   styles: ReturnType<typeof createStyles>;
+  isActive?: boolean;
+  isPlaying?: boolean;
   onRemoveFromPlaylist?: () => void;
   draggable?: boolean;
   dragging: boolean;
@@ -790,6 +802,8 @@ function TrackRow({
   track,
   colors,
   styles,
+  isActive,
+  isPlaying,
   onRemoveFromPlaylist,
   draggable,
   dragging,
@@ -806,7 +820,11 @@ function TrackRow({
   return (
     <View
       ref={canDrag ? dragRef : undefined}
-      style={[styles.row, dragging ? styles.rowDragging : null]}>
+      style={[
+        styles.row,
+        dragging ? styles.rowDragging : null,
+        isActive ? styles.rowActive : null,
+      ]}>
       {canDrag ? (
         <View pointerEvents="none" style={styles.iconBtn}>
           <Ionicons name="reorder-three" size={22} color={colors.textMuted} />
@@ -814,16 +832,25 @@ function TrackRow({
       ) : null}
       <Pressable
         accessibilityRole="button"
-        accessibilityLabel={`Играть ${track.title}`}
+        accessibilityLabel={
+          isPlaying ? `Пауза ${track.title}` : `Играть ${track.title}`
+        }
         onPress={onPlay}
-        style={styles.playChip}>
-        <Ionicons name="play" size={16} color={colors.primary} />
+        style={[styles.playChip, isActive ? styles.playChipActive : null]}>
+        <Ionicons
+          name={isPlaying ? 'pause' : 'play'}
+          size={16}
+          color={isActive ? '#FFFFFF' : colors.primary}
+        />
       </Pressable>
       <View style={styles.rowBody} pointerEvents={canDrag ? 'none' : 'auto'}>
-        <Text numberOfLines={1} style={styles.rowTitle}>
+        <Text
+          numberOfLines={1}
+          style={[styles.rowTitle, isActive ? styles.rowTitleActive : null]}>
           {track.title}
         </Text>
         <Text style={styles.rowMeta}>
+          {isActive && isPlaying ? 'Сейчас играет · ' : ''}
           {track.source === 'external'
             ? 'По ссылке'
             : formatBytes(track.sizeBytes)}
@@ -967,6 +994,10 @@ export default function MusicLibraryScreen() {
   const [uploadProgress, setUploadProgress] = useState<number | null>(null);
   const [uploadFileName, setUploadFileName] = useState<string | null>(null);
   const [session, setSession] = useState<MusicPlaybackSession | null>(null);
+  const [activePlayback, setActivePlayback] = useState<{
+    trackId: string;
+    playing: boolean;
+  } | null>(null);
   const sessionSeqRef = useRef(0);
 
   const [createOpen, setCreateOpen] = useState(false);
@@ -1537,6 +1568,11 @@ export default function MusicLibraryScreen() {
                           track={track}
                           colors={colors}
                           styles={styles}
+                          isActive={activePlayback?.trackId === track.id}
+                          isPlaying={
+                            activePlayback?.trackId === track.id &&
+                            activePlayback.playing
+                          }
                           dragging={false}
                           onDragStart={setDraggingTrackId}
                           onDragEnd={clearDragState}
@@ -1631,6 +1667,11 @@ export default function MusicLibraryScreen() {
                             track={track}
                             colors={colors}
                             styles={styles}
+                            isActive={activePlayback?.trackId === track.id}
+                            isPlaying={
+                              activePlayback?.trackId === track.id &&
+                              activePlayback.playing
+                            }
                             draggable
                             dragging={draggingTrackId === track.id}
                             onDragStart={setDraggingTrackId}
@@ -1659,7 +1700,11 @@ export default function MusicLibraryScreen() {
           <View style={styles.playerDock}>
             <MusicPlayerBar
               session={session}
-              onClose={() => setSession(null)}
+              onActiveTrackChange={setActivePlayback}
+              onClose={() => {
+                setSession(null);
+                setActivePlayback(null);
+              }}
             />
           </View>
         ) : null}

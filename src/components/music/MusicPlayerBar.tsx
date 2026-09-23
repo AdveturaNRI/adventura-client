@@ -1,7 +1,15 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useAudioPlayer, useAudioPlayerStatus } from 'expo-audio';
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  ActivityIndicator,
+  PanResponder,
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
+  type LayoutChangeEvent,
+} from 'react-native';
 
 import { toast } from '@/components/ui/feedback/toast';
 import { FontSize, Spacing, type ThemeColors } from '@/constants/theme';
@@ -19,6 +27,9 @@ export type MusicPlaybackSession = {
 type MusicPlayerBarProps = {
   session: MusicPlaybackSession;
   onClose: () => void;
+  onActiveTrackChange?: (
+    info: { trackId: string; playing: boolean } | null,
+  ) => void;
 };
 
 function formatTime(value: number) {
@@ -29,15 +40,19 @@ function formatTime(value: number) {
 function createStyles(colors: ThemeColors) {
   return StyleSheet.create({
     root: {
-      minHeight: 56,
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 4,
+      gap: 6,
       paddingHorizontal: Spacing.sm,
-      paddingVertical: 8,
+      paddingTop: 8,
+      paddingBottom: 10,
       borderTopWidth: StyleSheet.hairlineWidth,
       borderColor: colors.borderLight,
       backgroundColor: colors.surface,
+    },
+    row: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 4,
+      minHeight: 40,
     },
     iconButton: {
       width: 36,
@@ -69,15 +84,59 @@ function createStyles(colors: ThemeColors) {
       color: colors.textMuted,
       fontVariant: ['tabular-nums'],
     },
+    seekRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+      paddingHorizontal: 4,
+    },
+    seekTime: {
+      width: 40,
+      fontSize: 11,
+      color: colors.textMuted,
+      fontVariant: ['tabular-nums'],
+    },
+    seekTrack: {
+      flex: 1,
+      height: 28,
+      justifyContent: 'center',
+    },
+    seekRail: {
+      height: 4,
+      borderRadius: 2,
+      backgroundColor: colors.borderLight,
+      overflow: 'hidden',
+    },
+    seekFill: {
+      height: '100%',
+      borderRadius: 2,
+      backgroundColor: colors.primary,
+    },
+    seekThumb: {
+      position: 'absolute',
+      width: 14,
+      height: 14,
+      borderRadius: 7,
+      marginLeft: -7,
+      top: 7,
+      backgroundColor: colors.primary,
+      borderWidth: 2,
+      borderColor: colors.surface,
+    },
   });
 }
 
-export function MusicPlayerBar({ session, onClose }: MusicPlayerBarProps) {
+export function MusicPlayerBar({
+  session,
+  onClose,
+  onActiveTrackChange,
+}: MusicPlayerBarProps) {
   return (
     <ActiveMusicPlayerBar
       key={session.id}
       session={session}
       onClose={onClose}
+      onActiveTrackChange={onActiveTrackChange}
     />
   );
 }
@@ -85,9 +144,13 @@ export function MusicPlayerBar({ session, onClose }: MusicPlayerBarProps) {
 function ActiveMusicPlayerBar({
   session,
   onClose,
+  onActiveTrackChange,
 }: {
   session: MusicPlaybackSession;
   onClose: () => void;
+  onActiveTrackChange?: (
+    info: { trackId: string; playing: boolean } | null,
+  ) => void;
 }) {
   const colors = useTheme();
   const styles = useThemedStyles(createStyles);
@@ -97,14 +160,44 @@ function ActiveMusicPlayerBar({
   );
   const [playRequested, setPlayRequested] = useState(true);
   const [urlError, setUrlError] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
+  const [scrubbing, setScrubbing] = useState(false);
+  const [scrubRatio, setScrubRatio] = useState(0);
+  const [seekWidth, setSeekWidth] = useState(0);
   const player = useAudioPlayer(null, { updateInterval: 200 });
   const status = useAudioPlayerStatus(player);
   const loadGenRef = useRef(0);
   const finishedForTrackRef = useRef<string | null>(null);
   const playRequestedRef = useRef(playRequested);
+  const seekWidthRef = useRef(0);
+  const durationRef = useRef(0);
+  const scrubRatioRef = useRef(0);
+  const canSeekRef = useRef(false);
   playRequestedRef.current = playRequested;
 
   const active = queue[index] ?? null;
+
+  const showLoader =
+    isLoading || (playRequested && status.isBuffering && !status.playing);
+  const isActivelyPlaying =
+    Boolean(active) && playRequested && !urlError && !showLoader;
+
+  useEffect(() => {
+    if (!active) {
+      onActiveTrackChange?.(null);
+      return;
+    }
+    onActiveTrackChange?.({
+      trackId: active.id,
+      playing: isActivelyPlaying,
+    });
+  }, [active, isActivelyPlaying, onActiveTrackChange]);
+
+  useEffect(() => {
+    return () => {
+      onActiveTrackChange?.(null);
+    };
+  }, [onActiveTrackChange]);
 
   const loadTrackAt = useCallback(
     async (nextIndex: number, shouldPlay: boolean) => {
@@ -113,6 +206,10 @@ function ActiveMusicPlayerBar({
 
       const gen = ++loadGenRef.current;
       setUrlError(false);
+      setIsLoading(true);
+      setScrubbing(false);
+      setScrubRatio(0);
+      scrubRatioRef.current = 0;
       finishedForTrackRef.current = null;
 
       try {
@@ -122,6 +219,7 @@ function ActiveMusicPlayerBar({
         const playUrl = fresh.url;
         if (!playUrl) {
           setUrlError(true);
+          setIsLoading(false);
           toast.error('У трека нет файла для воспроизведения');
           setPlayRequested(false);
           return;
@@ -144,6 +242,7 @@ function ActiveMusicPlayerBar({
       } catch {
         if (gen !== loadGenRef.current) return;
         setUrlError(true);
+        setIsLoading(false);
         toast.error('Не удалось получить ссылку на трек');
         setPlayRequested(false);
       }
@@ -154,6 +253,23 @@ function ActiveMusicPlayerBar({
   useEffect(() => {
     void loadTrackAt(index, playRequestedRef.current);
   }, [index, loadTrackAt]);
+
+  useEffect(() => {
+    if (!isLoading) return;
+    if (urlError) {
+      setIsLoading(false);
+      return;
+    }
+    if (status.isLoaded || status.playing || status.currentTime > 0.05) {
+      setIsLoading(false);
+    }
+  }, [
+    isLoading,
+    urlError,
+    status.isLoaded,
+    status.playing,
+    status.currentTime,
+  ]);
 
   useEffect(() => {
     if (!status.didJustFinish || !active || !playRequested) return;
@@ -167,89 +283,202 @@ function ActiveMusicPlayerBar({
     setPlayRequested(false);
   }, [status.didJustFinish, active, playRequested, index, queue.length]);
 
+  const duration = Math.max(0, status.duration || active?.durationSec || 0);
+  durationRef.current = duration;
+
+  canSeekRef.current = duration > 0 && !showLoader && !urlError;
+
+  const liveRatio =
+    duration > 0 ? Math.min(1, Math.max(0, status.currentTime / duration)) : 0;
+  const progressRatio = scrubbing ? scrubRatio : liveRatio;
+  const displayTime = scrubbing
+    ? scrubRatio * duration
+    : showLoader
+      ? 0
+      : status.currentTime;
+
+  const applyScrubX = useCallback((locationX: number) => {
+    const width = seekWidthRef.current;
+    if (width <= 0) return;
+    const ratio = Math.min(1, Math.max(0, locationX / width));
+    scrubRatioRef.current = ratio;
+    setScrubRatio(ratio);
+  }, []);
+
+  const commitScrub = useCallback(async () => {
+    const target = scrubRatioRef.current * durationRef.current;
+    setScrubbing(false);
+    if (durationRef.current <= 0 || !Number.isFinite(target)) return;
+    try {
+      await player.seekTo(target);
+      if (playRequestedRef.current) {
+        player.play();
+      }
+    } catch {
+      // ignore seek races while source swaps
+    }
+  }, [player]);
+
+  const seekPan = useMemo(
+    () =>
+      PanResponder.create({
+        onStartShouldSetPanResponder: () => canSeekRef.current,
+        onMoveShouldSetPanResponder: () => canSeekRef.current,
+        onPanResponderGrant: (event) => {
+          if (!canSeekRef.current) return;
+          setScrubbing(true);
+          applyScrubX(event.nativeEvent.locationX);
+        },
+        onPanResponderMove: (event) => {
+          applyScrubX(event.nativeEvent.locationX);
+        },
+        onPanResponderRelease: () => {
+          void commitScrub();
+        },
+        onPanResponderTerminate: () => {
+          setScrubbing(false);
+        },
+      }),
+    [applyScrubX, commitScrub],
+  );
+
+  const handleSeekLayout = (event: LayoutChangeEvent) => {
+    const width = event.nativeEvent.layout.width;
+    seekWidthRef.current = width;
+    setSeekWidth(width);
+  };
+
   if (!active) return null;
 
   const canPrev = index > 0;
   const canNext = index < queue.length - 1;
   const showsPause =
-    playRequested && !urlError && !(status.didJustFinish && !canNext);
+    playRequested &&
+    !urlError &&
+    !showLoader &&
+    !(status.didJustFinish && !canNext);
+  const thumbLeft = seekWidth * progressRatio;
 
   return (
     <View style={styles.root}>
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel="Предыдущий трек"
-        disabled={!canPrev}
-        onPress={() => {
-          setPlayRequested(true);
-          setIndex((prev) => Math.max(0, prev - 1));
-        }}
-        style={styles.iconButton}>
-        <Ionicons
-          name="play-skip-back"
-          size={18}
-          color={canPrev ? colors.text : colors.textMuted}
-        />
-      </Pressable>
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel={showsPause ? 'Пауза' : 'Воспроизвести'}
-        onPress={() => {
-          if (showsPause) {
+      <View style={styles.row}>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Предыдущий трек"
+          disabled={!canPrev || showLoader}
+          onPress={() => {
+            setPlayRequested(true);
+            setIsLoading(true);
+            setIndex((prev) => Math.max(0, prev - 1));
+          }}
+          style={styles.iconButton}>
+          <Ionicons
+            name="play-skip-back"
+            size={18}
+            color={canPrev && !showLoader ? colors.text : colors.textMuted}
+          />
+        </Pressable>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={
+            showLoader ? 'Загрузка' : showsPause ? 'Пауза' : 'Воспроизвести'
+          }
+          disabled={showLoader && !urlError}
+          onPress={() => {
+            if (showLoader) return;
+            if (showsPause) {
+              setPlayRequested(false);
+              player.pause();
+              return;
+            }
+            setPlayRequested(true);
+            if (urlError) {
+              void loadTrackAt(index, true);
+              return;
+            }
+            player.play();
+          }}
+          style={styles.playButton}>
+          {showLoader ? (
+            <ActivityIndicator size="small" color="#FFFFFF" />
+          ) : (
+            <Ionicons
+              name={showsPause ? 'pause' : 'play'}
+              size={18}
+              color="#FFFFFF"
+            />
+          )}
+        </Pressable>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Следующий трек"
+          disabled={!canNext || showLoader}
+          onPress={() => {
+            setPlayRequested(true);
+            setIsLoading(true);
+            setIndex((prev) => Math.min(queue.length - 1, prev + 1));
+          }}
+          style={styles.iconButton}>
+          <Ionicons
+            name="play-skip-forward"
+            size={18}
+            color={canNext && !showLoader ? colors.text : colors.textMuted}
+          />
+        </Pressable>
+        <View style={styles.copy}>
+          <Text numberOfLines={1} style={styles.title}>
+            {active.title}
+          </Text>
+          <Text numberOfLines={1} style={styles.meta}>
+            {showLoader
+              ? 'Загрузка…'
+              : session.label
+                ? `${session.label} · ${index + 1}/${queue.length}`
+                : `${index + 1}/${queue.length}`}
+          </Text>
+        </View>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Закрыть плеер"
+          onPress={() => {
             setPlayRequested(false);
             player.pause();
-            return;
-          }
-          setPlayRequested(true);
-          if (urlError) {
-            void loadTrackAt(index, true);
-            return;
-          }
-          player.play();
-        }}
-        style={styles.playButton}>
-        <Ionicons
-          name={showsPause ? 'pause' : 'play'}
-          size={18}
-          color="#FFFFFF"
-        />
-      </Pressable>
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel="Следующий трек"
-        disabled={!canNext}
-        onPress={() => {
-          setPlayRequested(true);
-          setIndex((prev) => Math.min(queue.length - 1, prev + 1));
-        }}
-        style={styles.iconButton}>
-        <Ionicons
-          name="play-skip-forward"
-          size={18}
-          color={canNext ? colors.text : colors.textMuted}
-        />
-      </Pressable>
-      <View style={styles.copy}>
-        <Text numberOfLines={1} style={styles.title}>
-          {active.title}
-        </Text>
-        <Text style={styles.meta}>
-          {session.label ? `${session.label} · ` : ''}
-          {formatTime(status.currentTime)} /{' '}
-          {formatTime(status.duration || active.durationSec || 0)}
+            onClose();
+          }}
+          style={styles.iconButton}>
+          <Ionicons name="close" size={20} color={colors.textMuted} />
+        </Pressable>
+      </View>
+
+      <View style={styles.seekRow}>
+        <Text style={styles.seekTime}>{formatTime(displayTime)}</Text>
+        <View
+          style={styles.seekTrack}
+          onLayout={handleSeekLayout}
+          {...seekPan.panHandlers}
+          accessibilityRole="adjustable"
+          accessibilityLabel="Позиция трека"
+          accessibilityValue={{
+            min: 0,
+            max: Math.floor(duration),
+            now: Math.floor(displayTime),
+          }}>
+          <View style={styles.seekRail}>
+            <View
+              style={[styles.seekFill, { width: `${progressRatio * 100}%` }]}
+            />
+          </View>
+          {duration > 0 && seekWidth > 0 ? (
+            <View
+              pointerEvents="none"
+              style={[styles.seekThumb, { left: thumbLeft }]}
+            />
+          ) : null}
+        </View>
+        <Text style={[styles.seekTime, { textAlign: 'right' }]}>
+          {formatTime(duration)}
         </Text>
       </View>
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel="Закрыть плеер"
-        onPress={() => {
-          setPlayRequested(false);
-          player.pause();
-          onClose();
-        }}
-        style={styles.iconButton}>
-        <Ionicons name="close" size={20} color={colors.textMuted} />
-      </Pressable>
     </View>
   );
 }
