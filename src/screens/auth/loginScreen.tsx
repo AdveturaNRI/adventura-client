@@ -69,12 +69,11 @@ export default function LoginScreen() {
   const router = useRouter();
   const params = useLocalSearchParams<{ next?: string | string[] }>();
   const nextParam = Array.isArray(params.next) ? params.next[0] : params.next;
-  const { signIn, signInAsGuest } = useAuth();
+  const { signIn } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [errors, setErrors] = useState<LoginErrors>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [isGuestSubmitting, setIsGuestSubmitting] = useState(false);
   const isDesktop = useIsDesktopWeb();
   const { height } = useWindowDimensions();
   const compact = height < AUTH_COMPACT_HEIGHT;
@@ -109,27 +108,11 @@ export default function LoginScreen() {
     }
   };
 
-  const handleGuestLogin = async () => {
-    if (isSubmitting || isGuestSubmitting) {
-      return;
-    }
-
-    setIsGuestSubmitting(true);
-
-    const ok = await signInAsGuest();
-
-    setIsGuestSubmitting(false);
-
-    if (ok) {
-      router.replace(resolvePostLoginHref(nextParam));
-    }
-  };
-
   return (
     <AuthScreenLayout>
       <View style={styles.header}>
         <H1 style={styles.title}>Начните приключение прямо сейчас</H1>
-        <Caption style={styles.subtitle}>Войдите в аккаунт или зайдите как гость</Caption>
+        <Caption style={styles.subtitle}>Войдите в аккаунт через email или соцсеть</Caption>
 
         <Switcher
           size="compact"
@@ -197,16 +180,9 @@ export default function LoginScreen() {
         />
 
         <OauthButtons
-          disabled={isSubmitting || isGuestSubmitting}
+          disabled={isSubmitting}
           onSuccess={() => router.replace(resolvePostLoginHref(nextParam))}
           buttonStyle={layoutStyles.authButtonGhost}
-        />
-
-        <Button
-          variant="outline"
-          label={isGuestSubmitting ? 'Создаём гостя...' : 'Войти как гость'}
-          onPress={handleGuestLogin}
-          style={layoutStyles.authButtonGhost}
         />
       </View>
     </AuthScreenLayout>

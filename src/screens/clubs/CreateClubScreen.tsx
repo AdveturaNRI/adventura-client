@@ -700,10 +700,37 @@ export default function CreateClubScreen() {
   };
 
   const onDelete = () => {
-    if (!clubId || confirmationName.trim() !== name.trim()) {
+    if (!clubId) {
+      return;
+    }
+    if (confirmationName.trim() !== name.trim()) {
       toast.error('Введите точное название клуба');
       return;
     }
+
+    const runDelete = () => {
+      setSaving(true);
+      void deleteClub(clubId, confirmationName.trim())
+        .then(() => {
+          toast.success('Клуб удалён');
+          router.replace('/my-clubs');
+        })
+        .catch((error) => toast.error(localizeErrorMessage(error, 'Не удалось удалить клуб')))
+        .finally(() => setSaving(false));
+    };
+
+    // Alert.alert on web is a no-op in Expo — confirm explicitly.
+    if (Platform.OS === 'web' && typeof window !== 'undefined') {
+      if (
+        window.confirm(
+          'Удалить клуб? Он исчезнет из каталога. Данные останутся в архиве, участники получат уведомление.',
+        )
+      ) {
+        runDelete();
+      }
+      return;
+    }
+
     Alert.alert(
       'Удалить клуб?',
       'Клуб исчезнет из каталога. Данные останутся в архиве, а участники получат уведомление.',
@@ -712,16 +739,7 @@ export default function CreateClubScreen() {
         {
           text: 'Удалить',
           style: 'destructive',
-          onPress: () => {
-            setSaving(true);
-            void deleteClub(clubId, confirmationName.trim())
-              .then(() => {
-                toast.success('Клуб удалён');
-                router.replace('/my-clubs');
-              })
-              .catch((error) => toast.error(localizeErrorMessage(error, 'Не удалось удалить клуб')))
-              .finally(() => setSaving(false));
-          },
+          onPress: runDelete,
         },
       ],
     );
@@ -960,7 +978,7 @@ export default function CreateClubScreen() {
               label="Удалить клуб"
               variant="outline"
               onPress={onDelete}
-              disabled={saving || confirmationName.trim() !== name.trim()}
+              disabled={saving}
               style={styles.dangerButton}
             />
           </View>

@@ -1,5 +1,11 @@
-import { Pressable, StyleSheet, Text, View, ViewStyle } from 'react-native';
+import { Pressable, StyleSheet, Text, View, type ViewStyle } from 'react-native';
 
+import {
+  VkBrandIcon,
+  YandexBrandIcon,
+  VK_BRAND,
+  YANDEX_BRAND,
+} from '@/components/auth/OauthBrandIcons';
 import { FontSize, Radius, Sizes, Spacing, type ThemeColors } from '@/constants/theme';
 import { useThemedStyles } from '@/hooks/use-themed-styles';
 
@@ -8,89 +14,83 @@ type SocialProvider = 'vk' | 'yandex';
 type SocialButtonProps = {
   provider: SocialProvider;
   onPress?: () => void;
+  disabled?: boolean;
   style?: ViewStyle;
+  label?: string;
 };
 
-function createStyles(colors: ThemeColors) {
+function createStyles(_colors: ThemeColors) {
   return StyleSheet.create({
     base: {
-      flex: 1,
       minHeight: Sizes.controlHeight,
       borderRadius: Radius.pill,
-      backgroundColor: colors.surface,
-      borderWidth: 1,
-      borderColor: colors.borderLight,
+      borderWidth: 1.5,
       alignItems: 'center',
       justifyContent: 'center',
-      paddingHorizontal: Spacing.md,
+      paddingHorizontal: Spacing.lg,
+      paddingVertical: Spacing.sm,
+    },
+    vk: {
+      borderColor: VK_BRAND,
+      backgroundColor: 'rgba(0, 119, 255, 0.1)',
+    },
+    yandex: {
+      borderColor: YANDEX_BRAND,
+      backgroundColor: 'rgba(252, 63, 29, 0.1)',
     },
     pressed: {
       opacity: 0.85,
     },
-    logoRow: {
+    disabled: {
+      opacity: 0.5,
+    },
+    row: {
       flexDirection: 'row',
       alignItems: 'center',
-      gap: Spacing.sm,
+      gap: 12,
     },
-    vkIcon: {
-      width: 22,
-      height: 22,
-      borderRadius: 5,
-      backgroundColor: '#0077FF',
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    vkIconText: {
-      color: colors.onPrimary,
-      fontSize: 10,
-      fontWeight: '700',
-    },
-    vkText: {
-      fontSize: FontSize.button,
-      color: colors.text,
-      fontWeight: '600',
-    },
-    yandexText: {
+    label: {
       fontSize: FontSize.button,
       fontWeight: '600',
     },
-    yandexAccent: {
-      color: '#FC3F1D',
+    vkLabel: {
+      color: VK_BRAND,
     },
-    yandexRest: {
-      color: colors.text,
+    yandexLabel: {
+      color: YANDEX_BRAND,
     },
   });
 }
 
-export function SocialButton({ provider, onPress, style }: SocialButtonProps) {
+export function SocialButton({
+  provider,
+  onPress,
+  disabled = false,
+  style,
+  label,
+}: SocialButtonProps) {
   const styles = useThemedStyles(createStyles);
+  const isVk = provider === 'vk';
 
   return (
     <Pressable
       onPress={onPress}
-      style={({ pressed }) => [styles.base, pressed && styles.pressed, style]}>
-      {provider === 'vk' ? <VkLogo styles={styles} /> : <YandexLogo styles={styles} />}
-    </Pressable>
-  );
-}
-
-function VkLogo({ styles }: { styles: ReturnType<typeof createStyles> }) {
-  return (
-    <View style={styles.logoRow}>
-      <View style={styles.vkIcon}>
-        <Text style={styles.vkIconText}>vk</Text>
+      disabled={disabled}
+      accessibilityRole="button"
+      accessibilityLabel={label ?? (isVk ? 'Войти через VK ID' : 'Войти через Яндекс ID')}
+      style={({ pressed }) => [
+        styles.base,
+        isVk ? styles.vk : styles.yandex,
+        pressed && !disabled && styles.pressed,
+        disabled && styles.disabled,
+        style,
+      ]}>
+      <View style={styles.row}>
+        {isVk ? <VkBrandIcon size={28} /> : <YandexBrandIcon size={28} />}
+        <Text style={[styles.label, isVk ? styles.vkLabel : styles.yandexLabel]}>
+          {label ?? (isVk ? 'Войти через VK ID' : 'Войти через Яндекс ID')}
+        </Text>
       </View>
-      <Text style={styles.vkText}>вконтакте</Text>
-    </View>
-  );
-}
-
-function YandexLogo({ styles }: { styles: ReturnType<typeof createStyles> }) {
-  return (
-    <Text style={styles.yandexText}>
-      <Text style={styles.yandexAccent}>Я</Text>
-      <Text style={styles.yandexRest}>ндекс</Text>
-    </Text>
+    </Pressable>
   );
 }

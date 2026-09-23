@@ -1,5 +1,5 @@
 import { type ReactNode } from 'react';
-import { Pressable, StyleSheet, Text, View, type ViewStyle } from 'react-native';
+import { Pressable, StyleSheet, Text, View, type TextStyle, type ViewStyle } from 'react-native';
 
 import { FontSize, Radius, Sizes, Spacing, type ThemeColors } from '@/constants/theme';
 import { useThemedStyles } from '@/hooks/use-themed-styles';
@@ -10,6 +10,7 @@ type ButtonProps = {
   variant?: 'primary' | 'outline';
   disabled?: boolean;
   style?: ViewStyle;
+  labelStyle?: TextStyle;
   icon?: ReactNode;
 };
 
@@ -61,6 +62,7 @@ export function Button({
   variant = 'primary',
   disabled = false,
   style,
+  labelStyle,
   icon,
 }: ButtonProps) {
   const styles = useThemedStyles(createStyles);
@@ -79,7 +81,12 @@ export function Button({
       ]}>
       <View style={styles.content}>
         {icon}
-        <Text style={[styles.label, isPrimary ? styles.labelPrimary : styles.labelOutline]}>
+        <Text
+          style={[
+            styles.label,
+            isPrimary ? styles.labelPrimary : styles.labelOutline,
+            labelStyle,
+          ]}>
           {label}
         </Text>
       </View>
