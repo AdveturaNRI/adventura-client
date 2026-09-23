@@ -72,6 +72,7 @@ type VoiceCallContextValue = {
   muted: boolean;
   deafened: boolean;
   cameraOn: boolean;
+  cameraFacing: 'user' | 'environment';
   participants: ChatLiveVoiceParticipant[];
   startCall: (
     conversationId: string,
@@ -94,6 +95,7 @@ type VoiceCallContextValue = {
   toggleMute: () => Promise<void>;
   toggleDeafen: () => Promise<void>;
   toggleCamera: () => Promise<void>;
+  switchCameraFacing: () => Promise<void>;
   retryLive: () => Promise<void>;
   minimize: () => void;
   expand: () => void;
@@ -208,6 +210,7 @@ export function VoiceCallProvider({ children }: { children: ReactNode }) {
     muted,
     deafened,
     cameraOn,
+    cameraFacing,
     participants,
     urgentById,
     volumeById,
@@ -216,6 +219,7 @@ export function VoiceCallProvider({ children }: { children: ReactNode }) {
     toggleMute,
     toggleDeafen,
     toggleCamera,
+    switchCameraFacing,
     sendUrgentRequest,
     setParticipantVolume,
     publishRoomData,
@@ -557,6 +561,14 @@ export function VoiceCallProvider({ children }: { children: ReactNode }) {
       toast.error(localizeErrorMessage(error, 'Не удалось включить камеру'));
     }
   }, [toggleCamera]);
+
+  const handleSwitchCameraFacing = useCallback(async () => {
+    try {
+      await switchCameraFacing();
+    } catch (error) {
+      toast.error(localizeErrorMessage(error, 'Не удалось переключить камеру'));
+    }
+  }, [switchCameraFacing]);
 
   useEffect(() => {
     return subscribeCallEvents((event) => {
@@ -968,6 +980,7 @@ export function VoiceCallProvider({ children }: { children: ReactNode }) {
       muted,
       deafened,
       cameraOn,
+      cameraFacing,
       participants,
       startCall,
       joinOngoingCall,
@@ -975,6 +988,7 @@ export function VoiceCallProvider({ children }: { children: ReactNode }) {
       toggleMute,
       toggleDeafen,
       toggleCamera: handleToggleCamera,
+      switchCameraFacing: handleSwitchCameraFacing,
       retryLive,
       minimize,
       expand,
@@ -994,6 +1008,7 @@ export function VoiceCallProvider({ children }: { children: ReactNode }) {
       muted,
       deafened,
       cameraOn,
+      cameraFacing,
       participants,
       startCall,
       joinOngoingCall,
@@ -1001,6 +1016,7 @@ export function VoiceCallProvider({ children }: { children: ReactNode }) {
       toggleMute,
       toggleDeafen,
       handleToggleCamera,
+      handleSwitchCameraFacing,
       retryLive,
       minimize,
       expand,
@@ -1051,6 +1067,7 @@ export function VoiceCallProvider({ children }: { children: ReactNode }) {
           }}
           onToggleDeafen={() => void toggleDeafen()}
           onToggleCamera={() => void handleToggleCamera()}
+          onSwitchCameraFacing={() => void handleSwitchCameraFacing()}
           onHangup={() => void hangup()}
           onRetry={() => void retryLive()}
           onMinimize={minimize}
@@ -1075,9 +1092,10 @@ export function VoiceCallProvider({ children }: { children: ReactNode }) {
           }}
           onDismissBard={() => void sharedMusic.dismissBard()}
           onSetBardLocalVolume={sharedMusic.setLocalVolume}
-          onEnqueueBardTrack={(trackId, title, durationSec, playUrl) =>
-            void sharedMusic.enqueueTrack(trackId, title, durationSec, playUrl)
-          }
+          onEnqueueBardTrack={(trackId, title, durationSec, playUrl) => {
+            sharedMusic.resumeFromGesture();
+            void sharedMusic.enqueueTrack(trackId, title, durationSec, playUrl);
+          }}
           onRemoveBardQueueEntry={(entryId) => void sharedMusic.removeQueueEntry(entryId)}
           onToggleBardLayerPlay={(entryId) => {
             sharedMusic.resumeFromGesture();

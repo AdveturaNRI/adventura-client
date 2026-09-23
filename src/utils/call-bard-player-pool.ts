@@ -1,4 +1,4 @@
-import { createAudioPlayer, type AudioPlayer } from 'expo-audio';
+import { createAudioPlayer, setAudioModeAsync, type AudioPlayer } from 'expo-audio';
 import { Platform } from 'react-native';
 
 import {
@@ -18,6 +18,12 @@ type StatusListener = (entryId: string, status: BardLayerStatus) => void;
 
 const isWeb = Platform.OS === 'web';
 
+/**
+ * Cap concurrent Bard layers. On web we also warm this many unlocked idle
+ * HTMLAudioElements on each user gesture so every layer can start without another tap.
+ */
+export const MAX_CALL_MUSIC_LAYERS = 8;
+
 const EMPTY: BardLayerStatus = {
   playing: false,
   currentTime: 0,
@@ -25,6 +31,55 @@ const EMPTY: BardLayerStatus = {
   ended: false,
   buffering: false,
 };
+
+let nativeAudioModeArmed = false;
+
+async function armNativeAudioMode() {
+  if (isWeb || nativeAudioModeArmed) {
+    return;
+  }
+  nativeAudioModeArmed = true;
+  try {
+    await setAudioModeAsync({
+      playsInSilentMode: true,
+      interruptionMode: 'mixWithOthers',
+    });
+  } catch {
+    nativeAudioModeArmed = false;
+  }
+}
+
+function waitNativeLoaded(player: AudioPlayer, timeoutMs = 10_000): Promise<boolean> {
+  if (player.isLoaded) {
+    return Promise.resolve(true);
+  }
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (ok: boolean) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      clearTimeout(timer);
+      try {
+        sub.remove();
+      } catch {
+        // ignore
+      }
+      resolve(ok);
+    };
+    const sub = player.addListener('playbackStatusUpdate', (status) => {
+      if (status.isLoaded) {
+        finish(true);
+      }
+    });
+    const timer = setTimeout(() => finish(player.isLoaded), timeoutMs);
+    // Replace can finish before the listener attaches.
+    if (player.isLoaded) {
+      finish(true);
+    }
+  });
+}
 
 function fromWeb(status: WebBardAudioStatus): BardLayerStatus {
   return {
@@ -58,6 +113,8 @@ function fromNative(player: AudioPlayer): BardLayerStatus {
  */
 export class CallBardPlayerPool {
   private readonly web = new Map<string, WebBardAudioEngine>();
+  /** Pre-unlocked HTMLAudioElements — Safari/iOS blocks play() on fresh elements without a gesture. */
+  private readonly webSpare: WebBardAudioEngine[] = [];
   private readonly native = new Map<string, AudioPlayer>();
   private readonly unsubs = new Map<string, () => void>();
   private readonly listeners = new Set<StatusListener>();
@@ -144,12 +201,37 @@ export class CallBardPlayerPool {
     this.pollTimer = null;
   }
 
+  private takeWebEngine(): WebBardAudioEngine {
+    return this.webSpare.pop() ?? new WebBardAudioEngine();
+  }
+
+  private releaseWebEngine(engine: WebBardAudioEngine) {
+    try {
+      engine.stop();
+    } catch {
+      // ignore
+    }
+    if (this.disposed || this.webSpare.length >= MAX_CALL_MUSIC_LAYERS) {
+      engine.dispose();
+      return;
+    }
+    this.webSpare.push(engine);
+  }
+
+  private topUpWebSpares() {
+    while (this.webSpare.length < MAX_CALL_MUSIC_LAYERS) {
+      const engine = new WebBardAudioEngine();
+      engine.unlockFromGesture();
+      this.webSpare.push(engine);
+    }
+  }
+
   private getOrCreateWeb(entryId: string): WebBardAudioEngine {
     let engine = this.web.get(entryId);
     if (engine) {
       return engine;
     }
-    engine = new WebBardAudioEngine();
+    engine = this.takeWebEngine();
     engine.setVolume(this.effectiveVolume(entryId));
     const unsub = engine.subscribe((status) => {
       this.emit(entryId, fromWeb(status));
@@ -164,7 +246,11 @@ export class CallBardPlayerPool {
     if (player) {
       return player;
     }
-    player = createAudioPlayer(null, { updateInterval: 250 });
+    player = createAudioPlayer(null, {
+      updateInterval: 250,
+      // Keep session up when one layer pauses so siblings keep mixing on iOS.
+      keepAudioSessionActive: true,
+    });
     const next = this.effectiveVolume(entryId);
     try {
       player.volume = next;
@@ -239,27 +325,28 @@ export class CallBardPlayerPool {
 
   unlockFromGesture() {
     if (!isWeb) {
-      return;
-    }
-    if (this.web.size === 0) {
-      const bootstrap = this.getOrCreateWeb('__unlock__');
-      bootstrap.unlockFromGesture();
+      void armNativeAudioMode();
       return;
     }
     for (const engine of this.web.values()) {
       engine.unlockFromGesture();
     }
+    for (const engine of this.webSpare) {
+      engine.unlockFromGesture();
+    }
+    // Warm idle elements now — next layer can play() after an await / remote wire.
+    this.topUpWebSpares();
   }
 
   resumeContextFromGesture() {
     if (!isWeb) {
-      return;
-    }
-    if (this.web.size === 0) {
-      this.getOrCreateWeb('__unlock__').resumeContextFromGesture();
+      void armNativeAudioMode();
       return;
     }
     for (const engine of this.web.values()) {
+      engine.resumeContextFromGesture();
+    }
+    for (const engine of this.webSpare) {
       engine.resumeContextFromGesture();
     }
   }
@@ -283,8 +370,9 @@ export class CallBardPlayerPool {
       if (params.entryId === '__unlock__') {
         return false;
       }
-      // Drop unlock bootstrap once real layers exist.
-      this.stopLayer('__unlock__');
+      if (!this.web.has(params.entryId) && this.listEntryIds().length >= MAX_CALL_MUSIC_LAYERS) {
+        return false;
+      }
       const engine = this.getOrCreateWeb(params.entryId);
       const ok = await engine.load({
         key,
@@ -298,6 +386,10 @@ export class CallBardPlayerPool {
       return ok;
     }
 
+    await armNativeAudioMode();
+    if (!this.native.has(params.entryId) && this.listEntryIds().length >= MAX_CALL_MUSIC_LAYERS) {
+      return false;
+    }
     const player = this.getOrCreateNative(params.entryId);
     try {
       player.pause();
@@ -309,7 +401,9 @@ export class CallBardPlayerPool {
     } catch {
       return false;
     }
-    await new Promise((resolve) => setTimeout(resolve, 40));
+    // iOS often rejects play() until the item is loaded — 40ms sleep is not enough
+    // for a second concurrent layer, so wait for isLoaded then play.
+    await waitNativeLoaded(player);
     try {
       await player.seekTo(Math.max(0, params.positionSec));
     } catch {
@@ -328,6 +422,15 @@ export class CallBardPlayerPool {
         player.play();
       } catch {
         return false;
+      }
+      // Second pass after a short settle — covers late AVPlayer ready on iPhone.
+      if (!player.playing) {
+        await new Promise((resolve) => setTimeout(resolve, 120));
+        try {
+          player.play();
+        } catch {
+          // ignore
+        }
       }
     } else {
       try {
@@ -430,8 +533,9 @@ export class CallBardPlayerPool {
       this.unsubs.delete(entryId);
       const engine = this.web.get(entryId);
       if (engine) {
-        engine.dispose();
         this.web.delete(entryId);
+        // Return to spare so the unlock survives for the next track.
+        this.releaseWebEngine(engine);
       }
       this.emit(entryId, EMPTY);
       return;
@@ -466,6 +570,9 @@ export class CallBardPlayerPool {
     this.disposed = true;
     this.listeners.clear();
     this.stopAll();
+    for (const engine of this.webSpare.splice(0)) {
+      engine.dispose();
+    }
     if (this.pollTimer) {
       clearInterval(this.pollTimer);
       this.pollTimer = null;

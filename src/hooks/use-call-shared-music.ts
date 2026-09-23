@@ -2,14 +2,17 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 
 import type { ChatLiveVoiceStatus, RoomDataHandler } from '@/hooks/use-chat-live-voice';
 import { getMusicTrack } from '@/services/music/musicApi';
-import { CallBardPlayerPool, type BardLayerStatus } from '@/utils/call-bard-player-pool';
+import {
+  CallBardPlayerPool,
+  MAX_CALL_MUSIC_LAYERS,
+  type BardLayerStatus,
+} from '@/utils/call-bard-player-pool';
 import { clearPlayableMusicUrlCache } from '@/utils/music-playable-url';
 import { unlockWebMediaPlayback } from '@/utils/unlock-web-media';
 
 export const CALL_MUSIC_TOPIC = 'adventura.music';
 
-/** Cap concurrent layers so CPU/bandwidth stay sane. */
-export const MAX_CALL_MUSIC_LAYERS = 8;
+export { MAX_CALL_MUSIC_LAYERS };
 
 export type CallMusicQueueEntry = {
   entryId: string;
@@ -177,6 +180,21 @@ function anyLayerWantsPlay(queue: CallMusicQueueEntry[]) {
   return queue.some(layerWantsPlay);
 }
 
+/** Keep the newest layers — client never plays more than MAX_CALL_MUSIC_LAYERS. */
+function trimQueueToMaxLayers(queue: CallMusicQueueEntry[]): {
+  queue: CallMusicQueueEntry[];
+  dropped: CallMusicQueueEntry[];
+} {
+  if (queue.length <= MAX_CALL_MUSIC_LAYERS) {
+    return { queue, dropped: [] };
+  }
+  const overflow = queue.length - MAX_CALL_MUSIC_LAYERS;
+  return {
+    dropped: queue.slice(0, overflow),
+    queue: queue.slice(overflow),
+  };
+}
+
 function focusFromQueue(
   queue: CallMusicQueueEntry[],
   preferredId: string | null,
@@ -224,6 +242,7 @@ function parseWire(raw: unknown): MusicWirePayload | null {
   let queue = queueRaw
     .map(parseQueueEntry)
     .filter((entry): entry is CallMusicQueueEntry => Boolean(entry));
+  queue = trimQueueToMaxLayers(queue).queue;
 
   // Older peers: singular current track only — promote into the now-playing list.
   const trackId =
@@ -438,7 +457,8 @@ export function useCallSharedMusic({
 
   const armPlaybackGesture = useCallback(() => {
     unlockWebMediaPlayback();
-    poolRef.current?.resumeContextFromGesture();
+    // Full unlock + spare HTMLAudioElements — second layer must not wait for another tap.
+    poolRef.current?.unlockFromGesture();
   }, []);
 
   const stopLocalPlayback = useCallback(() => {
@@ -465,6 +485,11 @@ export function useCallSharedMusic({
       if (!pool) {
         return;
       }
+      const trimmed = trimQueueToMaxLayers(queue);
+      for (const item of trimmed.dropped) {
+        pool.stopLayer(item.entryId);
+      }
+      queue = trimmed.queue;
       const wantIds = new Set(queue.map((entry) => entry.entryId));
       for (const entryId of pool.listEntryIds()) {
         if (!wantIds.has(entryId)) {
@@ -564,6 +589,11 @@ export function useCallSharedMusic({
           queueAt: now,
         };
       } else if (patch.queue) {
+        const trimmed = trimQueueToMaxLayers(next.queue);
+        next.queue = trimmed.queue;
+        for (const item of trimmed.dropped) {
+          poolRef.current?.stopLayer(item.entryId);
+        }
         const focus = focusFromQueue(next.queue, next.currentEntryId);
         next = {
           ...next,
@@ -596,8 +626,12 @@ export function useCallSharedMusic({
       let next: CallMusicSnapshot = { ...local };
 
       if (takeQueue) {
-        next.queue = incoming.queue;
+        const trimmed = trimQueueToMaxLayers(incoming.queue);
+        next.queue = trimmed.queue;
         next.queueAt = incomingQueueAt;
+        for (const item of trimmed.dropped) {
+          poolRef.current?.stopLayer(item.entryId);
+        }
       }
 
       if (takePlayback) {
@@ -842,11 +876,15 @@ export function useCallSharedMusic({
       };
 
       const stamped = stampQueuePositions(snapshotRef.current.queue);
+      if (stamped.length >= MAX_CALL_MUSIC_LAYERS) {
+        // Hard client cap — remove an older layer first.
+        return;
+      }
       let queue = [...stamped, entry];
       if (queue.length > MAX_CALL_MUSIC_LAYERS) {
-        const dropped = queue.slice(0, queue.length - MAX_CALL_MUSIC_LAYERS);
-        queue = queue.slice(queue.length - MAX_CALL_MUSIC_LAYERS);
-        for (const item of dropped) {
+        const trimmed = trimQueueToMaxLayers(queue);
+        queue = trimmed.queue;
+        for (const item of trimmed.dropped) {
           poolRef.current?.stopLayer(item.entryId);
         }
       }

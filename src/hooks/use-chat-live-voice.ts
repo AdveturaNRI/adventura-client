@@ -3,6 +3,7 @@ import { AppState, Platform } from 'react-native';
 import {
   ConnectionState,
   DisconnectReason,
+  LocalVideoTrack,
   Room,
   RoomEvent,
   Track,
@@ -32,6 +33,8 @@ import {
 } from '@/utils/voice-mic-pipeline';
 
 export type ChatLiveVoiceStatus = 'idle' | 'connecting' | 'connected' | 'error';
+
+export type CameraFacingMode = 'user' | 'environment';
 
 export type ChatLiveVoiceParticipant = {
   identity: string;
@@ -71,6 +74,8 @@ type UseChatLiveVoiceResult = {
   muted: boolean;
   deafened: boolean;
   cameraOn: boolean;
+  /** Local camera facing — front (`user`) or rear (`environment`). */
+  cameraFacing: CameraFacingMode;
   participants: ChatLiveVoiceParticipant[];
   /** identity → urgent flag (cleared only by sender toggle / leave) */
   urgentById: Record<string, boolean>;
@@ -81,6 +86,8 @@ type UseChatLiveVoiceResult = {
   toggleMute: () => Promise<void>;
   toggleDeafen: () => Promise<void>;
   toggleCamera: () => Promise<void>;
+  /** Flip front ↔ rear camera (works while camera is on). */
+  switchCameraFacing: () => Promise<void>;
   sendUrgentRequest: () => Promise<void>;
   setParticipantVolume: (identity: string, volume: number) => void;
   /** Reliable LiveKit data publish (topic + JSON body). No-op if not connected. */
@@ -375,6 +382,9 @@ export function useChatLiveVoice(conversationId: string | null): UseChatLiveVoic
   const [muted, setMuted] = useState(false);
   const [deafened, setDeafened] = useState(false);
   const [cameraOn, setCameraOn] = useState(false);
+  const [cameraFacing, setCameraFacing] = useState<CameraFacingMode>('user');
+  const cameraFacingRef = useRef<CameraFacingMode>('user');
+  cameraFacingRef.current = cameraFacing;
   const [volumeById, setVolumeById] = useState<Record<string, number>>({});
   const deafenedRef = useRef(false);
   const volumeByIdRef = useRef<Record<string, number>>({});
@@ -546,6 +556,8 @@ export function useChatLiveVoice(conversationId: string | null): UseChatLiveVoic
     setMuted(false);
     setDeafened(false);
     setCameraOn(false);
+    setCameraFacing('user');
+    cameraFacingRef.current = 'user';
     setVolumeById({});
     volumeByIdRef.current = {};
     deafenedRef.current = false;
@@ -944,24 +956,72 @@ export function useChatLiveVoice(conversationId: string | null): UseChatLiveVoic
     applyRemotePlaybackVolumes(roomRef.current, deafenedRef.current, next);
   }, []);
 
+  const cameraCaptureOptions = useCallback(async (facing: CameraFacingMode) => {
+    const prefs = await loadVoiceDevicePrefs();
+    const resolution =
+      Platform.OS === 'web' ? VideoPresets.h720.resolution : VideoPresets.h540.resolution;
+    // Pin deviceId only for front cam — rear switch must not keep the front device.
+    const pinDevice = facing === 'user' && Boolean(prefs.videoDeviceId?.trim());
+    return {
+      facingMode: facing,
+      resolution,
+      ...(pinDevice ? { deviceId: prefs.videoDeviceId!.trim() } : {}),
+    };
+  }, []);
+
   const toggleCamera = useCallback(async () => {
     const room = roomRef.current;
     if (!room || (status !== 'connected' && status !== 'connecting')) {
       return;
     }
     const next = !cameraOn;
-    const prefs = await loadVoiceDevicePrefs();
     try {
-      await room.localParticipant.setCameraEnabled(next, {
-        facingMode: 'user',
-        resolution: Platform.OS === 'web' ? VideoPresets.h720.resolution : VideoPresets.h540.resolution,
-        ...(prefs.videoDeviceId?.trim() ? { deviceId: prefs.videoDeviceId.trim() } : {}),
-      });
+      if (next) {
+        await room.localParticipant.setCameraEnabled(
+          true,
+          await cameraCaptureOptions(cameraFacingRef.current),
+        );
+      } else {
+        await room.localParticipant.setCameraEnabled(false);
+      }
     } catch (error) {
       throw new Error(localizeErrorMessage(error, 'Не удалось включить камеру'));
     }
     refreshParticipants();
-  }, [cameraOn, refreshParticipants, status]);
+  }, [cameraCaptureOptions, cameraOn, refreshParticipants, status]);
+
+  const switchCameraFacing = useCallback(async () => {
+    const room = roomRef.current;
+    if (!room || (status !== 'connected' && status !== 'connecting')) {
+      return;
+    }
+    const nextFacing: CameraFacingMode =
+      cameraFacingRef.current === 'user' ? 'environment' : 'user';
+
+    if (!cameraOn) {
+      cameraFacingRef.current = nextFacing;
+      setCameraFacing(nextFacing);
+      return;
+    }
+
+    const options = await cameraCaptureOptions(nextFacing);
+    const pub = room.localParticipant.getTrackPublication(Track.Source.Camera);
+    const track = pub?.track;
+
+    try {
+      if (track instanceof LocalVideoTrack) {
+        await track.restartTrack(options);
+      } else {
+        await room.localParticipant.setCameraEnabled(false);
+        await room.localParticipant.setCameraEnabled(true, options);
+      }
+      cameraFacingRef.current = nextFacing;
+      setCameraFacing(nextFacing);
+      refreshParticipants();
+    } catch (error) {
+      throw new Error(localizeErrorMessage(error, 'Не удалось переключить камеру'));
+    }
+  }, [cameraCaptureOptions, cameraOn, refreshParticipants, status]);
 
   const sendUrgentRequest = useCallback(async () => {
     const room = roomRef.current;
@@ -1111,6 +1171,7 @@ export function useChatLiveVoice(conversationId: string | null): UseChatLiveVoic
     muted,
     deafened,
     cameraOn,
+    cameraFacing,
     participants,
     urgentById,
     volumeById,
@@ -1119,6 +1180,7 @@ export function useChatLiveVoice(conversationId: string | null): UseChatLiveVoic
     toggleMute,
     toggleDeafen,
     toggleCamera,
+    switchCameraFacing,
     sendUrgentRequest,
     setParticipantVolume,
     publishRoomData,

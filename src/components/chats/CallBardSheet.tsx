@@ -20,7 +20,11 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useIsDesktopWeb } from '@/components/navigation/DesktopThemeToggle';
 import { toast } from '@/components/ui';
 import { FontSize, Spacing } from '@/constants/theme';
-import type { CallMusicLayerLive, CallMusicQueueEntry } from '@/hooks/use-call-shared-music';
+import {
+  MAX_CALL_MUSIC_LAYERS,
+  type CallMusicLayerLive,
+  type CallMusicQueueEntry,
+} from '@/hooks/use-call-shared-music';
 import {
   addTrackToPlaylist,
   createMusicPlaylist,
@@ -1110,6 +1114,10 @@ export function CallBardSheet({
           : `Предложить ${track.title}`
       }
       onPressIn={() => {
+        if (queue.length >= MAX_CALL_MUSIC_LAYERS) {
+          toast.info(`Максимум ${MAX_CALL_MUSIC_LAYERS} треков сразу — убери один`);
+          return;
+        }
         if (canControl && Platform.OS === 'web') {
           onEnqueueTrack(track.id, track.title, track.durationSec ?? null, track.url);
           return;
@@ -1117,6 +1125,10 @@ export function CallBardSheet({
         onAudioGesture?.();
       }}
       onPress={() => {
+        if (queue.length >= MAX_CALL_MUSIC_LAYERS) {
+          toast.info(`Максимум ${MAX_CALL_MUSIC_LAYERS} треков сразу — убери один`);
+          return;
+        }
         if (Platform.OS === 'web' && canControl) {
           return;
         }
@@ -1239,7 +1251,7 @@ export function CallBardSheet({
             </View>
 
             <Text style={styles.sectionLabel}>
-              Сейчас играет{queue.length > 0 ? ` · ${queue.length}` : ''}
+              Сейчас играет{queue.length > 0 ? ` · ${queue.length}/${MAX_CALL_MUSIC_LAYERS}` : ''}
             </Text>
             {queue.length === 0 ? (
               <Text style={styles.emptyInline}>Ничего не играет — ткни трек в библиотеке</Text>

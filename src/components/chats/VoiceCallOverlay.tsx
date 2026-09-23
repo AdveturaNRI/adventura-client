@@ -90,6 +90,8 @@ type Props = {
   onMicGesture?: () => void;
   onToggleDeafen: () => void;
   onToggleCamera?: () => void;
+  /** Flip front ↔ rear while camera is on. */
+  onSwitchCameraFacing?: () => void;
   onHangup: () => void;
   onRetry?: () => void;
   onMinimize?: () => void;
@@ -1110,6 +1112,7 @@ export function VoiceCallOverlay({
   onMicGesture,
   onToggleDeafen,
   onToggleCamera,
+  onSwitchCameraFacing,
   onHangup,
   onRetry,
   onMinimize,
@@ -1540,6 +1543,15 @@ export function VoiceCallOverlay({
               <Ionicons name={cameraOn ? 'videocam' : 'videocam-off'} size={18} color="#FFFFFF" />
             </Pressable>
           ) : null}
+          {onSwitchCameraFacing && cameraOn && !pinToTop ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Переключить камеру"
+              onPress={onSwitchCameraFacing}
+              style={({ pressed }) => [styles.miniCtrl, pressed && styles.pressed]}>
+              <Ionicons name="camera-reverse-outline" size={18} color="#FFFFFF" />
+            </Pressable>
+          ) : null}
           <Pressable
             accessibilityRole="button"
             accessibilityLabel="Завершить звонок"
@@ -1812,6 +1824,22 @@ export function VoiceCallOverlay({
                   !mediaReady && styles.controlDisabled,
                 ]}>
                 <Ionicons name={cameraOn ? 'videocam' : 'videocam-off'} size={22} color="#FFFFFF" />
+              </Pressable>
+            ) : null}
+
+            {onSwitchCameraFacing && cameraOn ? (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Переключить камеру"
+                disabled={!mediaReady}
+                onPress={onSwitchCameraFacing}
+                style={({ pressed }) => [
+                  styles.controlBtn,
+                  styles.controlBtnSecondary,
+                  pressed && styles.pressed,
+                  !mediaReady && styles.controlDisabled,
+                ]}>
+                <Ionicons name="camera-reverse-outline" size={22} color="#FFFFFF" />
               </Pressable>
             ) : null}
 
