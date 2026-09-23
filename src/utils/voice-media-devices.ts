@@ -1,5 +1,7 @@
 import { Platform } from 'react-native';
 
+import { unlockWebMediaPlayback } from '@/utils/unlock-web-media';
+
 export type MediaDeviceOption = {
   deviceId: string;
   label: string;
@@ -64,9 +66,12 @@ let primedMicGeneration = 0;
 
 export function beginMicrophonePrimeFromGesture(): void {
   if (!canUseMediaDevices() || !navigator.mediaDevices.getUserMedia) {
+    unlockWebMediaPlayback();
     return;
   }
   if (primedMicInflight || primedMicReady) {
+    // Mic already warming — still unlock HTML audio for Bard on this tap.
+    unlockWebMediaPlayback();
     return;
   }
   if (typeof window !== 'undefined' && !window.isSecureContext) {
@@ -82,6 +87,10 @@ export function beginMicrophonePrimeFromGesture(): void {
   // CRITICAL (iOS Safari): getUserMedia must start in the same sync turn as the tap.
   // Any await before it (AudioContext.resume, network) drops user-activation → NotAllowedError.
   const gumPromise = navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+
+  // Same gesture: unlock HTMLAudioElement autoplay for shared Bard music (remote play).
+  // After GUM starts so mic activation is preserved. Must stay sync — do not await.
+  unlockWebMediaPlayback();
 
   primedMicInflight = (async () => {
     try {

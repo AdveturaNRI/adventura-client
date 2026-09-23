@@ -3324,9 +3324,9 @@ export default function ChatThreadScreen() {
             accessibilityRole="button"
             accessibilityLabel={
               voiceActiveHere
-                ? 'Завершить звонок'
+                ? 'Покинуть голосовой чат'
                 : ongoingVoiceCall
-                  ? 'Войти в звонок'
+                  ? 'Присоединиться к голосовому чату'
                   : 'Позвонить'
             }
             hitSlop={8}
@@ -3432,23 +3432,25 @@ export default function ChatThreadScreen() {
         {ongoingVoiceCall && !voiceActiveHere ? (
           <View style={styles.voiceJoinBanner}>
             <View style={styles.voiceJoinIcon}>
-              <Ionicons name="call" size={18} color={colors.primary} />
+              <Ionicons name="headset" size={18} color={colors.primary} />
             </View>
             <View style={styles.voiceJoinCopy}>
               <Text style={styles.voiceJoinTitle} numberOfLines={1}>
-                Идёт звонок
+                {ongoingVoiceCall.isGroup
+                  ? ongoingVoiceCall.conversationTitle?.trim() || title || 'Голосовой чат'
+                  : ongoingVoiceCall.fromNickname?.trim() || 'Голосовой чат'}
               </Text>
               <Text style={styles.voiceJoinHint} numberOfLines={1}>
                 {ongoingVoiceCall.joinedCount > 1
                   ? `${ongoingVoiceCall.joinedCount} в эфире`
-                  : ongoingVoiceCall.fromNickname
-                    ? `${ongoingVoiceCall.fromNickname} в эфире`
-                    : 'Можно войти'}
+                  : 'В эфире'}
               </Text>
             </View>
             <Pressable
               accessibilityRole="button"
-              accessibilityLabel="Войти в звонок"
+              accessibilityLabel={
+                ongoingVoiceCall.isJoined ? 'Вернуться в голосовой чат' : 'Присоединиться к голосовому чату'
+              }
               disabled={joiningOngoingVoice}
               onPressIn={() => {
                 if (Platform.OS === 'web') {
@@ -3481,7 +3483,7 @@ export default function ChatThreadScreen() {
                 <ActivityIndicator size="small" color="#FFFFFF" />
               ) : (
                 <Text style={styles.voiceJoinButtonLabel}>
-                  {ongoingVoiceCall.isJoined ? 'Вернуться' : 'Войти'}
+                  {ongoingVoiceCall.isJoined ? 'Вернуться' : 'Присоединиться'}
                 </Text>
               )}
             </Pressable>

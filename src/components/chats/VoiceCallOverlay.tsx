@@ -121,6 +121,8 @@ type Props = {
   onStopBardTrack?: () => void;
   onSetBardGlobalVolume?: (volume: number) => void;
   onRequestBardSync?: () => void;
+  /** Unlock + retry Bard audio (web autoplay) from a user gesture. */
+  onResumeBardAudio?: () => void;
 };
 
 /** Survives expand/collapse while the call is up. */
@@ -1079,6 +1081,7 @@ export function VoiceCallOverlay({
   onStopBardTrack,
   onSetBardGlobalVolume,
   onRequestBardSync,
+  onResumeBardAudio,
 }: Props) {
   const insets = useSafeAreaInsets();
   const isDesktop = useIsDesktopWeb();
@@ -1690,7 +1693,12 @@ export function VoiceCallOverlay({
                         : undefined
                   }
                   onPress={
-                    tile.isBard ? () => setBardSheetOpen(true) : undefined
+                    tile.isBard
+                      ? () => {
+                          onResumeBardAudio?.();
+                          setBardSheetOpen(true);
+                        }
+                      : undefined
                   }
                 />
               ))}
@@ -1792,6 +1800,7 @@ export function VoiceCallOverlay({
                 }
                 accessibilityState={{ selected: bardPresent }}
                 onPress={() => {
+                  onResumeBardAudio?.();
                   if (bardPresent) {
                     setBardSheetOpen(true);
                     return;

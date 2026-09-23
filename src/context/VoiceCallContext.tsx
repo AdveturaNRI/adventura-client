@@ -26,6 +26,7 @@ import {
   acceptChatVoiceCall,
   declineChatVoiceCall,
   endChatVoiceCall,
+  getActiveChatVoiceCall,
   inviteChatVoiceCall,
   joinChatVoiceCall,
   listChatMembers,
@@ -331,63 +332,6 @@ export function VoiceCallProvider({ children }: { children: ReactNode }) {
     [clearSession, join, user?.id],
   );
 
-  const startCall = useCallback(
-    async (
-      conversationId: string,
-      peerName?: string | null,
-      peerAvatarUrl?: string | null,
-      opts?: {
-        isGroup?: boolean;
-        ringingPeers?: VoiceCallRingingPeer[];
-        myRole?: VoiceCallGroupRole | null;
-      },
-    ) => {
-      if (sessionRef.current) {
-        toast.info('Сначала завершите текущий звонок');
-        return;
-      }
-      const primedMic = await takePrimedMicrophone();
-      try {
-        const { callId, isGroup, ringing } = await inviteChatVoiceCall(conversationId);
-        const ringingPeers =
-          mapInviteRinging(ringing).length > 0
-            ? mapInviteRinging(ringing)
-            : mapInviteRinging(opts?.ringingPeers);
-        const group = opts?.isGroup ?? Boolean(isGroup);
-        let myRole: VoiceCallGroupRole | null = group ? opts?.myRole ?? null : null;
-        if (group && !myRole) {
-          myRole = await resolveGroupRole(conversationId, user?.id);
-        }
-        const next: Session = {
-          callId,
-          conversationId,
-          role: 'caller',
-          peerName: peerName?.trim() || 'Собеседник',
-          peerAvatarUrl: peerAvatarUrl ?? null,
-          callerName: null,
-          isGroup: group,
-          myRole: group ? myRole ?? 'member' : null,
-          ringingPeers,
-          phase: 'outgoing',
-        };
-        sessionRef.current = next;
-        setSession(next);
-        setMinimized(false);
-        ringingStartedAtRef.current = ringingPeers.length > 0 ? Date.now() : null;
-        startCallRingback();
-        await join(conversationId, { primedMic });
-      } catch (error) {
-        stopMediaStream(primedMic);
-        stopCallRingtone();
-        await leave();
-        sessionRef.current = null;
-        setSession(null);
-        toast.error(localizeErrorMessage(error, 'Не удалось начать звонок'));
-      }
-    },
-    [join, leave, user?.id],
-  );
-
   const joinOngoingCall = useCallback(
     async (
       conversationId: string,
@@ -434,6 +378,84 @@ export function VoiceCallProvider({ children }: { children: ReactNode }) {
       }
     },
     [join, leave, user?.id],
+  );
+
+  const startCall = useCallback(
+    async (
+      conversationId: string,
+      peerName?: string | null,
+      peerAvatarUrl?: string | null,
+      opts?: {
+        isGroup?: boolean;
+        ringingPeers?: VoiceCallRingingPeer[];
+        myRole?: VoiceCallGroupRole | null;
+      },
+    ) => {
+      if (sessionRef.current) {
+        toast.info('Сначала завершите текущий звонок');
+        return;
+      }
+
+      // Lobby still open (peer alone / abandon timer) — rejoin, don't ring again.
+      try {
+        const active = await getActiveChatVoiceCall(conversationId);
+        if (active?.callId) {
+          const group = opts?.isGroup ?? active.isGroup;
+          await joinOngoingCall(
+            conversationId,
+            active.callId,
+            peerName?.trim() ||
+              (group ? active.conversationTitle : active.fromNickname) ||
+              null,
+            peerAvatarUrl ?? active.fromAvatarUrl,
+            { isGroup: group, myRole: opts?.myRole ?? null },
+          );
+          return;
+        }
+      } catch {
+        // Active check failed — fall through to a fresh invite.
+      }
+
+      const primedMic = await takePrimedMicrophone();
+      try {
+        const { callId, isGroup, ringing } = await inviteChatVoiceCall(conversationId);
+        const ringingPeers =
+          mapInviteRinging(ringing).length > 0
+            ? mapInviteRinging(ringing)
+            : mapInviteRinging(opts?.ringingPeers);
+        const group = opts?.isGroup ?? Boolean(isGroup);
+        let myRole: VoiceCallGroupRole | null = group ? opts?.myRole ?? null : null;
+        if (group && !myRole) {
+          myRole = await resolveGroupRole(conversationId, user?.id);
+        }
+        const next: Session = {
+          callId,
+          conversationId,
+          role: 'caller',
+          peerName: peerName?.trim() || 'Собеседник',
+          peerAvatarUrl: peerAvatarUrl ?? null,
+          callerName: null,
+          isGroup: group,
+          myRole: group ? myRole ?? 'member' : null,
+          ringingPeers,
+          phase: 'outgoing',
+        };
+        sessionRef.current = next;
+        setSession(next);
+        setMinimized(false);
+        ringingStartedAtRef.current = ringingPeers.length > 0 ? Date.now() : null;
+        startCallRingback();
+        await join(conversationId, { primedMic });
+      } catch (error) {
+        stopMediaStream(primedMic);
+        stopCallRingtone();
+        await leave();
+        sessionRef.current = null;
+        setSession(null);
+        toast.error(localizeErrorMessage(error, 'Не удалось начать звонок'));
+      }
+    },
+    [join, joinOngoingCall, leave, user?.id],
   );
 
   const hangup = useCallback(async () => {
@@ -547,6 +569,16 @@ export function VoiceCallProvider({ children }: { children: ReactNode }) {
         }
 
         const nextInvite = inviteFromPayload(invite);
+
+        // Peer rejoined the lobby we're already in — no second incoming UI.
+        if (
+          current &&
+          (current.phase === 'outgoing' || current.phase === 'active') &&
+          (current.callId === invite.callId ||
+            current.conversationId === invite.conversationId)
+        ) {
+          return;
+        }
 
         // In another call — park the invite as a notification, do not soft-decline.
         if (current && (current.phase === 'outgoing' || current.phase === 'active')) {
@@ -763,6 +795,25 @@ export function VoiceCallProvider({ children }: { children: ReactNode }) {
     sessionRef.current = next;
     setSession(next);
   }, [participants]);
+
+  // New peer joined — push Bard state so they hear music without opening the sheet.
+  const remoteParticipantCount = participants.filter((p) => !p.isLocal).length;
+  const prevRemoteCountRef = useRef(0);
+  const sharedMusicRef = useRef(sharedMusic);
+  sharedMusicRef.current = sharedMusic;
+  useEffect(() => {
+    if (liveStatus !== 'connected') {
+      prevRemoteCountRef.current = remoteParticipantCount;
+      return;
+    }
+    if (remoteParticipantCount > prevRemoteCountRef.current) {
+      if (sharedMusicRef.current.snapshot.bardPresent) {
+        sharedMusicRef.current.republishState();
+      }
+      sharedMusicRef.current.requestSync();
+    }
+    prevRemoteCountRef.current = remoteParticipantCount;
+  }, [liveStatus, remoteParticipantCount]);
 
   // Solo lobby stays up — server ends the call after the wait/abandon timer (5 min).
 
@@ -1007,7 +1058,10 @@ export function VoiceCallProvider({ children }: { children: ReactNode }) {
           bardLocalVolume={sharedMusic.localVolume}
           bardGlobalVolume={sharedMusic.snapshot.globalVolume}
           bardLocalDisplayName={sharedMusic.localDisplayName}
-          onSummonBard={() => void sharedMusic.summonBard()}
+          onSummonBard={() => {
+            sharedMusic.resumeFromGesture();
+            void sharedMusic.summonBard();
+          }}
           onDismissBard={() => void sharedMusic.dismissBard()}
           onSetBardLocalVolume={sharedMusic.setLocalVolume}
           onEnqueueBardTrack={(trackId, title, durationSec) =>
@@ -1019,7 +1073,11 @@ export function VoiceCallProvider({ children }: { children: ReactNode }) {
           onSeekBard={(positionSec) => void sharedMusic.seek(positionSec)}
           onStopBardTrack={() => void sharedMusic.stopTrack()}
           onSetBardGlobalVolume={(volume) => void sharedMusic.setGlobalVolume(volume)}
-          onRequestBardSync={() => sharedMusic.requestSync()}
+          onRequestBardSync={() => {
+            sharedMusic.resumeFromGesture();
+            sharedMusic.requestSync();
+          }}
+          onResumeBardAudio={() => sharedMusic.resumeFromGesture()}
         />
         {children}
         <IncomingCallModal

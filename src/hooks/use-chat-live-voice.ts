@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Platform } from 'react-native';
+import { AppState, Platform } from 'react-native';
 import {
   ConnectionState,
   DisconnectReason,
@@ -179,20 +179,52 @@ function isInsecureLanWeb(): boolean {
 }
 
 const remoteAudioElements = new Set<HTMLMediaElement>();
+/** identity → attached HTML audio elements (for direct volume when GainNode isn't ready). */
+const remoteAudioByIdentity = new Map<string, Set<HTMLMediaElement>>();
 /** Preferred speaker device from Settings; applied to every remote audio element. */
 let preferredOutputDeviceId: string | null = null;
 
-function attachRemoteAudio(track: RemoteTrack, deafened: boolean) {
+/**
+ * Safari/iOS ignore HTMLMediaElement.volume — only WebAudio GainNode works.
+ * LiveKit webAudioMix routes remote audio through GainNode so setVolume is audible.
+ */
+function shouldUseWebAudioMix(): boolean {
+  return Platform.OS === 'web';
+}
+
+function attachRemoteAudio(
+  track: RemoteTrack,
+  deafened: boolean,
+  identity: string,
+  volume: number,
+) {
   if (Platform.OS !== 'web' || track.kind !== Track.Kind.Audio) {
     return;
   }
+  const webAudioMix = shouldUseWebAudioMix();
   const el = track.attach();
   el.autoplay = true;
-  el.muted = deafened;
+  // With webAudioMix, LiveKit keeps the element muted and plays via GainNode.
+  // Unmuting here → double audio on Safari and setVolume has no effect on the element path.
+  if (webAudioMix) {
+    el.muted = true;
+  } else {
+    el.muted = deafened || volume < 0.001;
+    el.volume = deafened ? 0 : clampPlaybackVolume(volume);
+  }
   el.setAttribute('playsinline', 'true');
   el.style.display = 'none';
   document.body.appendChild(el);
   remoteAudioElements.add(el);
+  const id = identity.trim();
+  if (id) {
+    let set = remoteAudioByIdentity.get(id);
+    if (!set) {
+      set = new Set();
+      remoteAudioByIdentity.set(id, set);
+    }
+    set.add(el);
+  }
   void applyAudioOutputToElement(el, preferredOutputDeviceId);
   void el.play().catch(() => undefined);
 }
@@ -206,6 +238,10 @@ async function applyPreferredOutputToAllRemote(): Promise<void> {
 }
 
 function setRemoteOutputsDeafened(deafened: boolean) {
+  if (shouldUseWebAudioMix()) {
+    // Dampen via GainNode in applyRemotePlaybackVolumes — don't unmute HTML elements.
+    return;
+  }
   for (const el of remoteAudioElements) {
     el.muted = deafened;
   }
@@ -218,7 +254,7 @@ function clampPlaybackVolume(value: number): number {
   return Math.min(1, Math.max(0, value));
 }
 
-/** LiveKit setVolume works on web + native; deafen forces 0. */
+/** Apply local per-participant gain. Deafened forces 0. */
 function applyRemotePlaybackVolumes(
   room: Room | null,
   deafened: boolean,
@@ -227,13 +263,36 @@ function applyRemotePlaybackVolumes(
   if (!room) {
     return;
   }
+  const webAudioMix = shouldUseWebAudioMix();
   for (const participant of room.remoteParticipants.values()) {
     const userVol = clampPlaybackVolume(volumeById[participant.identity] ?? 1);
     const volume = deafened ? 0 : userVol;
+
+    // Persist on the participant so late-subscribed tracks inherit the gain.
+    if (typeof participant.setVolume === 'function') {
+      participant.setVolume(volume, Track.Source.Microphone);
+      participant.setVolume(volume, Track.Source.ScreenShareAudio);
+    }
+
     for (const pub of participant.audioTrackPublications.values()) {
       const track = pub.track as RemoteAudioTrack | undefined;
       if (track && typeof track.setVolume === 'function') {
         track.setVolume(volume);
+      }
+    }
+
+    // Direct element fallback (non-webAudioMix browsers / GainNode not connected yet).
+    const els = remoteAudioByIdentity.get(participant.identity);
+    if (els) {
+      for (const el of els) {
+        try {
+          if (!webAudioMix) {
+            el.volume = volume;
+            el.muted = deafened || volume < 0.001;
+          }
+        } catch {
+          // ignore
+        }
       }
     }
   }
@@ -249,6 +308,7 @@ function clearRemoteAudioElements() {
     }
   }
   remoteAudioElements.clear();
+  remoteAudioByIdentity.clear();
 }
 
 function voiceConnectErrorMessage(err: unknown): string {
@@ -272,6 +332,25 @@ function voiceConnectErrorMessage(err: unknown): string {
 }
 
 const VOICE_CONNECT_TIMEOUT_MS = 20_000;
+const AUTO_REJOIN_MAX_ATTEMPTS = 3;
+
+/**
+ * LiveKit always registers `freeze` → disconnect, even when disconnectOnPageLeave is false.
+ * On iPhone that fires when Safari freezes the tab (Home, lock, Control Center).
+ * Strip those handlers so a brief background doesn't drop the peer for everyone else.
+ */
+function detachLivekitPageLeaveHandlers(room: Room): void {
+  if (Platform.OS !== 'web' || typeof window === 'undefined') {
+    return;
+  }
+  const handler = (room as unknown as { onPageLeave?: EventListener }).onPageLeave;
+  if (!handler) {
+    return;
+  }
+  window.removeEventListener('freeze', handler);
+  window.removeEventListener('pagehide', handler);
+  window.removeEventListener('beforeunload', handler);
+}
 
 /**
  * LiveKit media session for a chat thread.
@@ -281,7 +360,17 @@ export function useChatLiveVoice(conversationId: string | null): UseChatLiveVoic
   const roomRef = useRef<Room | null>(null);
   const joiningRef = useRef(false);
   const intentionalLeaveRef = useRef(false);
+  /** Session still wants media (join started; not hangup / leave). */
+  const expectConnectedRef = useRef(false);
+  const conversationIdRef = useRef(conversationId);
+  conversationIdRef.current = conversationId;
+  const prevConversationIdRef = useRef(conversationId);
+  const statusRef = useRef<ChatLiveVoiceStatus>('idle');
+  const autoRejoinAttemptsRef = useRef(0);
+  const autoRejoinTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const joinRef = useRef<(id?: string, options?: JoinLiveOptions) => Promise<void>>(async () => undefined);
   const [status, setStatus] = useState<ChatLiveVoiceStatus>('idle');
+  statusRef.current = status;
   const [error, setError] = useState<string | null>(null);
   const [muted, setMuted] = useState(false);
   const [deafened, setDeafened] = useState(false);
@@ -392,9 +481,63 @@ export function useChatLiveVoice(conversationId: string | null): UseChatLiveVoic
     await stopLivekitAudioSession().catch(() => undefined);
   }, []);
 
+  const clearAutoRejoinTimer = useCallback(() => {
+    if (autoRejoinTimerRef.current) {
+      clearTimeout(autoRejoinTimerRef.current);
+      autoRejoinTimerRef.current = null;
+    }
+  }, []);
+
+  const tryAutoRejoin = useCallback(() => {
+    if (intentionalLeaveRef.current || !expectConnectedRef.current) {
+      return;
+    }
+    const id = conversationIdRef.current;
+    if (!id || roomRef.current || joiningRef.current) {
+      return;
+    }
+    if (statusRef.current !== 'error' && statusRef.current !== 'idle') {
+      return;
+    }
+    if (Platform.OS === 'web' && typeof document !== 'undefined' && document.visibilityState === 'hidden') {
+      return;
+    }
+    void joinRef.current(id);
+  }, []);
+
+  const scheduleAutoRejoin = useCallback(() => {
+    clearAutoRejoinTimer();
+    if (!expectConnectedRef.current || intentionalLeaveRef.current) {
+      return;
+    }
+    if (autoRejoinAttemptsRef.current >= AUTO_REJOIN_MAX_ATTEMPTS) {
+      return;
+    }
+    const attempt = autoRejoinAttemptsRef.current;
+    const delayMs = Math.min(800 * 2 ** attempt, 6_000);
+    autoRejoinTimerRef.current = setTimeout(() => {
+      autoRejoinTimerRef.current = null;
+      if (intentionalLeaveRef.current || !expectConnectedRef.current) {
+        return;
+      }
+      if (roomRef.current || joiningRef.current) {
+        return;
+      }
+      if (Platform.OS === 'web' && typeof document !== 'undefined' && document.visibilityState === 'hidden') {
+        // Wait for visibilitychange / AppState — don't burn attempts while backgrounded.
+        return;
+      }
+      autoRejoinAttemptsRef.current += 1;
+      tryAutoRejoin();
+    }, delayMs);
+  }, [clearAutoRejoinTimer, tryAutoRejoin]);
+
   const leave = useCallback(async () => {
     intentionalLeaveRef.current = true;
+    expectConnectedRef.current = false;
     joiningRef.current = false;
+    autoRejoinAttemptsRef.current = 0;
+    clearAutoRejoinTimer();
     preferredOutputDeviceId = null;
     const room = roomRef.current;
     roomRef.current = null;
@@ -408,7 +551,7 @@ export function useChatLiveVoice(conversationId: string | null): UseChatLiveVoic
     deafenedRef.current = false;
     setStatus('idle');
     setError(null);
-  }, [teardownRoom]);
+  }, [clearAutoRejoinTimer, teardownRoom]);
 
   const join = useCallback(async (conversationIdOverride?: string, options?: JoinLiveOptions) => {
     const targetId = conversationIdOverride ?? conversationId;
@@ -429,6 +572,8 @@ export function useChatLiveVoice(conversationId: string | null): UseChatLiveVoic
 
     joiningRef.current = true;
     intentionalLeaveRef.current = false;
+    expectConnectedRef.current = true;
+    clearAutoRejoinTimer();
     setStatus('connecting');
     setError(null);
 
@@ -448,7 +593,12 @@ export function useChatLiveVoice(conversationId: string | null): UseChatLiveVoic
       room = new Room({
         adaptiveStream: true,
         dynacast: true,
-        disconnectOnPageLeave: true,
+        // iOS Safari fires pagehide/freeze on brief background — don't drop the call.
+        // LiveKit still registers `freeze`; we strip it after connect (see detachLivekitPageLeaveHandlers).
+        disconnectOnPageLeave: false,
+        // Safari/iOS ignore HTMLMediaElement.volume — GainNode via webAudioMix
+        // makes per-participant local volume actually audible.
+        webAudioMix: shouldUseWebAudioMix(),
         // LiveKit defaults voiceIsolation: true — mobile Chrome/Safari reject it
         // with OverconstrainedError ("Invalid constraint") right after mic permission.
         audioCaptureDefaults: {
@@ -472,6 +622,7 @@ export function useChatLiveVoice(conversationId: string | null): UseChatLiveVoic
           const id = participant.identity;
           if (id) {
             setUrgent(id, false, false);
+            remoteAudioByIdentity.delete(id);
           }
           sync();
         })
@@ -483,23 +634,34 @@ export function useChatLiveVoice(conversationId: string | null): UseChatLiveVoic
         .on(
           RoomEvent.TrackSubscribed,
           (track: RemoteTrack, _pub: RemoteTrackPublication, participant: RemoteParticipant) => {
-            attachRemoteAudio(track, deafenedRef.current);
+            const userVol = clampPlaybackVolume(
+              volumeByIdRef.current[participant.identity] ?? 1,
+            );
+            const effective = deafenedRef.current ? 0 : userVol;
+            attachRemoteAudio(track, deafenedRef.current, participant.identity, effective);
             if (track.kind === Track.Kind.Audio) {
+              if (typeof participant.setVolume === 'function') {
+                const source =
+                  _pub.source === Track.Source.ScreenShareAudio
+                    ? Track.Source.ScreenShareAudio
+                    : Track.Source.Microphone;
+                participant.setVolume(effective, source);
+              }
               const audio = track as RemoteAudioTrack;
               if (typeof audio.setVolume === 'function') {
-                const userVol = clampPlaybackVolume(
-                  volumeByIdRef.current[participant.identity] ?? 1,
-                );
-                audio.setVolume(deafenedRef.current ? 0 : userVol);
+                audio.setVolume(effective);
               }
             }
             sync();
           },
         )
-        .on(RoomEvent.TrackUnsubscribed, (track: RemoteTrack) => {
+        .on(RoomEvent.TrackUnsubscribed, (track: RemoteTrack, _pub: RemoteTrackPublication, participant?: RemoteParticipant) => {
           if (Platform.OS === 'web' && track.kind === Track.Kind.Audio) {
             for (const el of track.detach()) {
               remoteAudioElements.delete(el);
+              if (participant?.identity) {
+                remoteAudioByIdentity.get(participant.identity)?.delete(el);
+              }
               try {
                 el.pause();
                 el.remove();
@@ -568,18 +730,22 @@ export function useChatLiveVoice(conversationId: string | null): UseChatLiveVoic
           setVolumeById({});
           volumeByIdRef.current = {};
           deafenedRef.current = false;
-          if (
-            reason === DisconnectReason.DUPLICATE_IDENTITY ||
-            reason === DisconnectReason.CLIENT_INITIATED
-          ) {
+          // Another tab/PWA stole this identity — don't fight it with auto-rejoin.
+          if (reason === DisconnectReason.DUPLICATE_IDENTITY) {
+            expectConnectedRef.current = false;
             setStatus('idle');
             setError(null);
             return;
           }
+          // CLIENT_INITIATED often means freeze/pagehide (or engine drop), not user hangup.
+          // Keep expectConnected and show Retry; auto-rejoin when foregrounded.
           setStatus('error');
           setError(
             'Соединение с голосовым чатом оборвалось. Проверь интернет — иногда нужен VPN.',
           );
+          if (expectConnectedRef.current) {
+            scheduleAutoRejoin();
+          }
         })
         .on(RoomEvent.MediaDevicesError, (err: Error) => {
           // First mic attempt often fails on phones (voiceIsolation / exact deviceId);
@@ -605,6 +771,9 @@ export function useChatLiveVoice(conversationId: string | null): UseChatLiveVoic
           setError(
             'Не удалось установить соединение за 20 сек. Проверь интернет — иногда нужен VPN.',
           );
+          if (expectConnectedRef.current && !intentionalLeaveRef.current) {
+            scheduleAutoRejoin();
+          }
         });
       }, VOICE_CONNECT_TIMEOUT_MS);
 
@@ -622,6 +791,10 @@ export function useChatLiveVoice(conversationId: string | null): UseChatLiveVoic
         }
         return;
       }
+
+      // Connect registers freeze→disconnect; strip it so iOS background doesn't kick peers.
+      detachLivekitPageLeaveHandlers(room);
+      autoRejoinAttemptsRef.current = 0;
 
       if (Platform.OS === 'web') {
         try {
@@ -679,10 +852,15 @@ export function useChatLiveVoice(conversationId: string | null): UseChatLiveVoic
       await teardownRoom(room);
       setStatus('error');
       setError(voiceConnectErrorMessage(err));
+      if (expectConnectedRef.current && !intentionalLeaveRef.current) {
+        scheduleAutoRejoin();
+      }
     } finally {
       joiningRef.current = false;
     }
-  }, [conversationId, refreshParticipants, setUrgent, teardownRoom]);
+  }, [clearAutoRejoinTimer, conversationId, refreshParticipants, scheduleAutoRejoin, setUrgent, teardownRoom]);
+
+  joinRef.current = join;
 
   const toggleMute = useCallback(async () => {
     const room = roomRef.current;
@@ -817,12 +995,57 @@ export function useChatLiveVoice(conversationId: string | null): UseChatLiveVoic
   useEffect(() => {
     return () => {
       intentionalLeaveRef.current = true;
+      expectConnectedRef.current = false;
       joiningRef.current = false;
+      if (autoRejoinTimerRef.current) {
+        clearTimeout(autoRejoinTimerRef.current);
+        autoRejoinTimerRef.current = null;
+      }
       const room = roomRef.current;
       roomRef.current = null;
       void teardownRoom(room);
     };
   }, [teardownRoom]);
+
+  // Foreground after background drop (iOS freeze / network) → rejoin while session still wants media.
+  useEffect(() => {
+    const onForeground = () => {
+      if (intentionalLeaveRef.current || !expectConnectedRef.current) {
+        return;
+      }
+      if (!conversationIdRef.current || roomRef.current || joiningRef.current) {
+        return;
+      }
+      if (statusRef.current !== 'error' && statusRef.current !== 'idle') {
+        return;
+      }
+      tryAutoRejoin();
+    };
+
+    if (Platform.OS === 'web') {
+      if (typeof document === 'undefined') {
+        return;
+      }
+      const onVisibility = () => {
+        if (document.visibilityState === 'visible') {
+          onForeground();
+        }
+      };
+      document.addEventListener('visibilitychange', onVisibility);
+      window.addEventListener('pageshow', onForeground);
+      return () => {
+        document.removeEventListener('visibilitychange', onVisibility);
+        window.removeEventListener('pageshow', onForeground);
+      };
+    }
+
+    const sub = AppState.addEventListener('change', (next) => {
+      if (next === 'active') {
+        onForeground();
+      }
+    });
+    return () => sub.remove();
+  }, [tryAutoRejoin]);
 
   // Settings → live call: switch mic/speaker/camera without rejoining.
   useEffect(() => {
@@ -871,13 +1094,12 @@ export function useChatLiveVoice(conversationId: string | null): UseChatLiveVoic
     });
   }, [refreshParticipants]);
 
-  const conversationIdRef = useRef(conversationId);
   useEffect(() => {
-    const prev = conversationIdRef.current;
+    const prev = prevConversationIdRef.current;
     if (prev === conversationId) {
       return;
     }
-    conversationIdRef.current = conversationId;
+    prevConversationIdRef.current = conversationId;
     if (prev) {
       void leave();
     }

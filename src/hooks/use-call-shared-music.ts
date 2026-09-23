@@ -1,8 +1,10 @@
 import { useAudioPlayer, useAudioPlayerStatus } from 'expo-audio';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { Platform } from 'react-native';
 
 import type { ChatLiveVoiceStatus, RoomDataHandler } from '@/hooks/use-chat-live-voice';
 import { getMusicTrack } from '@/services/music/musicApi';
+import { unlockWebMediaPlayback } from '@/utils/unlock-web-media';
 
 export const CALL_MUSIC_TOPIC = 'adventura.music';
 
@@ -186,6 +188,13 @@ export type UseCallSharedMusicResult = {
   setLocalVolume: (volume: number) => void;
   setGlobalVolume: (volume: number) => Promise<void>;
   requestSync: () => void;
+  /** Push current Bard state (e.g. when a peer joins). */
+  republishState: () => void;
+  /**
+   * Call from a user gesture so Safari/Chrome allow remote Bard audio
+   * without requiring a click on the Bard tile.
+   */
+  resumeFromGesture: () => void;
   reset: () => void;
 };
 
@@ -232,9 +241,45 @@ export function useCallSharedMusic({
     }
   }, [player]);
 
+  const tryPlay = useCallback(() => {
+    if (deafenedRef.current) {
+      return;
+    }
+    if (!snapshotRef.current.playing || !snapshotRef.current.playUrl) {
+      return;
+    }
+    try {
+      player.play();
+    } catch {
+      // AbortError / NotAllowedError — resumeFromGesture retries
+    }
+  }, [player]);
+
+  const resumeFromGesture = useCallback(() => {
+    unlockWebMediaPlayback();
+    tryPlay();
+  }, [tryPlay]);
+
   useEffect(() => {
     applyPlayerVolume();
   }, [applyPlayerVolume, effectiveVolume]);
+
+  // Web autoplay: remote play() is blocked until a gesture. Accept/Start unlocks
+  // the document; any later tap in the tab retries the actual expo-audio element.
+  useEffect(() => {
+    if (Platform.OS !== 'web' || !enabled) {
+      return;
+    }
+    const onGesture = () => {
+      resumeFromGesture();
+    };
+    window.addEventListener('pointerdown', onGesture, true);
+    window.addEventListener('keydown', onGesture, true);
+    return () => {
+      window.removeEventListener('pointerdown', onGesture, true);
+      window.removeEventListener('keydown', onGesture, true);
+    };
+  }, [enabled, resumeFromGesture]);
 
   const buildWire = useCallback((next: CallMusicSnapshot): MusicWirePayload => {
     return {
@@ -310,11 +355,7 @@ export function useCallSharedMusic({
         }
         applyPlayerVolume();
         if (shouldPlay) {
-          try {
-            player.play();
-          } catch {
-            // AbortError on race
-          }
+          tryPlay();
         } else {
           try {
             player.pause();
@@ -326,7 +367,7 @@ export function useCallSharedMusic({
         // source swap failed — leave idle
       }
     },
-    [applyPlayerVolume, player],
+    [applyPlayerVolume, player, tryPlay],
   );
 
   const applyRemoteState = useCallback(
@@ -410,19 +451,19 @@ export function useCallSharedMusic({
           // ignore
         }
         applyPlayerVolume();
-        try {
-          if (next.playing) {
-            player.play();
-          } else {
+        if (next.playing) {
+          tryPlay();
+        } else {
+          try {
             player.pause();
+          } catch {
+            // ignore
           }
-        } catch {
-          // ignore
         }
       }
       applyingRemoteRef.current = false;
     },
-    [applyPlayerVolume, loadFromPlayUrl, player, stopLocalPlayback],
+    [applyPlayerVolume, loadFromPlayUrl, player, stopLocalPlayback, tryPlay],
   );
 
   const applyRemoteStateRef = useRef(applyRemoteState);
@@ -688,16 +729,16 @@ export function useCallSharedMusic({
     const playing = !snapshotRef.current.playing;
     const positionSec = readLocalPosition();
     await commitLocal({ playing, positionSec });
-    try {
-      if (playing) {
-        player.play();
-      } else {
+    if (playing) {
+      tryPlay();
+    } else {
+      try {
         player.pause();
+      } catch {
+        // ignore
       }
-    } catch {
-      // ignore
     }
-  }, [commitLocal, player, readLocalPosition]);
+  }, [commitLocal, player, readLocalPosition, tryPlay]);
 
   const seek = useCallback(
     async (positionSec: number) => {
@@ -716,13 +757,13 @@ export function useCallSharedMusic({
       try {
         await player.seekTo(nextPos);
         if (snapshotRef.current.playing) {
-          player.play();
+          tryPlay();
         }
       } catch {
         // ignore
       }
     },
-    [commitLocal, player],
+    [commitLocal, player, tryPlay],
   );
 
   const stopTrack = useCallback(async () => {
@@ -772,6 +813,42 @@ export function useCallSharedMusic({
     }
     void publishRoomData(CALL_MUSIC_TOPIC, { type: 'music_request', at: Date.now() });
   }, [liveStatus, publishRoomData]);
+
+  const republishState = useCallback(() => {
+    const current = snapshotRef.current;
+    if (liveStatus !== 'connected' || !current.bardPresent) {
+      return;
+    }
+    void publishRoomData(CALL_MUSIC_TOPIC, buildWire(current));
+  }, [buildWire, liveStatus, publishRoomData]);
+
+  // Remote play often lands before the HTMLAudioElement is unlocked — retry a few times.
+  useEffect(() => {
+    if (!enabled || !snapshot.playing || deafened || !snapshot.playUrl) {
+      return;
+    }
+    if (status.playing) {
+      return;
+    }
+    tryPlay();
+    const t1 = setTimeout(() => tryPlay(), 200);
+    const t2 = setTimeout(() => tryPlay(), 800);
+    const t3 = setTimeout(() => tryPlay(), 2000);
+    return () => {
+      clearTimeout(t1);
+      clearTimeout(t2);
+      clearTimeout(t3);
+    };
+  }, [
+    deafened,
+    enabled,
+    snapshot.playUrl,
+    snapshot.playing,
+    snapshot.trackId,
+    snapshot.at,
+    status.playing,
+    tryPlay,
+  ]);
 
   // When track ends for the controller, advance to the next queue item.
   useEffect(() => {
@@ -846,6 +923,8 @@ export function useCallSharedMusic({
     setLocalVolume,
     setGlobalVolume,
     requestSync,
+    republishState,
+    resumeFromGesture,
     reset,
   };
 }
