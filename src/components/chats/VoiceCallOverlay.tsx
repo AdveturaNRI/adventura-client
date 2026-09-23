@@ -53,6 +53,8 @@ type OverlayTile = {
   isBard?: boolean;
   bardPlaque?: string | null;
   bardPlaying?: boolean;
+  /** Local track buffering — spinner around Bard avatar. */
+  bardLoading?: boolean;
 };
 
 export type VoiceCallWaitingPeer = {
@@ -98,6 +100,7 @@ type Props = {
   bardPresent?: boolean;
   bardTrackTitle?: string | null;
   bardPlaying?: boolean;
+  bardLoading?: boolean;
   bardTrackId?: string | null;
   bardCurrentEntryId?: string | null;
   bardQueue?: CallMusicQueueEntry[];
@@ -806,11 +809,26 @@ function ParticipantTile({
                   {tile.isBard ? (
                     <BardPlayingAura size={ringBox} active={Boolean(tile.bardPlaying)} />
                   ) : null}
+                  {tile.isBard && tile.bardLoading ? (
+                    <View
+                      pointerEvents="none"
+                      style={[
+                        styles.bardLoadingRing,
+                        {
+                          width: ringBox + 10,
+                          height: ringBox + 10,
+                          borderRadius: (ringBox + 10) / 2,
+                        },
+                      ]}>
+                      <ActivityIndicator size="small" color="#84B9FF" />
+                    </View>
+                  ) : null}
                   <View
                     style={[
                       styles.avatarRing,
                       tile.isBard && styles.bardRing,
                       tile.isBard && tile.bardPlaying && styles.bardRingPlaying,
+                      tile.isBard && tile.bardLoading && styles.bardRingLoading,
                       {
                         width: ringBox,
                         height: ringBox,
@@ -1104,6 +1122,7 @@ export function VoiceCallOverlay({
   bardPresent = false,
   bardTrackTitle = null,
   bardPlaying = false,
+  bardLoading = false,
   bardTrackId = null,
   bardCurrentEntryId = null,
   bardQueue = [],
@@ -1312,6 +1331,7 @@ export function VoiceCallOverlay({
         isBard: true,
         bardPlaque: bardTrackTitle,
         bardPlaying,
+        bardLoading,
         volume: clamp01(bardLocalVolume),
       });
     }
@@ -1330,6 +1350,7 @@ export function VoiceCallOverlay({
     });
   }, [
     bardLocalVolume,
+    bardLoading,
     bardPlaying,
     bardPresent,
     bardTrackTitle,
@@ -1900,6 +1921,7 @@ export function VoiceCallOverlay({
       trackTitle={bardTrackTitle}
       currentEntryId={bardCurrentEntryId}
       playing={bardPlaying}
+      trackLoading={bardLoading}
       positionSec={bardPositionSec}
       durationSec={bardDurationSec}
       globalVolume={bardGlobalVolume}
@@ -2262,6 +2284,19 @@ const styles = StyleSheet.create({
     shadowRadius: 12,
     shadowOffset: { width: 0, height: 0 },
     elevation: 6,
+  },
+  bardRingLoading: {
+    borderColor: 'rgba(132, 185, 255, 0.55)',
+    opacity: 0.92,
+  },
+  bardLoadingRing: {
+    position: 'absolute',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: 'rgba(132, 185, 255, 0.45)',
+    backgroundColor: 'rgba(8, 16, 28, 0.35)',
+    zIndex: 4,
   },
   bardAvatar: {
     alignItems: 'center',

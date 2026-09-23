@@ -88,6 +88,7 @@ const EMPTY_WEB_STATUS: WebBardAudioStatus = {
   currentTime: 0,
   duration: 0,
   ended: false,
+  buffering: false,
 };
 
 function clamp01(value: number) {
@@ -197,6 +198,8 @@ export type UseCallSharedMusicResult = {
   snapshot: CallMusicSnapshot;
   /** Shared playback intent — drives play/pause icon for everyone. */
   isPlaying: boolean;
+  /** Local track is buffering / starting — spinner in player + around Bard tile. */
+  trackLoading: boolean;
   livePositionSec: number;
   durationSec: number;
   localVolume: number;
@@ -238,6 +241,7 @@ export function useCallSharedMusic({
   const [snapshot, setSnapshot] = useState<CallMusicSnapshot>(EMPTY_SNAPSHOT);
   const [localVolume, setLocalVolumeState] = useState(1);
   const [webStatus, setWebStatus] = useState<WebBardAudioStatus>(EMPTY_WEB_STATUS);
+  const [trackLoading, setTrackLoading] = useState(false);
 
   const snapshotRef = useRef(snapshot);
   snapshotRef.current = snapshot;
@@ -316,9 +320,19 @@ export function useCallSharedMusic({
     }
   }, [nativePlayer]);
 
+  /** Gesture right before starting a known URL — no silent play/pause race. */
+  const armPlaybackGesture = useCallback(() => {
+    unlockWebMediaPlayback();
+    if (isWeb) {
+      webEngineRef.current?.resumeContextFromGesture();
+      return;
+    }
+  }, []);
+
   const stopLocalPlayback = useCallback(() => {
     loadGenRef.current += 1;
     loadedKeyRef.current = null;
+    setTrackLoading(false);
     if (isWeb) {
       webEngineRef.current?.stop();
       return;
@@ -348,13 +362,18 @@ export function useCallSharedMusic({
       const seekTo = Math.max(0, positionSec + (shouldPlay ? lagSec : 0));
       const play = shouldPlay && !deafenedRef.current;
 
+      if (play) {
+        setTrackLoading(true);
+      }
+
       if (isWeb) {
         const engine = webEngineRef.current;
         if (!engine) {
+          setTrackLoading(false);
           return;
         }
         loadedKeyRef.current = loadKey;
-        await engine.load({
+        const ok = await engine.load({
           key: loadKey,
           playUrl,
           shouldPlay: play,
@@ -364,6 +383,9 @@ export function useCallSharedMusic({
           return;
         }
         applyVolume();
+        if (!play || ok || engine.getStatus().playing) {
+          setTrackLoading(false);
+        }
         return;
       }
 
@@ -397,6 +419,7 @@ export function useCallSharedMusic({
           // ignore
         }
       }
+      setTrackLoading(false);
     },
     [applyVolume, nativePlayer],
   );
@@ -626,6 +649,7 @@ export function useCallSharedMusic({
     setSnapshot(EMPTY_SNAPSHOT);
     setLocalVolumeState(1);
     localVolumeRef.current = 1;
+    setTrackLoading(false);
   }, [stopLocalPlayback]);
 
   useEffect(() => {
@@ -718,8 +742,8 @@ export function useCallSharedMusic({
       if (!id) {
         return;
       }
-      // Gesture turn — unlock BEFORE any await.
-      resumeFromGesture();
+      // Gesture turn — unlock context BEFORE any await (no silent play race).
+      armPlaybackGesture();
 
       let playUrl = knownPlayUrl?.trim() || null;
       let title = trackTitle?.trim() || null;
@@ -787,9 +811,9 @@ export function useCallSharedMusic({
         void loadFromPlayUrl(entry.trackId, entry.playUrl, true, 0, Date.now());
         return;
       }
-      void commitLocal({ queue }, { allowAnyone: true, bumpQueue: true });
+      await commitLocal({ queue }, { allowAnyone: true, bumpQueue: true });
     },
-    [commitLocal, loadFromPlayUrl, readLocalPosition, resumeFromGesture],
+    [armPlaybackGesture, commitLocal, loadFromPlayUrl, readLocalPosition],
   );
 
   const removeQueueEntry = useCallback(
@@ -813,7 +837,7 @@ export function useCallSharedMusic({
       }
       const nextEntry = queue[0] ?? null;
       if (nextEntry && canControlRef.current) {
-        resumeFromGesture();
+        armPlaybackGesture();
         await commitLocal(
           {
             queue,
@@ -849,7 +873,7 @@ export function useCallSharedMusic({
         { allowAnyone: true, bumpQueue: true },
       );
     },
-    [commitLocal, loadFromPlayUrl, resumeFromGesture, stopLocalPlayback],
+    [armPlaybackGesture, commitLocal, loadFromPlayUrl, stopLocalPlayback],
   );
 
   const playQueueEntry = useCallback(
@@ -861,7 +885,8 @@ export function useCallSharedMusic({
       if (!entry) {
         return;
       }
-      resumeFromGesture();
+      // Same gesture turn as the tap — do not silent-unlock (that raced and muted iOS).
+      armPlaybackGesture();
       void commitLocal({
         currentEntryId: entry.entryId,
         trackId: entry.trackId,
@@ -872,7 +897,7 @@ export function useCallSharedMusic({
       });
       void loadFromPlayUrl(entry.trackId, entry.playUrl, true, 0, Date.now());
     },
-    [commitLocal, loadFromPlayUrl, resumeFromGesture],
+    [armPlaybackGesture, commitLocal, loadFromPlayUrl],
   );
 
   const togglePlay = useCallback(async () => {
@@ -889,7 +914,7 @@ export function useCallSharedMusic({
     }
     toggleInFlightRef.current = true;
     try {
-      resumeFromGesture();
+      armPlaybackGesture();
       const positionSec = readLocalPosition();
       const snap = snapshotRef.current;
 
@@ -899,23 +924,25 @@ export function useCallSharedMusic({
         if (loadedKeyRef.current !== key) {
           void loadFromPlayUrl(snap.trackId!, snap.playUrl!, true, positionSec, Date.now());
         } else {
-          void ensurePlaying();
+          setTrackLoading(true);
+          void ensurePlaying().finally(() => setTrackLoading(false));
         }
         return;
       }
 
       void commitLocal({ playing: false, positionSec });
+      setTrackLoading(false);
       pauseLocal();
     } finally {
       toggleInFlightRef.current = false;
     }
   }, [
+    armPlaybackGesture,
     commitLocal,
     ensurePlaying,
     loadFromPlayUrl,
     pauseLocal,
     readLocalPosition,
-    resumeFromGesture,
   ]);
 
   const seek = useCallback(
@@ -1106,12 +1133,28 @@ export function useCallSharedMusic({
       : snapshot.queue.find((item) => item.entryId === snapshot.currentEntryId)?.durationSec ||
         0;
 
+  // Keep spinner while engine reports buffering.
+  useEffect(() => {
+    if (!isWeb) {
+      return;
+    }
+    if (webStatus.buffering && snapshot.playing) {
+      setTrackLoading(true);
+      return;
+    }
+    if (webStatus.playing && !webStatus.buffering) {
+      setTrackLoading(false);
+    }
+  }, [snapshot.playing, webStatus.buffering, webStatus.playing]);
+
   // Icon follows shared intent so Play never "lies" after a failed local start.
   const isPlaying = Boolean(snapshot.playing);
+  const showTrackLoading = Boolean(trackLoading && snapshot.playing);
 
   return {
     snapshot,
     isPlaying,
+    trackLoading: showTrackLoading,
     livePositionSec,
     durationSec,
     localVolume,

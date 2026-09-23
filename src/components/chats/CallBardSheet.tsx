@@ -57,6 +57,8 @@ type Props = {
   onRequestSync?: () => void;
   /** Unlock web audio inside press-in (iOS Safari). */
   onAudioGesture?: () => void;
+  /** Local buffering / starting track. */
+  trackLoading?: boolean;
 };
 
 type LibraryBrowse =
@@ -111,6 +113,7 @@ export function CallBardSheet({
   durationSec,
   globalVolume,
   queue,
+  trackLoading = false,
   onClose,
   onEnqueueTrack,
   onPlayQueueEntry,
@@ -397,10 +400,19 @@ export function CallBardSheet({
           ? `Добавить и включить ${track.title}`
           : `Добавить ${track.title} в очередь`
       }
-      onPressIn={() => onAudioGesture?.()}
-      onPress={() =>
-        onEnqueueTrack(track.id, track.title, track.durationSec ?? null, track.url)
-      }
+      onPressIn={() => {
+        if (canControl && Platform.OS === 'web') {
+          onEnqueueTrack(track.id, track.title, track.durationSec ?? null, track.url);
+          return;
+        }
+        onAudioGesture?.();
+      }}
+      onPress={() => {
+        if (Platform.OS === 'web' && canControl) {
+          return;
+        }
+        onEnqueueTrack(track.id, track.title, track.durationSec ?? null, track.url);
+      }}
       style={({ pressed }) => [styles.row, pressed && styles.pressed]}>
       <Ionicons
         name={canControl ? 'play-circle-outline' : 'add-circle-outline'}
@@ -454,16 +466,22 @@ export function CallBardSheet({
               <View style={styles.transport}>
                 <Pressable
                   accessibilityRole="button"
-                  accessibilityLabel={playing ? 'Пауза' : 'Играть'}
-                  disabled={!trackId}
+                  accessibilityLabel={
+                    trackLoading ? 'Загрузка' : playing ? 'Пауза' : 'Играть'
+                  }
+                  disabled={!trackId || trackLoading}
                   onPressIn={() => onAudioGesture?.()}
                   onPress={onTogglePlay}
                   style={({ pressed }) => [
                     styles.transportBtn,
-                    !trackId && styles.dimmed,
+                    (!trackId || trackLoading) && styles.dimmed,
                     pressed && styles.pressed,
                   ]}>
-                  <Ionicons name={playing ? 'pause' : 'play'} size={18} color="#FFFFFF" />
+                  {trackLoading ? (
+                    <ActivityIndicator size="small" color="#FFFFFF" />
+                  ) : (
+                    <Ionicons name={playing ? 'pause' : 'play'} size={18} color="#FFFFFF" />
+                  )}
                 </Pressable>
                 <Pressable
                   accessibilityRole="button"
@@ -554,17 +572,31 @@ export function CallBardSheet({
                   <View key={entry.entryId} style={[styles.row, active && styles.rowActive]}>
                     <Pressable
                       accessibilityRole="button"
-                      disabled={!canControl}
-                      onPressIn={() => onAudioGesture?.()}
+                      disabled={!canControl || trackLoading}
+                      onPressIn={() => {
+                        // iOS: start in press-in — strongest user-activation window.
+                        if (canControl && Platform.OS === 'web') {
+                          onPlayQueueEntry(entry.entryId);
+                          return;
+                        }
+                        onAudioGesture?.();
+                      }}
                       onPress={() => {
-                        if (canControl) {
+                        if (!canControl) {
+                          return;
+                        }
+                        if (Platform.OS !== 'web') {
                           onPlayQueueEntry(entry.entryId);
                         }
                       }}
                       style={styles.rowMain}>
-                      <Text style={[styles.rowIndex, active && styles.rowIndexActive]}>
-                        {index + 1}
-                      </Text>
+                      {trackLoading && active ? (
+                        <ActivityIndicator size="small" color="#84B9FF" />
+                      ) : (
+                        <Text style={[styles.rowIndex, active && styles.rowIndexActive]}>
+                          {index + 1}
+                        </Text>
+                      )}
                       <View style={styles.rowCopy}>
                         <Text style={styles.rowTitle} numberOfLines={1}>
                           {entry.title}

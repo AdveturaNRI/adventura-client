@@ -1063,6 +1063,7 @@ export function VoiceCallProvider({ children }: { children: ReactNode }) {
           bardPresent={sharedMusic.snapshot.bardPresent}
           bardTrackTitle={sharedMusic.snapshot.trackTitle}
           bardPlaying={sharedMusic.isPlaying}
+          bardLoading={sharedMusic.trackLoading}
           bardTrackId={sharedMusic.snapshot.trackId}
           bardCurrentEntryId={sharedMusic.snapshot.currentEntryId}
           bardQueue={sharedMusic.snapshot.queue}
