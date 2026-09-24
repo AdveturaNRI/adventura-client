@@ -216,6 +216,14 @@ function createStyles(
       paddingHorizontal: isDesktopWeb ? Spacing.xl : isMobileNative ? Spacing.md : Spacing.lg,
       minHeight: 0,
     },
+    listHeader: {
+      flexGrow: 0,
+      flexShrink: 0,
+      width: '100%',
+      maxWidth: isDesktopWeb ? DESKTOP_DECK_MAX_WIDTH : undefined,
+      alignSelf: 'center',
+      paddingHorizontal: isDesktopWeb ? Spacing.xl : isMobileNative ? Spacing.md : Spacing.lg,
+    },
     header: {
       flexShrink: 0,
       gap: isMobileNative ? Spacing.sm : Spacing.xs,
@@ -1330,7 +1338,7 @@ export function WandererDeck({
 
     return (
       <View style={styles.root}>
-        <View style={styles.inner}>{renderHeader(subtitle)}</View>
+        <View style={styles.listHeader}>{renderHeader(subtitle)}</View>
         {/* ScrollView spans the full content pane so wheel works on side margins too. */}
         <ScrollView
           style={styles.listScroll}
