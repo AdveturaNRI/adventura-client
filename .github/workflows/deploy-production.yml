@@ -50,8 +50,10 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          # mode=max often hangs for minutes on "exporting to GitHub Actions Cache"
+          # (huge layer upload after the image is already pushed). min is enough here.
           cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-to: type=gha,mode=min,ignore-error=true
           build-args: |
             EXPO_PUBLIC_API_URL=https://api.adventu.ru/api
             EXPO_PUBLIC_VK_APP_ID=${{ secrets.EXPO_PUBLIC_VK_APP_ID }}
