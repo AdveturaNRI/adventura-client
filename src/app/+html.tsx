@@ -70,85 +70,61 @@ body {
 }
 
 /*
- * In-app toasts: never trust Pressable/button fill on web (Safari → white).
- * Shell + .adventura-toast-hit get hard theme fills; title/action colors match.
+ * In-app toasts: theme comes ONLY from .adventura-toast--dark/--light on the card.
+ * Do NOT couple fills to html[data-theme] — stale data-theme="light" used to beat
+ * --dark (higher specificity) and paint a white card over white React text.
  */
-.adventura-toast,
-.adventura-toast .adventura-toast-hit {
+.adventura-toast {
   -webkit-appearance: none !important;
   appearance: none !important;
   background-image: none !important;
 }
 
-.adventura-toast button {
-  -webkit-appearance: none !important;
-  appearance: none !important;
-  background: transparent !important;
-  background-color: transparent !important;
-  background-image: none !important;
-  border: none !important;
-  box-shadow: none !important;
-}
-
-.adventura-toast--dark,
-.adventura-toast--dark .adventura-toast-hit,
-html[data-theme="dark"] .adventura-toast,
-html[data-theme="dark"] .adventura-toast .adventura-toast-hit {
+.adventura-toast.adventura-toast--dark {
   background: #1c1c1e !important;
   background-color: #1c1c1e !important;
   border-color: #38383a !important;
   color: #ffffff !important;
 }
 
-.adventura-toast--dark .adventura-toast-title,
-html[data-theme="dark"] .adventura-toast-title {
+.adventura-toast.adventura-toast--dark .adventura-toast-title {
   color: #ffffff !important;
 }
 
-.adventura-toast--dark .adventura-toast-message,
-html[data-theme="dark"] .adventura-toast-message {
+.adventura-toast.adventura-toast--dark .adventura-toast-message {
   color: #c7c7cc !important;
 }
 
-.adventura-toast--dark .adventura-toast-action,
-html[data-theme="dark"] .adventura-toast-action {
+.adventura-toast.adventura-toast--dark .adventura-toast-action {
   background: rgba(21, 122, 254, 0.28) !important;
   background-color: rgba(21, 122, 254, 0.28) !important;
 }
 
-.adventura-toast--dark .adventura-toast-action-label,
-html[data-theme="dark"] .adventura-toast-action-label {
+.adventura-toast.adventura-toast--dark .adventura-toast-action-label {
   color: #84b9ff !important;
 }
 
-.adventura-toast--light,
-.adventura-toast--light .adventura-toast-hit,
-html[data-theme="light"] .adventura-toast,
-html[data-theme="light"] .adventura-toast .adventura-toast-hit {
+.adventura-toast.adventura-toast--light {
   background: #ffffff !important;
   background-color: #ffffff !important;
   border-color: #e8e8e8 !important;
   color: #000000 !important;
 }
 
-.adventura-toast--light .adventura-toast-title,
-html[data-theme="light"] .adventura-toast-title {
+.adventura-toast.adventura-toast--light .adventura-toast-title {
   color: #000000 !important;
 }
 
-.adventura-toast--light .adventura-toast-message,
-html[data-theme="light"] .adventura-toast-message {
+.adventura-toast.adventura-toast--light .adventura-toast-message {
   color: #4c4c4c !important;
 }
 
-.adventura-toast--light .adventura-toast-action,
-html[data-theme="light"] .adventura-toast-action {
+.adventura-toast.adventura-toast--light .adventura-toast-action {
   background: rgba(21, 122, 254, 0.12) !important;
   background-color: rgba(21, 122, 254, 0.12) !important;
 }
 
-.adventura-toast--light .adventura-toast-action-label,
-html[data-theme="light"] .adventura-toast-action-label {
+.adventura-toast.adventura-toast--light .adventura-toast-action-label {
   color: #157afe !important;
 }
 

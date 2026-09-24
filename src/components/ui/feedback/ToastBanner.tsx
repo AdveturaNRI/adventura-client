@@ -1,4 +1,4 @@
-import type { ComponentProps } from 'react';
+import { createElement, useLayoutEffect, useRef, type ComponentProps } from 'react';
 import { Ionicons } from '@expo/vector-icons';
 import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import Toast, { type ToastConfigParams } from 'react-native-toast-message';
@@ -19,6 +19,25 @@ type ToastBannerProps = ToastConfigParams<Record<string, unknown>> & {
 };
 
 type IconName = ComponentProps<typeof Ionicons>['name'];
+
+const TOAST_THEME = {
+  dark: {
+    bg: '#1C1C1E',
+    fg: '#FFFFFF',
+    muted: '#C7C7CC',
+    border: '#38383A',
+    actionBg: 'rgba(21, 122, 254, 0.28)',
+    actionFg: '#84B9FF',
+  },
+  light: {
+    bg: '#FFFFFF',
+    fg: '#000000',
+    muted: '#4C4C4C',
+    border: '#E8E8E8',
+    actionBg: 'rgba(21, 122, 254, 0.12)',
+    actionFg: '#157AFE',
+  },
+} as const;
 
 function createStyles(colors: ThemeColors) {
   const isDark = colors.background === '#000000';
@@ -192,11 +211,29 @@ function resolveSealIcon(emphasis: ToastEmphasis, variant: ToastVariant): IconNa
   return 'notifications';
 }
 
+function paintToastNode(node: HTMLElement | null, isDark: boolean) {
+  if (!node?.style) {
+    return;
+  }
+  const theme = isDark ? TOAST_THEME.dark : TOAST_THEME.light;
+  node.style.setProperty('background', theme.bg, 'important');
+  node.style.setProperty('background-color', theme.bg, 'important');
+  node.style.setProperty('border-color', theme.border, 'important');
+  node.style.setProperty('color', theme.fg, 'important');
+}
+
 export function ToastBanner({ text1, text2, variant, props }: ToastBannerProps) {
   const colors = useTheme();
   const { colorScheme } = useThemePreference();
   const isDark = colorScheme === 'dark';
+  const theme = isDark ? TOAST_THEME.dark : TOAST_THEME.light;
   const styles = useThemedStyles(createStyles);
+  const cardRef = useRef<HTMLDivElement | null>(null);
+  const titleRef = useRef<HTMLElement | null>(null);
+  const messageRef = useRef<HTMLElement | null>(null);
+  const actionRef = useRef<HTMLElement | null>(null);
+  const actionLabelRef = useRef<HTMLElement | null>(null);
+
   const spec = getToastSpecs(colors).find((item) => item.variant === variant)!;
   const alignment = (props?.alignment as ToastAlignment | undefined) ?? 'center';
   const actionLabel = typeof props?.actionLabel === 'string' ? props.actionLabel : undefined;
@@ -214,15 +251,37 @@ export function ToastBanner({ text1, text2, variant, props }: ToastBannerProps) 
   const iconName = resolveIconName(emphasis, spec.icon);
   const showAvatar = Boolean(avatarName);
   const sealIcon = resolveSealIcon(emphasis, variant);
+  const isInteractive = Boolean(actionLabel && onAction);
 
   const handleAction = () => {
     onAction?.();
     Toast.hide();
   };
 
-  // react-native-toast-message defaults onPress to a noop — Boolean(onPress) is always
-  // true and forces a web <button>, which Safari paints white over dark theme text.
-  const isInteractive = Boolean(actionLabel && onAction);
+  useLayoutEffect(() => {
+    if (Platform.OS !== 'web') {
+      return;
+    }
+    // Keep <html data-theme> in sync before paint — stale "light" used to win
+    // over .adventura-toast--dark and force a white card with white text.
+    if (typeof document !== 'undefined') {
+      document.documentElement.dataset.theme = colorScheme;
+    }
+    paintToastNode(cardRef.current, isDark);
+    if (titleRef.current?.style) {
+      titleRef.current.style.setProperty('color', theme.fg, 'important');
+    }
+    if (messageRef.current?.style) {
+      messageRef.current.style.setProperty('color', theme.muted, 'important');
+    }
+    if (actionRef.current?.style) {
+      actionRef.current.style.setProperty('background', theme.actionBg, 'important');
+      actionRef.current.style.setProperty('background-color', theme.actionBg, 'important');
+    }
+    if (actionLabelRef.current?.style) {
+      actionLabelRef.current.style.setProperty('color', theme.actionFg, 'important');
+    }
+  }, [colorScheme, isDark, theme]);
 
   const leading = showAvatar ? (
     <View style={styles.leading}>
@@ -230,6 +289,7 @@ export function ToastBanner({ text1, text2, variant, props }: ToastBannerProps) 
       <View
         style={[
           styles.avatarSeal,
+          { borderColor: theme.bg },
           variant === 'warning' ? styles.avatarSealWarning : null,
           variant === 'success' ? styles.avatarSealSuccess : null,
         ]}>
@@ -252,10 +312,17 @@ export function ToastBanner({ text1, text2, variant, props }: ToastBannerProps) 
       <View style={styles.content}>
         {text1 ? (
           <Text
+            ref={
+              Platform.OS === 'web'
+                ? (node) => {
+                    titleRef.current = node as unknown as HTMLElement | null;
+                  }
+                : undefined
+            }
             {...(Platform.OS === 'web' ? ({ className: 'adventura-toast-title' } as object) : null)}
             style={[
               styles.title,
-              { color: colors.text },
+              { color: theme.fg },
               emphasis !== 'default' ? styles.titleEmphasis : null,
             ]}
             numberOfLines={2}>
@@ -264,10 +331,17 @@ export function ToastBanner({ text1, text2, variant, props }: ToastBannerProps) 
         ) : null}
         {message ? (
           <Text
+            ref={
+              Platform.OS === 'web'
+                ? (node) => {
+                    messageRef.current = node as unknown as HTMLElement | null;
+                  }
+                : undefined
+            }
             {...(Platform.OS === 'web'
               ? ({ className: 'adventura-toast-message' } as object)
               : null)}
-            style={[styles.message, { color: colors.textSecondary }]}
+            style={[styles.message, { color: theme.muted }]}
             numberOfLines={4}>
             {message}
           </Text>
@@ -275,17 +349,28 @@ export function ToastBanner({ text1, text2, variant, props }: ToastBannerProps) 
       </View>
       {actionLabel && onAction ? (
         <View
+          ref={
+            Platform.OS === 'web'
+              ? (node) => {
+                  actionRef.current = node as unknown as HTMLElement | null;
+                }
+              : undefined
+          }
           {...(Platform.OS === 'web' ? ({ className: 'adventura-toast-action' } as object) : null)}
-          style={styles.actionButton}
+          style={[styles.actionButton, { backgroundColor: theme.actionBg }]}
           pointerEvents="none">
           <Text
+            ref={
+              Platform.OS === 'web'
+                ? (node) => {
+                    actionLabelRef.current = node as unknown as HTMLElement | null;
+                  }
+                : undefined
+            }
             {...(Platform.OS === 'web'
               ? ({ className: 'adventura-toast-action-label' } as object)
               : null)}
-            style={[
-              styles.actionLabel,
-              { color: isDark ? colors.primaryLight : colors.primary },
-            ]}>
+            style={[styles.actionLabel, { color: theme.actionFg }]}>
             {actionLabel}
           </Text>
         </View>
@@ -293,91 +378,97 @@ export function ToastBanner({ text1, text2, variant, props }: ToastBannerProps) 
     </>
   );
 
-  // Web: theme modifier class + CSS vars. Hard colors live in +html.tsx (!important) so
-  // Safari cannot leave a white Pressable over white/dark text.
-  const webThemeVars =
-    Platform.OS === 'web'
-      ? ({
-          ['--adventura-toast-bg']: colors.surface,
-          ['--adventura-toast-fg']: colors.text,
-          ['--adventura-toast-muted']: colors.textSecondary,
-          ['--adventura-toast-border']: colors.border,
-          ['--adventura-toast-action-bg']: isDark
-            ? 'rgba(21, 122, 254, 0.22)'
-            : 'rgba(21, 122, 254, 0.12)',
-          ['--adventura-toast-action-fg']: isDark ? colors.primaryLight : colors.primary,
-          backgroundColor: colors.surface,
-          background: colors.surface,
-          color: colors.text,
-          borderColor: colors.border,
-        } as Record<string, string>)
-      : null;
+  const borderColor =
+    emphasis !== 'default' && variant === 'warning'
+      ? isDark
+        ? 'rgba(255, 159, 10, 0.5)'
+        : 'rgba(255, 159, 10, 0.35)'
+      : emphasis === 'alert' || emphasis === 'chat'
+        ? isDark
+          ? 'rgba(75, 153, 255, 0.45)'
+          : 'rgba(21, 122, 254, 0.28)'
+        : theme.border;
+
+  // Web: plain <div> — RN View/Pressable keep getting UA white fills in Safari.
+  if (Platform.OS === 'web') {
+    const toastClassName = isDark
+      ? 'adventura-toast adventura-toast--dark'
+      : 'adventura-toast adventura-toast--light';
+
+    return (
+      <View pointerEvents="box-none" style={[styles.outer, getAlignmentStyle(alignment, styles)]}>
+        {createElement(
+          'div',
+          {
+            ref: cardRef,
+            className: toastClassName,
+            'aria-label': isInteractive ? (actionLabel ?? text1 ?? 'Уведомление') : undefined,
+            tabIndex: isInteractive ? 0 : undefined,
+            onClick: isInteractive ? handleAction : undefined,
+            onKeyDown: isInteractive
+              ? (event: { key: string; preventDefault: () => void }) => {
+                  if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault();
+                    handleAction();
+                  }
+                }
+              : undefined,
+            style: {
+              width: alignment === 'center' ? '100%' : 'auto',
+              minWidth: alignment === 'center' ? undefined : 300,
+              maxWidth: Layout.maxContentWidth,
+              boxSizing: 'border-box',
+              borderRadius: 16,
+              borderWidth: 1,
+              borderStyle: 'solid',
+              borderColor,
+              backgroundColor: theme.bg,
+              background: theme.bg,
+              color: theme.fg,
+              overflow: 'hidden',
+              cursor: isInteractive ? 'pointer' : 'default',
+              boxShadow: isDark
+                ? '0 10px 22px rgba(0,0,0,0.55)'
+                : '0 10px 22px rgba(0,0,0,0.14)',
+              display: 'flex',
+              flexDirection: 'row',
+              alignItems: 'center',
+              gap: Spacing.sm + 2,
+              paddingTop: 12,
+              paddingBottom: 12,
+              paddingLeft: Spacing.md,
+              paddingRight: Spacing.md,
+            },
+          },
+          body,
+        )}
+      </View>
+    );
+  }
 
   const cardStyle = [
     styles.card,
-    webThemeVars,
     {
-      backgroundColor: colors.surface,
-      borderColor: colors.border,
+      backgroundColor: theme.bg,
+      borderColor,
     },
     alignment !== 'center' ? styles.cardShrink : null,
-    emphasis === 'alert' ? styles.cardAlert : null,
-    emphasis === 'chat' ? styles.cardChat : null,
-    emphasis !== 'default' && variant === 'warning' ? styles.cardWarningEmphasis : null,
   ];
-
-  const toastClassName = isDark
-    ? 'adventura-toast adventura-toast--dark'
-    : 'adventura-toast adventura-toast--light';
-
-  // Web: never use Pressable / role=button — Safari paints those white and kills contrast.
-  // Native keeps Pressable for press feedback.
-  const inner =
-    Platform.OS === 'web' ? (
-      <View
-        {...({
-          className: 'adventura-toast-hit',
-          // No accessibilityRole/role="button" — WebKit UA stylesheet forces white fill.
-          'aria-label': isInteractive ? (actionLabel ?? text1 ?? 'Уведомление') : undefined,
-          tabIndex: isInteractive ? 0 : undefined,
-          onClick: isInteractive ? handleAction : undefined,
-          onKeyDown: isInteractive
-            ? (event: { key: string; preventDefault: () => void }) => {
-                if (event.key === 'Enter' || event.key === ' ') {
-                  event.preventDefault();
-                  handleAction();
-                }
-              }
-            : undefined,
-          style: [
-            styles.cardInner,
-            {
-              backgroundColor: colors.surface,
-              background: colors.surface,
-              cursor: isInteractive ? 'pointer' : 'default',
-            },
-          ],
-        } as object)}>
-        {body}
-      </View>
-    ) : isInteractive ? (
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel={actionLabel ?? text1 ?? 'Уведомление'}
-        onPress={handleAction}
-        style={({ pressed }) => [styles.cardInner, pressed && styles.cardPressed]}>
-        {body}
-      </Pressable>
-    ) : (
-      <View style={styles.cardInner}>{body}</View>
-    );
 
   return (
     <View pointerEvents="box-none" style={[styles.outer, getAlignmentStyle(alignment, styles)]}>
-      <View
-        {...(Platform.OS === 'web' ? ({ className: toastClassName } as object) : null)}
-        style={cardStyle}>
-        {inner}
+      <View style={cardStyle}>
+        {isInteractive ? (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={actionLabel ?? text1 ?? 'Уведомление'}
+            onPress={handleAction}
+            style={({ pressed }) => [styles.cardInner, pressed && styles.cardPressed]}>
+            {body}
+          </Pressable>
+        ) : (
+          <View style={styles.cardInner}>{body}</View>
+        )}
       </View>
     </View>
   );
