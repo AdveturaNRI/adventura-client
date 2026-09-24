@@ -18,7 +18,7 @@ type DieMeshPreviewProps = {
   active?: boolean;
   /** Hex body color; defaults to saved dice accent / theme primary. */
   themeColor?: string;
-  /** Stop the render loop without disposing (hidden but kept-alive popover). */
+  /** Kept for API compat — snapshots don't hold a live GL context. */
   paused?: boolean;
 };
 
@@ -34,9 +34,25 @@ const CDN_THEME =
   'https://cdn.jsdelivr.net/npm/@3d-dice/dice-box@1.1.4/dist/assets/themes/default/';
 const DIE_NAMES = ['d4', 'd6', 'd8', 'd10', 'd12', 'd20', 'd100'] as const;
 
+/** sides:accent → dataURL. Reopen popover without creating 7 WebGL contexts again. */
+const snapshotCache = new Map<string, string>();
+
+/** One live preview engine at a time — 7 parallel Babylon + roll iframe = white screen even on a beefy PC. */
+let previewBuildChain: Promise<void> = Promise.resolve();
+
+function enqueuePreviewBuild(task: () => Promise<void>) {
+  const run = previewBuildChain.then(task, task);
+  previewBuildChain = run.then(
+    () => undefined,
+    () => undefined,
+  );
+  return run;
+}
+
 declare global {
   interface Window {
     BABYLON?: any;
+    __ADVENTURA_DIE_PREVIEW__?: string;
   }
 }
 
@@ -71,7 +87,6 @@ async function resolveThemeRoot() {
   } catch {
     // fall through
   }
-  // No preview.babylon → clean default.json once into memory (data: import).
   for (const root of [THEME_ROOT, CDN_THEME]) {
     try {
       const res = await fetch(`${root}default.json`);
@@ -86,7 +101,6 @@ async function resolveThemeRoot() {
 }
 
 async function buildCleanPreview(data: Record<string, unknown>) {
-  // Store cleaned JSON on window so ImportMesh can use data: without re-fetch physics spam.
   if (Array.isArray(data.meshes)) {
     data.meshes = (data.meshes as Record<string, unknown>[])
       .filter((m) => DIE_NAMES.includes(String(m.name || '') as (typeof DIE_NAMES)[number]))
@@ -100,9 +114,7 @@ async function buildCleanPreview(data: Record<string, unknown>) {
       });
   }
   delete data.gravity;
-  delete data.colliderFaceMap;
-  (window as Window & { __ADVENTURA_DIE_PREVIEW__?: string }).__ADVENTURA_DIE_PREVIEW__ =
-    JSON.stringify(data);
+  window.__ADVENTURA_DIE_PREVIEW__ = JSON.stringify(data);
 }
 
 function dieLabel(sides: DieGlyphSides) {
@@ -174,10 +186,6 @@ export function DieMeshPreviewProvider({ children }: { children: ReactNode }) {
   return <SharedCtx.Provider value={shared}>{children}</SharedCtx.Provider>;
 }
 
-/**
- * Real @3d-dice/dice-box theme mesh in a small WebGL canvas.
- * Text label (d4 / d20…) while loading or if 3D assets fail.
- */
 function hexToBabylonColor3(BABYLON: any, hex: string) {
   try {
     return BABYLON.Color3.FromHexString(hex);
@@ -197,106 +205,140 @@ function applyDieAccent(
   const luma = 0.2126 * theme.r + 0.7152 * theme.g + 0.0722 * theme.b;
   const diffuseName = luma > 0.55 ? 'diffuse-dark.png' : 'diffuse-light.png';
   mat.setColor3('themeColor', theme);
-  // Не пересоздаём текстуру на каждый кадр/смену цвета в той же luma-зоне — иначе превью мигает.
   if ((mat as { __adventuraDiffuse?: string }).__adventuraDiffuse === diffuseName) {
-    return;
+    return null;
   }
   (mat as { __adventuraDiffuse?: string }).__adventuraDiffuse = diffuseName;
   const diffuseTex = new BABYLON.Texture(`${themeRoot}${diffuseName}`, scene);
   diffuseTex.hasAlpha = true;
   mat.setTexture('diffuseSampler', diffuseTex);
+  return diffuseTex;
 }
 
+function waitTextureReady(tex: any, timeoutMs = 8000): Promise<void> {
+  if (!tex) {
+    return Promise.resolve();
+  }
+  if (typeof tex.isReady === 'function' && tex.isReady()) {
+    return Promise.resolve();
+  }
+  return new Promise((resolve) => {
+    let done = false;
+    const finish = () => {
+      if (done) return;
+      done = true;
+      resolve();
+    };
+    const timer = window.setTimeout(finish, timeoutMs);
+    try {
+      tex.onLoadObservable?.addOnce?.(() => {
+        window.clearTimeout(timer);
+        finish();
+      });
+    } catch {
+      window.clearTimeout(timer);
+      finish();
+    }
+  });
+}
+
+function disposeEngine(engine: any, scene: any) {
+  try {
+    engine?.stopRenderLoop?.();
+  } catch {
+    // ignore
+  }
+  try {
+    scene?.dispose?.();
+  } catch {
+    // ignore
+  }
+  try {
+    engine?.dispose?.();
+  } catch {
+    // ignore
+  }
+}
+
+/**
+ * Real @3d-dice theme mesh, snapshotted to an image.
+ * Live WebGL is released after capture so the roll iframe isn't fighting 7 contexts.
+ */
 export function DieMeshPreview({
   sides,
   size = 56,
   active = true,
   themeColor,
-  paused = false,
 }: DieMeshPreviewProps) {
   const colors = useTheme();
   const accent = themeColor?.trim() || colors.primary;
   const shared = useContext(SharedCtx);
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const materialRef = useRef<{ BABYLON: any; themeRoot: string; scene: any; mat: any } | null>(
-    null,
+  const cacheKey = `${sides}:${accent.toLowerCase()}`;
+  const [snapshot, setSnapshot] = useState<string | null>(
+    () => snapshotCache.get(cacheKey) ?? null,
   );
-  const accentRef = useRef(accent);
-  accentRef.current = accent;
-  const pausedRef = useRef(paused);
-  pausedRef.current = paused;
-  const [ready, setReady] = useState(false);
   const [failed, setFailed] = useState(false);
+  const genRef = useRef(0);
 
-  // Build WebGL scene once per die — remounting all 7 on color change hits browser context limits.
   useEffect(() => {
-    if (Platform.OS !== 'web' || !shared || !canvasRef.current) {
+    const cached = snapshotCache.get(cacheKey);
+    if (cached) {
+      setSnapshot(cached);
+      setFailed(false);
+      return;
+    }
+
+    if (Platform.OS !== 'web' || !shared || typeof document === 'undefined') {
       return;
     }
 
     const { BABYLON, themeRoot } = shared;
-    const canvas = canvasRef.current;
-    let disposed = false;
-    let engine: any;
-    let scene: any;
     const die = dieLabel(sides);
+    const gen = ++genRef.current;
+    let cancelled = false;
 
-    setReady(false);
     setFailed(false);
-    materialRef.current = null;
 
-    const failTimer = window.setTimeout(() => {
-      if (!disposed) setFailed(true);
-    }, 10000);
+    void enqueuePreviewBuild(async () => {
+      if (cancelled || gen !== genRef.current) {
+        return;
+      }
 
-    try {
-      engine = new BABYLON.Engine(canvas, true, {
-        preserveDrawingBuffer: true,
-        adaptToDeviceRatio: true,
-        alpha: true,
-        antialias: true,
-      });
-      scene = new BABYLON.Scene(engine);
-      scene.clearColor = new BABYLON.Color4(0, 0, 0, 0);
+      const canvas = document.createElement('canvas');
+      const px = Math.max(128, Math.round(size * 2));
+      canvas.width = px;
+      canvas.height = px;
+      canvas.style.cssText = 'position:fixed;left:-9999px;top:0;width:1px;height:1px;opacity:0;pointer-events:none';
+      document.body.appendChild(canvas);
 
-      new BABYLON.HemisphericLight('h', new BABYLON.Vector3(0.25, 1, 0.35), scene).intensity = 1.15;
-      new BABYLON.DirectionalLight('k', new BABYLON.Vector3(-0.45, -1, 0.55), scene).intensity = 1.05;
+      let engine: any;
+      let scene: any;
 
-      const camera = new BABYLON.ArcRotateCamera(
-        'cam',
-        -Math.PI / 3.1,
-        Math.PI / 2.5,
-        2.5,
-        BABYLON.Vector3.Zero(),
-        scene,
-      );
-      camera.inputs.clear();
-      scene.activeCamera = camera;
+      try {
+        engine = new BABYLON.Engine(canvas, true, {
+          preserveDrawingBuffer: true,
+          adaptToDeviceRatio: false,
+          alpha: true,
+          antialias: true,
+        });
+        scene = new BABYLON.Scene(engine);
+        scene.clearColor = new BABYLON.Color4(0, 0, 0, 0);
 
-      const onMeshes = (meshes: any[]) => {
-        if (disposed) return;
-        window.clearTimeout(failTimer);
+        new BABYLON.HemisphericLight('h', new BABYLON.Vector3(0.25, 1, 0.35), scene).intensity =
+          1.15;
+        new BABYLON.DirectionalLight('k', new BABYLON.Vector3(-0.45, -1, 0.55), scene).intensity =
+          1.05;
 
-        const mesh =
-          meshes.find((m) => m.name === die) ||
-          meshes.find((m) => DIE_NAMES.includes(String(m.name) as (typeof DIE_NAMES)[number])) ||
-          meshes[0];
-
-        if (!mesh) {
-          setFailed(true);
-          return;
-        }
-
-        for (const m of meshes) {
-          const keep = m === mesh || m.parent === mesh;
-          m.setEnabled(keep);
-          m.isVisible = keep;
-        }
-
-        // Package meshes ship without materials — match dice-box color shader:
-        // finalColor = mix(themeColor.rgb, texture.rgb, texture.a)
-        mesh.scaling.set(10, 10, 10);
-        mesh.rotation.set(0.35, 0.7, 0.1);
+        const camera = new BABYLON.ArcRotateCamera(
+          'cam',
+          -Math.PI / 3.1,
+          Math.PI / 2.5,
+          2.5,
+          BABYLON.Vector3.Zero(),
+          scene,
+        );
+        camera.inputs.clear();
+        scene.activeCamera = camera;
 
         if (!BABYLON.Effect.ShadersStore.adventuraDieVertexShader) {
           BABYLON.Effect.ShadersStore.adventuraDieVertexShader = `
@@ -332,13 +374,63 @@ export function DieMeshPreview({
           `;
         }
 
+        const meshes: any[] = await new Promise((resolve, reject) => {
+          const onError = (_s: unknown, message?: string) => {
+            reject(new Error(message || 'import failed'));
+          };
+          const onMeshes = (loaded: any[]) => resolve(loaded);
+          const mem = window.__ADVENTURA_DIE_PREVIEW__;
+          if (mem) {
+            BABYLON.SceneLoader.ImportMesh(
+              die,
+              themeRoot,
+              `data:${mem}`,
+              scene,
+              onMeshes,
+              null,
+              onError,
+            );
+          } else {
+            BABYLON.SceneLoader.ImportMesh(
+              die,
+              themeRoot,
+              'preview.babylon',
+              scene,
+              onMeshes,
+              null,
+              onError,
+            );
+          }
+        });
+
+        if (cancelled || gen !== genRef.current) {
+          disposeEngine(engine, scene);
+          canvas.remove();
+          return;
+        }
+
+        const mesh =
+          meshes.find((m) => m.name === die) ||
+          meshes.find((m) => DIE_NAMES.includes(String(m.name) as (typeof DIE_NAMES)[number])) ||
+          meshes[0];
+
+        if (!mesh) {
+          throw new Error('mesh missing');
+        }
+
+        for (const m of meshes) {
+          const keep = m === mesh || m.parent === mesh;
+          m.setEnabled(keep);
+          m.isVisible = keep;
+        }
+
+        mesh.scaling.set(10, 10, 10);
+        mesh.rotation.set(0.35, 0.7, 0.1);
+
         const mat = new BABYLON.ShaderMaterial(
           `${die}-mat`,
           scene,
-          {
-            vertex: 'adventuraDie',
-            fragment: 'adventuraDie',
-          },
+          { vertex: 'adventuraDie', fragment: 'adventuraDie' },
           {
             attributes: ['position', 'normal', 'uv'],
             uniforms: ['world', 'worldViewProjection', 'themeColor', 'lightDir'],
@@ -347,21 +439,11 @@ export function DieMeshPreview({
         );
         mat.setVector3('lightDir', new BABYLON.Vector3(-0.45, -1, 0.55));
         mat.backFaceCulling = true;
-        applyDieAccent(BABYLON, themeRoot, scene, mat, accentRef.current);
+        const diffuseTex = applyDieAccent(BABYLON, themeRoot, scene, mat, accent);
         mesh.material = mat;
         mesh.getChildMeshes?.(true)?.forEach((child: any) => {
           child.material = mat;
         });
-        if (disposed) {
-          try {
-            mat.dispose?.();
-          } catch {
-            // ignore
-          }
-          return;
-        }
-
-        materialRef.current = { BABYLON, themeRoot, scene, mat };
 
         mesh.computeWorldMatrix(true);
         const bi = mesh.getHierarchyBoundingVectors(true);
@@ -371,86 +453,53 @@ export function DieMeshPreview({
         camera.radius = maxDim * 2.35;
         camera.lowerRadiusLimit = camera.upperRadiusLimit = camera.radius;
 
-        // Static pose — loop keeps textures compiling; paused skips draws
-        // so closing the popover for a roll doesn't dispose mid-frame.
-        engine.runRenderLoop(() => {
-          if (disposed || pausedRef.current) {
-            return;
+        await waitTextureReady(diffuseTex);
+        // A couple of frames for shader compile.
+        for (let i = 0; i < 4; i += 1) {
+          if (cancelled || gen !== genRef.current) {
+            break;
           }
+          engine.resize();
           scene.render();
-        });
-        engine.resize();
-        setReady(true);
-      };
+          await new Promise<void>((r) => requestAnimationFrame(() => r()));
+        }
 
-      const onError = (_s: unknown, message?: string) => {
-        console.error('[DieMeshPreview] import', die, message);
-        if (!disposed) setFailed(true);
-      };
+        if (cancelled || gen !== genRef.current) {
+          disposeEngine(engine, scene);
+          canvas.remove();
+          return;
+        }
 
-      const mem =
-        (window as Window & { __ADVENTURA_DIE_PREVIEW__?: string }).__ADVENTURA_DIE_PREVIEW__;
-
-      if (mem) {
-        BABYLON.SceneLoader.ImportMesh(die, themeRoot, `data:${mem}`, scene, onMeshes, null, onError);
-      } else {
-        BABYLON.SceneLoader.ImportMesh(
-          die,
-          themeRoot,
-          'preview.babylon',
-          scene,
-          onMeshes,
-          null,
-          onError,
-        );
+        const dataUrl = canvas.toDataURL('image/png');
+        snapshotCache.set(cacheKey, dataUrl);
+        setSnapshot(dataUrl);
+        setFailed(false);
+      } catch (err) {
+        console.error('[DieMeshPreview]', die, err);
+        if (!cancelled && gen === genRef.current) {
+          setFailed(true);
+        }
+      } finally {
+        disposeEngine(engine, scene);
+        try {
+          canvas.remove();
+        } catch {
+          // ignore
+        }
       }
-    } catch (err) {
-      console.error('[DieMeshPreview]', err);
-      voidMicrotask(() => {
-        if (!disposed) setFailed(true);
-      });
-    }
-
-    const onResize = () => {
-      if (disposed || pausedRef.current) {
-        return;
-      }
-      try {
-        engine?.resize?.();
-      } catch {
-        // ignore
-      }
-    };
-    window.addEventListener('resize', onResize);
+    });
 
     return () => {
-      disposed = true;
-      materialRef.current = null;
-      window.clearTimeout(failTimer);
-      window.removeEventListener('resize', onResize);
-      try {
-        engine?.stopRenderLoop?.();
-        scene?.dispose?.();
-        engine?.dispose?.();
-      } catch {
-        // ignore
-      }
+      cancelled = true;
+      genRef.current += 1;
     };
-  }, [shared, sides]);
-
-  useEffect(() => {
-    const handle = materialRef.current;
-    if (!handle) {
-      return;
-    }
-    applyDieAccent(handle.BABYLON, handle.themeRoot, handle.scene, handle.mat, accent);
-  }, [accent]);
-
-  const showText = Platform.OS !== 'web' || failed || !shared || !ready;
+  }, [accent, cacheKey, shared, sides, size]);
 
   if (Platform.OS !== 'web') {
     return <DieTextFallback sides={sides} size={size} active={active} themeColor={accent} />;
   }
+
+  const showText = failed || !snapshot;
 
   return (
     <div
@@ -463,22 +512,25 @@ export function DieMeshPreview({
       {showText ? (
         <DieTextFallback sides={sides} size={size} active themeColor={accent} />
       ) : null}
-      <canvas
-        ref={canvasRef}
-        width={Math.max(128, Math.round(size * 2))}
-        height={Math.max(128, Math.round(size * 2))}
-        style={{
-          position: 'absolute',
-          inset: 0,
-          width: '100%',
-          height: '100%',
-          display: failed ? 'none' : 'block',
-          borderRadius: 8,
-          background: 'transparent',
-          opacity: ready ? 1 : 0,
-          pointerEvents: 'none',
-        }}
-      />
+      {snapshot ? (
+        <img
+          src={snapshot}
+          alt=""
+          width={size}
+          height={size}
+          draggable={false}
+          style={{
+            position: 'absolute',
+            inset: 0,
+            width: '100%',
+            height: '100%',
+            borderRadius: 8,
+            display: 'block',
+            pointerEvents: 'none',
+            userSelect: 'none',
+          }}
+        />
+      ) : null}
     </div>
   );
 }

@@ -53,31 +53,16 @@ import { upsertWandererReaction, clearWandererReaction } from '@/services/profil
 import { diceRollPreviewText, parseDiceRollPayload } from '@/utils/chat-dice-roll';
 import {
   getCachedConversations,
+  prefetchChatThread,
+  prefetchChatThreads,
   removeCachedConversation,
   setCachedConversations,
 } from '@/utils/chat-thread-cache';
 import { localizeErrorMessage } from '@/utils/localizeError';
+import { stableAvatarUrl } from '@/utils/stable-avatar-url';
 
 function isGroupChat(item: ConversationListItem) {
   return item.type === 'group';
-}
-
-/** Одинаковый путь (игнор query) — оставляем старый url, чтобы Image не перезагружался. */
-function stableAvatarUrl(prevUrl?: string | null, nextUrl?: string | null) {
-  const prev = prevUrl?.trim() || null;
-  const next = nextUrl?.trim() || null;
-  if (!prev) {
-    return next;
-  }
-  if (!next) {
-    return prev;
-  }
-  if (prev === next) {
-    return prev;
-  }
-  const prevPath = prev.split('?')[0];
-  const nextPath = next.split('?')[0];
-  return prevPath === nextPath ? prev : next;
 }
 
 /** Время активности для сортировки списка — превью события/сообщения, не «сырой» updatedAt. */
@@ -630,6 +615,8 @@ export default function ChatsScreen({ variant = 'page' }: ChatsScreenProps) {
         });
         const sorted = sortConversations(merged);
         setCachedConversations(sorted);
+        // Первая пачка последних сообщений — пока пользователь ещё в списке.
+        prefetchChatThreads(sorted);
         return sorted;
       });
     } catch (error) {
@@ -1056,8 +1043,12 @@ export default function ChatsScreen({ variant = 'page' }: ChatsScreenProps) {
             <Pressable
               accessibilityRole="button"
               accessibilityLabel={title}
+              onPressIn={() => {
+                void prefetchChatThread(item.id, item);
+              }}
               onPress={() => {
                 if (!isActive) {
+                  void prefetchChatThread(item.id, item);
                   router.push(`/chats/${item.id}`);
                 }
               }}

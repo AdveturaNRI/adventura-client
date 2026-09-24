@@ -11,6 +11,7 @@ import { AppState, Platform } from 'react-native';
 
 import { useAuth } from '@/context/AuthContext';
 import type { ChatMessage, ConversationListItem } from '@/services/chats/chatsApi';
+import { appendCachedThreadMessage } from '@/utils/chat-thread-cache';
 import {
   getNotificationsUnreadCount,
   type PortalNotification,
@@ -129,6 +130,8 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
 
     const unbind = bindRealtimeHandlers({
       onMessageNew: (message) => {
+        // Пока сокет жив — кладём сообщение в кэш треда (даже если чат не открыт).
+        appendCachedThreadMessage(message.conversationId, message);
         setLastMessage(message);
         setLastConversationDeleted((prev) =>
           prev?.conversationId === message.conversationId ? null : prev,

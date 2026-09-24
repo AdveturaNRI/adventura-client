@@ -7,6 +7,7 @@ import {
   resolveChatBackground,
   resolveChatBackgroundDimmer,
   resolveChatBackgroundSync,
+  resolvePresetColors,
   subscribeConversationChatBackground,
   subscribeGlobalChatBackground,
   type ChatBackgroundSetting,
@@ -79,13 +80,16 @@ export function ChatBackgroundLayer({
   }
 
   const dimmer = resolveChatBackgroundDimmer(setting, isDark);
+  const preset =
+    setting.kind === 'preset' ? getChatBackgroundPreset(setting.presetId) : undefined;
+  const presetColors = preset
+    ? resolvePresetColors(preset, isDark)
+    : (['#2A3138', '#1A1F24'] as [string, string]);
 
   return (
     <View pointerEvents="none" style={styles.root}>
       {setting.kind === 'preset' ? (
-        <PresetFill
-          colors={getChatBackgroundPreset(setting.presetId)?.colors ?? ['#2A3138', '#1A1F24']}
-        />
+        <PresetFill colors={presetColors} />
       ) : (
         <Image
           source={{ uri: setting.uri }}

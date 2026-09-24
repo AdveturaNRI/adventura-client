@@ -1,4 +1,4 @@
-import { memo, useEffect, useState } from 'react';
+import { memo, useEffect, useRef, useState } from 'react';
 import { Image } from 'expo-image';
 import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
 
@@ -8,6 +8,7 @@ import { useTheme } from '@/hooks/use-theme';
 import { useThemedStyles } from '@/hooks/use-themed-styles';
 import { isGifImage } from '@/utils/image-format';
 import { sanitizeBadges, type AvatarFrameId, type RewardBadgeType } from '@/data/rewards/catalog';
+import { avatarUrlIdentity } from '@/utils/stable-avatar-url';
 
 type UserAvatarProps = {
   nickname: string;
@@ -76,11 +77,23 @@ function UserAvatarComponent({
   const resolvedBadges = sanitizeBadges(badges);
   const uri = avatarUrl?.trim() || null;
   const cachePolicy = uri && !isEphemeralUri(uri) ? 'memory-disk' : 'none';
-  const recycleKey = uri ? uri.split('?')[0] : undefined;
+  const recycleKey = avatarUrlIdentity(uri) ?? undefined;
+  const loadedKeyRef = useRef<string | null>(null);
   const [loading, setLoading] = useState(Boolean(uri));
 
   useEffect(() => {
-    setLoading(Boolean(uri));
+    if (!uri) {
+      loadedKeyRef.current = null;
+      setLoading(false);
+      return;
+    }
+    const key = avatarUrlIdentity(uri);
+    // Тот же объект, новая подпись — не прячем картинку и не крутим спиннер.
+    if (key && loadedKeyRef.current === key) {
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
   }, [uri]);
 
   const spinnerScale = size < 28 ? 0.7 : size < 40 ? 0.85 : 1;
@@ -100,7 +113,10 @@ function UserAvatarComponent({
             recyclingKey={recycleKey}
             transition={0}
             autoplay={isGifImage(uri)}
-            onLoad={() => setLoading(false)}
+            onLoad={() => {
+              loadedKeyRef.current = avatarUrlIdentity(uri);
+              setLoading(false);
+            }}
             onError={() => setLoading(false)}
           />
           {loading ? (

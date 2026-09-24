@@ -118,11 +118,12 @@ import {
 } from '@/utils/dice-animations-storage';
 import { setFocusedChatConversation } from '@/utils/chat-alerts';
 import { localizeErrorMessage } from '@/utils/localizeError';
+import { stableAvatarUrl } from '@/utils/stable-avatar-url';
 import {
   appendCachedThreadMessage,
   getCachedConversation,
   getCachedThread,
-  mergeCachedThreadMessages,
+  prefetchChatThread,
   removeCachedConversation,
   setCachedConversations,
   setCachedThread,
@@ -459,22 +460,25 @@ function buildChatTimeline(
   return items;
 }
 
-/** Одинаковый путь (игнор query) — оставляем старый url, чтобы Image не перезагружался. */
-function stableAvatarUrl(prevUrl?: string | null, nextUrl?: string | null) {
-  const prev = prevUrl?.trim() || null;
-  const next = nextUrl?.trim() || null;
-  if (!prev) {
+/** Не дёргаем peer.avatarUrl на каждый refetch — только если сменился объект. */
+function withStablePeerAvatar(
+  prev: ConversationListItem | null | undefined,
+  next: ConversationListItem,
+): ConversationListItem {
+  if (!next.peer || !prev?.peer || prev.peer.id !== next.peer.id) {
     return next;
   }
-  if (!next) {
-    return prev;
+  const avatarUrl = stableAvatarUrl(prev.peer.avatarUrl, next.peer.avatarUrl);
+  if (avatarUrl === next.peer.avatarUrl) {
+    return next;
   }
-  if (prev === next) {
-    return prev;
-  }
-  const prevPath = prev.split('?')[0];
-  const nextPath = next.split('?')[0];
-  return prevPath === nextPath ? prev : next;
+  return {
+    ...next,
+    peer: {
+      ...next.peer,
+      avatarUrl,
+    },
+  };
 }
 
 function formatLastSeen(online: boolean, lastSeenAt: string | null) {
@@ -1526,6 +1530,30 @@ export default function ChatThreadScreen() {
   const [members, setMembers] = useState<ChatMember[]>([]);
   const [membersLoading, setMembersLoading] = useState(false);
   const [membersBusy, setMembersBusy] = useState(false);
+  /** Presigned sender avatars in groups — keep path-stable urls across message refreshes. */
+  const stableSenderAvatarsRef = useRef<Map<string, string>>(new Map());
+
+  useEffect(() => {
+    stableSenderAvatarsRef.current.clear();
+  }, [conversationId]);
+
+  const resolveStableSenderAvatar = useCallback(
+    (senderId: string | undefined, nextUrl?: string | null) => {
+      if (!senderId) {
+        return nextUrl?.trim() || null;
+      }
+      const incoming = nextUrl?.trim() || null;
+      if (!incoming) {
+        return stableSenderAvatarsRef.current.get(senderId) ?? null;
+      }
+      const prev = stableSenderAvatarsRef.current.get(senderId) ?? null;
+      const stable = stableAvatarUrl(prev, incoming) ?? incoming;
+      stableSenderAvatarsRef.current.set(senderId, stable);
+      return stable;
+    },
+    [],
+  );
+
   const [renameOpen, setRenameOpen] = useState(false);
   const [addMembersOpen, setAddMembersOpen] = useState(false);
   const [addMemberContacts, setAddMemberContacts] = useState<
@@ -1848,7 +1876,7 @@ export default function ChatThreadScreen() {
     const list = await listConversations();
     setCachedConversations(list);
     const found = list.find((item) => item.id === conversationId) ?? null;
-    setConversation(found);
+    setConversation((prev) => (found ? withStablePeerAvatar(prev, found) : null));
     if (found) {
       upsertCachedConversation(found);
       setPeerLastReadAt(found.peerLastReadAt);
@@ -1860,8 +1888,7 @@ export default function ChatThreadScreen() {
     if (!conversationId) {
       return;
     }
-    const page = await listMessages(conversationId);
-    const merged = mergeCachedThreadMessages(conversationId, page);
+    const merged = await prefetchChatThread(conversationId);
     setMessages((prev) => {
       const byId = new Map(merged.messages.map((item) => [item.id, item]));
       for (const item of prev) {
@@ -1884,11 +1911,11 @@ export default function ChatThreadScreen() {
       if (!next) {
         return prev;
       }
-      return {
+      return withStablePeerAvatar(prev, {
         ...next,
-        blockedByMe: page.blockedByMe ?? next.blockedByMe,
-        blockedMe: page.blockedMe ?? next.blockedMe,
-      };
+        blockedByMe: next.blockedByMe,
+        blockedMe: next.blockedMe,
+      });
     });
   }, [conversationId]);
 
@@ -1939,9 +1966,9 @@ export default function ChatThreadScreen() {
 
       setRefreshing(true);
       try {
-        const [list, page] = await Promise.all([
+        const [list, merged] = await Promise.all([
           listConversations(),
-          listMessages(conversationId),
+          prefetchChatThread(conversationId),
         ]);
         if (cancelled) {
           return;
@@ -1956,12 +1983,13 @@ export default function ChatThreadScreen() {
         }
 
         upsertCachedConversation(found);
-        const merged = mergeCachedThreadMessages(conversationId, page, found);
-        setConversation({
-          ...found,
-          blockedByMe: page.blockedByMe ?? found.blockedByMe,
-          blockedMe: page.blockedMe ?? found.blockedMe,
-        });
+        setConversation((prev) =>
+          withStablePeerAvatar(prev, {
+            ...found,
+            blockedByMe: merged.conversation?.blockedByMe ?? found.blockedByMe,
+            blockedMe: merged.conversation?.blockedMe ?? found.blockedMe,
+          }),
+        );
         setMessages((prev) => {
           const byId = new Map(merged.messages.map((item) => [item.id, item]));
           for (const item of prev) {
@@ -1977,7 +2005,18 @@ export default function ChatThreadScreen() {
           );
         });
         setNextCursor(merged.nextCursor);
-        setPeerLastReadAt(merged.peerLastReadAt);
+        setPeerLastReadAt(merged.peerLastReadAt ?? found.peerLastReadAt);
+        // Подклеим conversation из списка к уже закэшированной странице сообщений.
+        setCachedThread(conversationId, {
+          conversation: {
+            ...found,
+            blockedByMe: merged.conversation?.blockedByMe ?? found.blockedByMe,
+            blockedMe: merged.conversation?.blockedMe ?? found.blockedMe,
+          },
+          messages: merged.messages,
+          nextCursor: merged.nextCursor,
+          peerLastReadAt: merged.peerLastReadAt ?? found.peerLastReadAt,
+        });
         await markConversationRead(conversationId);
       } catch (error) {
         if (cancelled) {
@@ -2814,7 +2853,7 @@ export default function ChatThreadScreen() {
       setIsMenuBusy(true);
       try {
         const next = await blockPeer(conversationId);
-        setConversation(next);
+        setConversation((prev) => withStablePeerAvatar(prev, next));
         setPendingBlock(false);
         toast.success(`${nickname} заблокирован`);
         if (deleteChat) {
@@ -2882,7 +2921,7 @@ export default function ChatThreadScreen() {
       setMembersBusy(true);
       try {
         const summary = await renameGroupChat(conversationId, nextTitle);
-        setConversation(summary);
+        setConversation((prev) => withStablePeerAvatar(prev, summary));
         setRenameOpen(false);
         toast.success('Название обновлено');
       } catch (error) {
@@ -3042,7 +3081,7 @@ export default function ChatThreadScreen() {
     setUnblocking(true);
     try {
       const next = await unblockPeer(conversationId);
-      setConversation(next);
+      setConversation((prev) => withStablePeerAvatar(prev, next));
       await loadMessages();
       toast.success(`${conversation.peer?.nickname ?? 'Пользователь'} разблокирован`);
     } catch (error) {
@@ -3818,11 +3857,12 @@ export default function ChatThreadScreen() {
                           style={styles.authorAvatarButton}>
                           <UserAvatar
                             nickname={item.sender?.nickname ?? 'Игрок'}
-                            avatarUrl={
+                            avatarUrl={resolveStableSenderAvatar(
+                              item.senderId,
                               item.sender?.avatarUrl ??
-                              members.find((member) => member.id === item.senderId)?.avatarUrl ??
-                              null
-                            }
+                                members.find((member) => member.id === item.senderId)?.avatarUrl ??
+                                null,
+                            )}
                             size={30}
                             badges={
                               item.sender?.badges ??
@@ -4447,7 +4487,7 @@ export default function ChatThreadScreen() {
           conversationId={conversationId}
           onClose={() => setBackgroundPickerOpen(false)}
           onConversationUpdated={(next) => {
-            setConversation(next);
+            setConversation((prev) => withStablePeerAvatar(prev, next));
             publishConversationUpdate(next);
           }}
         />

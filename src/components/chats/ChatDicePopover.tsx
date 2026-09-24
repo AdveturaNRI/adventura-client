@@ -368,9 +368,8 @@ function createStyles(isDesktop: boolean) {
 }
 
 /**
- * Не Modal: RN Modal при закрытии размонтирует детей и каждый раз заново
- * поднимает 7 WebGL-превью. На desktop держим шит в absolute overlay.
- * На mobile — нет: 7 Babylon + threejs iframe = лимит контекстов, куб в чате пустой.
+ * Не Modal: RN Modal при закрытии размонтирует детей.
+ * Превью — snapshot (без живых WebGL), сцена броска — один iframe.
  */
 export function ChatDicePopover({ visible, busy, onClose, onRoll }: ChatDicePopoverProps) {
   const isDesktop = useIsDesktopWeb();
@@ -394,20 +393,17 @@ export function ChatDicePopover({ visible, busy, onClose, onRoll }: ChatDicePopo
     : Math.max(320, windowHeight - Math.max(insets.top, 8) - 8);
 
   useEffect(() => {
-    if (visible || busy) {
+    if (visible) {
       setKeptAlive(true);
-      if (visible) {
-        void loadDiceAnimationSpeed().then(setAnimationSpeed);
-      }
+      void loadDiceAnimationSpeed().then(setAnimationSpeed);
       return;
     }
-    // На телефоне не держим 7 WebGL — лимит контекстов. Но во время броска
-    // (busy) не снимаем их: dispose mid-roll валит контекст сцены → белый экран.
-    // На desktop оставляем тёплые превью, паркуем шит за экраном.
+    // Mobile: можно снять поповер — превью уже snapshot без живого WebGL.
+    // Desktop: держим шит тёплым (картинки из кэша, контекстов не ест).
     if (!isDesktop) {
       setKeptAlive(false);
     }
-  }, [busy, isDesktop, visible]);
+  }, [isDesktop, visible]);
 
   const handleAnimationSpeedChange = (next: DiceAnimationSpeed) => {
     setAnimationSpeed(next);

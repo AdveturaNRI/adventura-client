@@ -19,9 +19,15 @@ export const CHAT_BG_ACCEPT = ['image/jpeg', 'image/png', 'image/webp'] as const
 export type ChatBackgroundPreset = {
   id: string;
   label: string;
-  /** Верх / низ градиента (или один цвет). */
+  /** Верх / низ градиента (светлая тема). */
   colors: [string, string];
+  /**
+   * Вариант для тёмной темы. Без него светлый пресет в dark mode
+   * даёт «глухой» серый фон мимо палитры приложения.
+   */
+  darkColors?: [string, string];
   dimmer: number;
+  darkDimmer?: number;
 };
 
 export type ChatBackgroundSetting =
@@ -40,13 +46,18 @@ export const CHAT_BACKGROUND_PRESETS: ChatBackgroundPreset[] = [
     id: 'mist',
     label: 'Туман',
     colors: ['#D7DEE8', '#B8C4D4'],
+    // Близко к surface/background приложения, не к светло-серому «Туман»у из light.
+    darkColors: ['#1C2229', '#0E1216'],
     dimmer: 0.28,
+    darkDimmer: 0.18,
   },
   {
     id: 'parchment',
     label: 'Пергамент',
     colors: ['#E8DCC8', '#C9B896'],
+    darkColors: ['#2A241C', '#14110C'],
     dimmer: 0.22,
+    darkDimmer: 0.2,
   },
   {
     id: 'forest',
@@ -85,6 +96,17 @@ export const CHAT_BACKGROUND_PRESETS: ChatBackgroundPreset[] = [
     dimmer: 0.4,
   },
 ];
+
+/** Цвета пресета под текущую тему. */
+export function resolvePresetColors(
+  preset: ChatBackgroundPreset,
+  isDark: boolean,
+): [string, string] {
+  if (isDark && preset.darkColors) {
+    return preset.darkColors;
+  }
+  return preset.colors;
+}
 
 const DEFAULT_SETTING: ChatBackgroundSetting = { kind: 'default' };
 
@@ -467,7 +489,10 @@ export function resolveChatBackgroundDimmer(
 ): number {
   if (setting.kind === 'default') return 0;
   if (setting.kind === 'preset') {
-    return getChatBackgroundPreset(setting.presetId)?.dimmer ?? 0.35;
+    const preset = getChatBackgroundPreset(setting.presetId);
+    if (!preset) return 0.35;
+    if (isDark && preset.darkDimmer != null) return preset.darkDimmer;
+    return preset.dimmer;
   }
   return isDark ? 0.48 : 0.36;
 }

@@ -4,6 +4,7 @@ import { useAuth } from '@/context/AuthContext';
 import { getNotificationsUnreadCount, } from '@/services/notifications/notificationsApi';
 import { bindRealtimeHandlers, connectRealtime, disconnectRealtime, ensureRealtimeConnected, updateRealtimeAuthToken, } from '@/services/realtime/socket';
 import { notifyIncomingChatMessage, notifyIncomingPortalNotification, stopNewMessageTitleBlink, unlockChatAlerts, } from '@/utils/chat-alerts';
+import { appendCachedThreadMessage } from '@/utils/chat-thread-cache';
 import { hydrateNotificationSoundSettingsFromProfile } from '@/utils/notification-sound-settings';
 const RealtimeContext = createContext(null);
 export function RealtimeProvider({ children }) {
@@ -60,6 +61,7 @@ export function RealtimeProvider({ children }) {
         void hydrateNotificationSoundSettingsFromProfile();
         const unbind = bindRealtimeHandlers({
             onMessageNew: (message) => {
+                appendCachedThreadMessage(message.conversationId, message);
                 setLastMessage(message);
                 setLastConversationDeleted((prev) => prev?.conversationId === message.conversationId ? null : prev);
                 messageListenersRef.current.forEach((listener) => listener(message));
