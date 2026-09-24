@@ -115,7 +115,7 @@ export function VoiceCallDiceLayer({
       color: string;
       mode: DiceRollMode;
     }) => {
-      if (!conversationId.trim() || busyRef.current || localRoll) {
+      if (!conversationId.trim() || busyRef.current) {
         return;
       }
       busyRef.current = true;
@@ -136,6 +136,9 @@ export function VoiceCallDiceLayer({
       });
 
       try {
+        if (token !== tokenRef.current) {
+          return;
+        }
         if (!outcome || outcome.groups.length === 0) {
           toast.error('Не удалось бросить кости');
           return;
@@ -148,6 +151,9 @@ export function VoiceCallDiceLayer({
           })),
           ...(input.mode !== 'normal' ? { mode: input.mode } : {}),
         });
+        if (token !== tokenRef.current) {
+          return;
+        }
         skipIdsRef.current.add(message.id);
         if (skipIdsRef.current.size > 80) {
           const oldest = skipIdsRef.current.values().next().value;
@@ -158,11 +164,13 @@ export function VoiceCallDiceLayer({
       } catch (error) {
         toast.error(localizeErrorMessage(error, 'Не удалось бросить кости'));
       } finally {
-        busyRef.current = false;
-        setBusy(false);
+        if (token === tokenRef.current) {
+          busyRef.current = false;
+          setBusy(false);
+        }
       }
     },
-    [conversationId, localRoll, onOpenChange, senderNickname],
+    [conversationId, onOpenChange, senderNickname],
   );
 
   const diceActive = open || busy || Boolean(localRoll) || Boolean(incoming);

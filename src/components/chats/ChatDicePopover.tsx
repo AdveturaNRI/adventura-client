@@ -368,9 +368,8 @@ function createStyles(isDesktop: boolean) {
 }
 
 /**
- * Не Modal: RN Modal при закрытии размонтирует детей и каждый раз заново
- * поднимает 7 WebGL-превью. На desktop держим шит в absolute overlay.
- * На mobile — нет: 7 Babylon + threejs iframe = лимит контекстов, куб в чате пустой.
+ * Не Modal: RN Modal при закрытии размонтирует детей.
+ * Превью — snapshot (без живых WebGL), сцена броска — один iframe.
  */
 export function ChatDicePopover({ visible, busy, onClose, onRoll }: ChatDicePopoverProps) {
   const isDesktop = useIsDesktopWeb();
@@ -399,8 +398,8 @@ export function ChatDicePopover({ visible, busy, onClose, onRoll }: ChatDicePopo
       void loadDiceAnimationSpeed().then(setAnimationSpeed);
       return;
     }
-    // На телефоне не держим 7 WebGL — лимит контекстов. На desktop оставляем
-    // тёплые превью, но паркуем шит за экраном (см. hiddenPark ниже).
+    // Mobile: можно снять поповер — превью уже snapshot без живого WebGL.
+    // Desktop: держим шит тёплым (картинки из кэша, контекстов не ест).
     if (!isDesktop) {
       setKeptAlive(false);
     }
@@ -605,6 +604,7 @@ export function ChatDicePopover({ visible, busy, onClose, onRoll }: ChatDicePopo
                         size={isDesktop ? PREVIEW_SIZE : PREVIEW_SIZE_COMPACT}
                         active={active || total === 0}
                         themeColor={accent}
+                        paused={!visible}
                       />
                     </View>
                     <Text style={[styles.dieLabel, !active ? styles.dieLabelMuted : null]}>

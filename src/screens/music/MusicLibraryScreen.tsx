@@ -4,7 +4,6 @@ import { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useFocusEffect } from 'expo-router';
 import {
   ActivityIndicator,
-  Alert,
   Modal,
   Platform,
   Pressable,
@@ -262,17 +261,9 @@ function trackWord(count: number) {
   return 'треков';
 }
 
-function confirmDelete(title: string, message: string): Promise<boolean> {
-  if (Platform.OS === 'web' && typeof window !== 'undefined') {
-    return Promise.resolve(window.confirm(`${title}\n\n${message}`));
-  }
-  return new Promise((resolve) => {
-    Alert.alert(title, message, [
-      { text: 'Отмена', style: 'cancel', onPress: () => resolve(false) },
-      { text: 'Удалить', style: 'destructive', onPress: () => resolve(true) },
-    ]);
-  });
-}
+type PendingDelete =
+  | { kind: 'track'; track: MusicTrack }
+  | { kind: 'playlist'; playlist: MusicPlaylistSummary | MusicPlaylistDetail };
 
 function createStyles(colors: ThemeColors, isDesktopWeb: boolean) {
   return StyleSheet.create({
@@ -696,6 +687,24 @@ function createStyles(colors: ThemeColors, isDesktopWeb: boolean) {
       lineHeight: FontSize.caption * 1.45,
       marginTop: -4,
     },
+    confirmMessage: {
+      fontSize: FontSize.label,
+      color: colors.textSecondary,
+      lineHeight: FontSize.label * 1.5,
+    },
+    confirmDangerButton: {
+      minHeight: 48,
+      borderRadius: 999,
+      alignItems: 'center',
+      justifyContent: 'center',
+      paddingHorizontal: Spacing.lg,
+      backgroundColor: colors.destructive,
+    },
+    confirmDangerLabel: {
+      fontSize: FontSize.button,
+      fontWeight: '500',
+      color: colors.onPrimary,
+    },
     chipRow: {
       flexDirection: 'row',
       flexWrap: 'wrap',
@@ -1111,6 +1120,7 @@ export default function MusicLibraryScreen() {
   const [pickTrackId, setPickTrackId] = useState<string | null>(null);
   const [draggingTrackId, setDraggingTrackId] = useState<string | null>(null);
   const [dropTargetId, setDropTargetId] = useState<string | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<PendingDelete | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -1307,16 +1317,29 @@ export default function MusicLibraryScreen() {
     refreshQuota,
   ]);
 
-  const handleDeleteTrack = useCallback(
-    (track: MusicTrack) => {
-      void (async () => {
-        const ok = await confirmDelete(
-          'Удалить трек?',
-          `«${track.title}» пропадёт из библиотеки и папок.`,
-        );
-        if (!ok) return;
-        try {
-          setBusy(true);
+  const handleDeleteTrack = useCallback((track: MusicTrack) => {
+    setPendingDelete({ kind: 'track', track });
+  }, []);
+
+  const handleDeletePlaylist = useCallback(
+    (playlist: MusicPlaylistSummary | MusicPlaylistDetail) => {
+      setPendingDelete({ kind: 'playlist', playlist });
+    },
+    [],
+  );
+
+  const closePendingDelete = useCallback(() => {
+    if (busy) return;
+    setPendingDelete(null);
+  }, [busy]);
+
+  const confirmPendingDelete = useCallback(() => {
+    if (!pendingDelete) return;
+    void (async () => {
+      try {
+        setBusy(true);
+        if (pendingDelete.kind === 'track') {
+          const { track } = pendingDelete;
           await deleteMusicTrack(track.id);
           setTracks((prev) => prev.filter((item) => item.id !== track.id));
           if (activePlaylist) {
@@ -1337,15 +1360,39 @@ export default function MusicLibraryScreen() {
           );
           await refreshQuota();
           toast.success('Трек удалён');
-        } catch (error) {
-          toast.error(localizeErrorMessage(error, 'Не удалось удалить трек'));
-        } finally {
-          setBusy(false);
+        } else {
+          const { playlist } = pendingDelete;
+          await deleteMusicPlaylist(playlist.id);
+          setPlaylists((prev) =>
+            prev.filter(
+              (item) => item.id !== playlist.id && item.parentId !== playlist.id,
+            ),
+          );
+          if (
+            activePlaylist?.id === playlist.id ||
+            folderPath.some((item) => item.id === playlist.id)
+          ) {
+            setActivePlaylist(null);
+            setFolderPath([]);
+          }
+          void load();
+          toast.success('Папка удалена');
         }
-      })();
-    },
-    [activePlaylist, refreshQuota],
-  );
+        setPendingDelete(null);
+      } catch (error) {
+        toast.error(
+          localizeErrorMessage(
+            error,
+            pendingDelete.kind === 'track'
+              ? 'Не удалось удалить трек'
+              : 'Не удалось удалить папку',
+          ),
+        );
+      } finally {
+        setBusy(false);
+      }
+    })();
+  }, [activePlaylist, folderPath, load, pendingDelete, refreshQuota]);
 
   const handleCreatePlaylist = useCallback(() => {
     const title = playlistTitle.trim();
@@ -1438,41 +1485,6 @@ export default function MusicLibraryScreen() {
       })();
     },
     [],
-  );
-
-  const handleDeletePlaylist = useCallback(
-    (playlist: MusicPlaylistSummary | MusicPlaylistDetail) => {
-      void (async () => {
-        const ok = await confirmDelete(
-          'Удалить папку?',
-          `«${playlist.title}» удалится, треки останутся в библиотеке.`,
-        );
-        if (!ok) return;
-        try {
-          setBusy(true);
-          await deleteMusicPlaylist(playlist.id);
-          setPlaylists((prev) =>
-            prev.filter(
-              (item) => item.id !== playlist.id && item.parentId !== playlist.id,
-            ),
-          );
-          if (
-            activePlaylist?.id === playlist.id ||
-            folderPath.some((item) => item.id === playlist.id)
-          ) {
-            setActivePlaylist(null);
-            setFolderPath([]);
-          }
-          void load();
-          toast.success('Папка удалена');
-        } catch (error) {
-          toast.error(localizeErrorMessage(error, 'Не удалось удалить папку'));
-        } finally {
-          setBusy(false);
-        }
-      })();
-    },
-    [activePlaylist, folderPath, load],
   );
 
   const handleAddToPlaylist = useCallback(
@@ -2139,6 +2151,49 @@ export default function MusicLibraryScreen() {
                   }}
                 />
               ) : null}
+            </View>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      <Modal
+        visible={pendingDelete != null}
+        transparent
+        animationType="fade"
+        onRequestClose={closePendingDelete}>
+        <Pressable style={styles.modalOverlay} onPress={closePendingDelete}>
+          <Pressable
+            style={styles.modalCard}
+            onPress={(e) => e.stopPropagation?.()}>
+            <Text style={styles.modalTitle}>
+              {pendingDelete?.kind === 'playlist' ? 'Удалить папку?' : 'Удалить трек?'}
+            </Text>
+            <Text style={styles.confirmMessage}>
+              {pendingDelete?.kind === 'playlist'
+                ? `«${pendingDelete.playlist.title}» удалится, треки останутся в библиотеке.`
+                : pendingDelete?.kind === 'track'
+                  ? `«${pendingDelete.track.title}» пропадёт из библиотеки и папок.`
+                  : ''}
+            </Text>
+            <View style={styles.modalActions}>
+              <Button
+                label="Отмена"
+                variant="outline"
+                onPress={closePendingDelete}
+                disabled={busy}
+              />
+              <Pressable
+                accessibilityRole="button"
+                disabled={busy}
+                onPress={busy ? undefined : confirmPendingDelete}
+                style={({ pressed }) => [
+                  styles.confirmDangerButton,
+                  (pressed || busy) && { opacity: 0.85 },
+                ]}>
+                <Text style={styles.confirmDangerLabel}>
+                  {busy ? 'Удаляем…' : 'Удалить'}
+                </Text>
+              </Pressable>
             </View>
           </Pressable>
         </Pressable>

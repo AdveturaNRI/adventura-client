@@ -3,6 +3,7 @@ import type {
   ConversationListItem,
   MessagesPage,
 } from '@/services/chats/chatsApi';
+import { listMessages } from '@/services/chats/chatsApi';
 
 export type CachedChatThread = {
   conversation: ConversationListItem | null;
@@ -168,6 +169,15 @@ export function mergeCachedThreadMessages(
 export function appendCachedThreadMessage(conversationId: string, message: ChatMessage) {
   const prev = threadCache.get(conversationId);
   if (!prev) {
+    // Пользователь на сайте, тред ещё не открывал — всё равно копим входящие,
+    // чтобы при входе сразу были свежие сообщения (история догрузится bootstrap'ом).
+    touchThread(conversationId, {
+      conversation: getCachedConversation(conversationId),
+      messages: [message],
+      nextCursor: null,
+      peerLastReadAt: null,
+      updatedAt: Date.now(),
+    });
     return;
   }
   if (prev.messages.some((item) => item.id === message.id)) {
@@ -186,4 +196,62 @@ export function appendCachedThreadMessage(conversationId: string, message: ChatM
 export function clearChatCaches() {
   conversationsCache = null;
   threadCache.clear();
+  inflightPrefetch.clear();
+}
+
+const inflightPrefetch = new Map<
+  string,
+  Promise<{
+    conversation: ConversationListItem | null | undefined;
+    messages: ChatMessage[];
+    nextCursor: string | null;
+    peerLastReadAt: string | null;
+  }>
+>();
+
+/**
+ * Тянет первую страницу последних сообщений в кэш.
+ * Дедуп in-flight: press + bootstrap + top-N не бьют API трижды.
+ */
+export function prefetchChatThread(
+  conversationId: string,
+  conversation?: ConversationListItem | null,
+) {
+  const pending = inflightPrefetch.get(conversationId);
+  if (pending) {
+    return pending;
+  }
+
+  const run = listMessages(conversationId)
+    .then((page) => mergeCachedThreadMessages(conversationId, page, conversation))
+    .finally(() => {
+      inflightPrefetch.delete(conversationId);
+    });
+
+  inflightPrefetch.set(conversationId, run);
+  return run;
+}
+
+/** Фоном греет верх списка — без await у вызывающего. */
+export function prefetchChatThreads(
+  items: ConversationListItem[],
+  options?: { limit?: number; concurrency?: number },
+) {
+  const limit = options?.limit ?? 8;
+  const concurrency = options?.concurrency ?? 3;
+  const targets = items.slice(0, limit);
+  if (targets.length === 0) {
+    return;
+  }
+
+  void (async () => {
+    for (let i = 0; i < targets.length; i += concurrency) {
+      const batch = targets.slice(i, i + concurrency);
+      await Promise.all(
+        batch.map((item) =>
+          prefetchChatThread(item.id, item).catch(() => null),
+        ),
+      );
+    }
+  })();
 }

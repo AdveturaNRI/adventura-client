@@ -1,0 +1,349 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <title>Bake dice previews</title>
+</head>
+<body>
+  <pre id="log">baking…</pre>
+  <script>
+    const DIES = ['d4', 'd6', 'd8', 'd10', 'd12', 'd20', 'd100'];
+    const SHOW_VALUE = {
+      d4: 4, d6: 6, d8: 8, d10: 10, d12: 12, d20: 20, d100: 0,
+    };
+    /** Кручение вокруг оси на камеру — max-грань анфас, цифра читается. */
+    const PREVIEW_TWIST = {
+      d4: 0.52,
+      d6: Math.PI,
+      d8: -1.2,
+      d10: -0.35,
+      d12: 0.35,
+      d20: 0.55,
+      d100: -0.4,
+    };
+    const COLORS = [
+      '#157AFE', '#E53935', '#43A047', '#FB8C00', '#8E24AA',
+      '#00ACC1', '#F9A825', '#F5F0E6', '#455A64', '#212121',
+    ];
+    const THEME_ROOT = '/dice-box/themes/default/';
+    const SIZE = 192;
+    const FILL = 0.84;
+    const logEl = document.getElementById('log');
+    const log = (line) => {
+      logEl.textContent += '\n' + line;
+    };
+
+    function loadScript(src) {
+      return new Promise((resolve, reject) => {
+        const s = document.createElement('script');
+        s.src = src;
+        s.onload = () => resolve();
+        s.onerror = () => reject(new Error(src));
+        document.head.appendChild(s);
+      });
+    }
+
+    function hexToColor3(BABYLON, hex) {
+      try {
+        return BABYLON.Color3.FromHexString(hex);
+      } catch {
+        return new BABYLON.Color3(0.082, 0.478, 0.996);
+      }
+    }
+
+    function waitTex(tex, ms = 10000) {
+      if (!tex || (tex.isReady && tex.isReady())) return Promise.resolve();
+      return new Promise((resolve) => {
+        const t = setTimeout(resolve, ms);
+        try {
+          tex.onLoadObservable.addOnce(() => {
+            clearTimeout(t);
+            resolve();
+          });
+        } catch {
+          clearTimeout(t);
+          resolve();
+        }
+      });
+    }
+
+    function faceNormalFromCollider(collider, faceId) {
+      const pos = collider.positions;
+      const idx = collider.indices;
+      const i = faceId * 3;
+      const ax = pos[idx[i] * 3], ay = pos[idx[i] * 3 + 1], az = pos[idx[i] * 3 + 2];
+      const bx = pos[idx[i + 1] * 3], by = pos[idx[i + 1] * 3 + 1], bz = pos[idx[i + 1] * 3 + 2];
+      const cx = pos[idx[i + 2] * 3], cy = pos[idx[i + 2] * 3 + 1], cz = pos[idx[i + 2] * 3 + 2];
+      const ux = bx - ax, uy = by - ay, uz = bz - az;
+      const vx = cx - ax, vy = cy - ay, vz = cz - az;
+      let nx = uy * vz - uz * vy;
+      let ny = uz * vx - ux * vz;
+      let nz = ux * vy - uy * vx;
+      const len = Math.hypot(nx, ny, nz) || 1;
+      return [nx / len, ny / len, nz / len];
+    }
+
+    function faceCentroid(collider, faceId) {
+      const pos = collider.positions;
+      const idx = collider.indices;
+      const i = faceId * 3;
+      let cx = 0, cy = 0, cz = 0;
+      for (let k = 0; k < 3; k += 1) {
+        const vi = idx[i + k];
+        cx += pos[vi * 3];
+        cy += pos[vi * 3 + 1];
+        cz += pos[vi * 3 + 2];
+      }
+      return [cx / 3, cy / 3, cz / 3];
+    }
+
+    function quatFromTo(BABYLON, from, to) {
+      const f = from.clone().normalize();
+      const t = to.clone().normalize();
+      let axis = BABYLON.Vector3.Cross(f, t);
+      const dot = BABYLON.Vector3.Dot(f, t);
+      if (axis.lengthSquared() < 1e-10) {
+        if (dot > 0) return BABYLON.Quaternion.Identity();
+        const ortho =
+          Math.abs(f.x) < 0.9
+            ? new BABYLON.Vector3(1, 0, 0)
+            : new BABYLON.Vector3(0, 1, 0);
+        axis = BABYLON.Vector3.Cross(f, ortho).normalize();
+        return BABYLON.Quaternion.RotationAxis(axis, Math.PI);
+      }
+      axis.normalize();
+      const angle = Math.acos(Math.min(1, Math.max(-1, dot)));
+      return BABYLON.Quaternion.RotationAxis(axis, angle);
+    }
+
+    function normalizePng(dataUrl) {
+      return new Promise((resolve) => {
+        const img = new Image();
+        img.onload = () => {
+          const src = document.createElement('canvas');
+          src.width = img.width;
+          src.height = img.height;
+          const sctx = src.getContext('2d');
+          sctx.drawImage(img, 0, 0);
+          const { data, width, height } = sctx.getImageData(0, 0, src.width, src.height);
+          let minX = width, minY = height, maxX = 0, maxY = 0;
+          let found = false;
+          for (let y = 0; y < height; y += 1) {
+            for (let x = 0; x < width; x += 1) {
+              if (data[(y * width + x) * 4 + 3] > 12) {
+                found = true;
+                if (x < minX) minX = x;
+                if (y < minY) minY = y;
+                if (x > maxX) maxX = x;
+                if (y > maxY) maxY = y;
+              }
+            }
+          }
+          const out = document.createElement('canvas');
+          out.width = SIZE;
+          out.height = SIZE;
+          const octx = out.getContext('2d');
+          octx.clearRect(0, 0, SIZE, SIZE);
+          if (!found) {
+            resolve(dataUrl);
+            return;
+          }
+          const bw = maxX - minX + 1;
+          const bh = maxY - minY + 1;
+          const scale = (SIZE * FILL) / Math.max(bw, bh);
+          const dw = bw * scale;
+          const dh = bh * scale;
+          octx.imageSmoothingEnabled = true;
+          octx.imageSmoothingQuality = 'high';
+          octx.drawImage(
+            src, minX, minY, bw, bh,
+            (SIZE - dw) / 2, (SIZE - dh) / 2, dw, dh,
+          );
+          resolve(out.toDataURL('image/png'));
+        };
+        img.onerror = () => resolve(dataUrl);
+        img.src = dataUrl;
+      });
+    }
+
+    function disposeAll(engine, scene, canvas) {
+      try { engine?.stopRenderLoop?.(); } catch (_) {}
+      try { scene?.dispose?.(); } catch (_) {}
+      try { engine?.dispose?.(); } catch (_) {}
+      try {
+        const gl = canvas.getContext('webgl2') || canvas.getContext('webgl');
+        gl?.getExtension('WEBGL_lose_context')?.loseContext();
+      } catch (_) {}
+    }
+
+    async function bakeOne(BABYLON, theme, die, hex) {
+      const canvas = document.createElement('canvas');
+      canvas.width = SIZE;
+      canvas.height = SIZE;
+      const engine = new BABYLON.Engine(canvas, true, {
+        preserveDrawingBuffer: true,
+        adaptToDeviceRatio: false,
+        alpha: true,
+        antialias: true,
+      });
+      const scene = new BABYLON.Scene(engine);
+      scene.clearColor = new BABYLON.Color4(0, 0, 0, 0);
+      new BABYLON.HemisphericLight('h', new BABYLON.Vector3(0.2, 1, 0.3), scene).intensity = 1.2;
+      new BABYLON.DirectionalLight('k', new BABYLON.Vector3(-0.4, -1, 0.5), scene).intensity = 1.0;
+      const camera = new BABYLON.ArcRotateCamera(
+        'cam', -Math.PI / 2, Math.PI / 2.12, 2.35, BABYLON.Vector3.Zero(), scene,
+      );
+      camera.inputs.clear();
+      camera.upVector = new BABYLON.Vector3(0, 1, 0);
+      scene.activeCamera = camera;
+
+      if (!BABYLON.Effect.ShadersStore.adventuraDieVertexShader) {
+        BABYLON.Effect.ShadersStore.adventuraDieVertexShader = `
+          precision highp float;
+          attribute vec3 position;
+          attribute vec3 normal;
+          attribute vec2 uv;
+          uniform mat4 world;
+          uniform mat4 worldViewProjection;
+          varying vec2 vUV;
+          varying vec3 vNormalW;
+          void main() {
+            vec4 p = vec4(position, 1.0);
+            gl_Position = worldViewProjection * p;
+            vUV = uv;
+            vNormalW = normalize(vec3(world * vec4(normal, 0.0)));
+          }
+        `;
+        BABYLON.Effect.ShadersStore.adventuraDieFragmentShader = `
+          precision highp float;
+          varying vec2 vUV;
+          varying vec3 vNormalW;
+          uniform sampler2D diffuseSampler;
+          uniform vec3 themeColor;
+          uniform vec3 lightDir;
+          void main() {
+            vec4 tex = texture2D(diffuseSampler, vUV);
+            vec3 base = mix(themeColor, tex.rgb, tex.a);
+            float ndl = max(0.45, dot(normalize(vNormalW), normalize(-lightDir)));
+            gl_FragColor = vec4(base * (0.58 + 0.5 * ndl), 1.0);
+          }
+        `;
+      }
+
+      const meshes = await new Promise((resolve, reject) => {
+        BABYLON.SceneLoader.ImportMesh(
+          die, THEME_ROOT, 'preview.babylon', scene,
+          (loaded) => resolve(loaded),
+          null,
+          (_s, msg) => reject(new Error(msg || 'import')),
+        );
+      });
+
+      const mesh =
+        meshes.find((m) => m.name === die) ||
+        meshes.find((m) => DIES.includes(String(m.name))) ||
+        meshes[0];
+      if (!mesh) throw new Error('no mesh ' + die);
+
+      for (const m of meshes) {
+        const keep = m === mesh || m.parent === mesh;
+        m.setEnabled(keep);
+        m.isVisible = keep;
+      }
+      mesh.scaling.set(10, 10, 10);
+
+      const faceMap = theme.colliderFaceMap[die];
+      const targetValue = SHOW_VALUE[die];
+      const faceId = Number(
+        Object.keys(faceMap).find((k) => Number(faceMap[k]) === targetValue),
+      );
+      const collider = theme.meshes.find((m) => m.name === die + '_collider');
+      const toCamera = camera.position.subtract(BABYLON.Vector3.Zero()).normalize();
+
+      if (collider && Number.isFinite(faceId)) {
+        let [nx, ny, nz] = faceNormalFromCollider(collider, faceId);
+        const [cx, cy, cz] = faceCentroid(collider, faceId);
+        if (nx * cx + ny * cy + nz * cz < 0) {
+          nx = -nx; ny = -ny; nz = -nz;
+        }
+        let orient = quatFromTo(BABYLON, new BABYLON.Vector3(nx, ny, nz), toCamera);
+        const twist = PREVIEW_TWIST[die] || 0;
+        if (twist) {
+          orient = BABYLON.Quaternion.RotationAxis(toCamera, twist).multiply(orient);
+        }
+        mesh.rotationQuaternion = orient;
+        mesh.rotation.set(0, 0, 0);
+      } else {
+        mesh.rotation.set(0.35, 0.7, 0.1);
+      }
+
+      const mat = new BABYLON.ShaderMaterial(die + '-mat', scene, {
+        vertex: 'adventuraDie', fragment: 'adventuraDie',
+      }, {
+        attributes: ['position', 'normal', 'uv'],
+        uniforms: ['world', 'worldViewProjection', 'themeColor', 'lightDir'],
+        samplers: ['diffuseSampler'],
+      });
+      mat.setVector3('lightDir', new BABYLON.Vector3(-0.4, -1, 0.5));
+      const themeColor = hexToColor3(BABYLON, hex);
+      const luma = 0.2126 * themeColor.r + 0.7152 * themeColor.g + 0.0722 * themeColor.b;
+      const diffuseName = luma > 0.55 ? 'diffuse-dark.png' : 'diffuse-light.png';
+      mat.setColor3('themeColor', themeColor);
+      const tex = new BABYLON.Texture(THEME_ROOT + diffuseName, scene);
+      tex.hasAlpha = true;
+      mat.setTexture('diffuseSampler', tex);
+      mesh.material = mat;
+      mesh.getChildMeshes?.(true)?.forEach((c) => { c.material = mat; });
+
+      await waitTex(tex);
+      mesh.computeWorldMatrix(true);
+      const bi = mesh.getHierarchyBoundingVectors(true);
+      const sizeVec = bi.max.subtract(bi.min);
+      const maxDim = Math.max(sizeVec.x, sizeVec.y, sizeVec.z, 0.01);
+      camera.setTarget(BABYLON.Vector3.Center(bi.min, bi.max));
+      camera.radius = maxDim * 1.9;
+      camera.lowerRadiusLimit = camera.upperRadiusLimit = camera.radius;
+
+      for (let i = 0; i < 8; i += 1) {
+        engine.resize();
+        scene.render();
+        await new Promise((r) => requestAnimationFrame(r));
+      }
+
+      const raw = canvas.toDataURL('image/png');
+      disposeAll(engine, scene, canvas);
+      return normalizePng(raw);
+    }
+
+    (async () => {
+      window.__DICE_PREVIEW_BAKE__ = { done: false, error: null, files: {} };
+      try {
+        await loadScript('https://cdn.babylonjs.com/v5.57.1/babylon.js');
+        await loadScript('https://cdn.babylonjs.com/v5.57.1/loaders/babylonjs.loaders.min.js');
+        const theme = await fetch(THEME_ROOT + 'default.json').then((r) => r.json());
+        const BABYLON = window.BABYLON;
+        const only = (new URLSearchParams(location.search)).get('only');
+        const colorFilter = (new URLSearchParams(location.search)).get('color');
+        const dies = only ? [only] : DIES;
+        const colors = colorFilter
+          ? COLORS.filter((c) => c.slice(1).toUpperCase() === colorFilter.toUpperCase())
+          : COLORS;
+        for (const hex of colors) {
+          const folder = hex.slice(1).toUpperCase();
+          for (const die of dies) {
+            log(folder + '/' + die);
+            const dataUrl = await bakeOne(BABYLON, theme, die, hex);
+            window.__DICE_PREVIEW_BAKE__.files[folder + '/' + die + '.png'] = dataUrl;
+          }
+        }
+        window.__DICE_PREVIEW_BAKE__.done = true;
+        log('done ' + Object.keys(window.__DICE_PREVIEW_BAKE__.files).length);
+      } catch (err) {
+        console.error(err);
+        window.__DICE_PREVIEW_BAKE__.error = String(err && err.message || err);
+        log('ERROR ' + window.__DICE_PREVIEW_BAKE__.error);
+      }
+    })();
+  </script>
+</body>
+</html>

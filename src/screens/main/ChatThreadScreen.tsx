@@ -118,11 +118,12 @@ import {
 } from '@/utils/dice-animations-storage';
 import { setFocusedChatConversation } from '@/utils/chat-alerts';
 import { localizeErrorMessage } from '@/utils/localizeError';
+import { stableAvatarUrl } from '@/utils/stable-avatar-url';
 import {
   appendCachedThreadMessage,
   getCachedConversation,
   getCachedThread,
-  mergeCachedThreadMessages,
+  prefetchChatThread,
   removeCachedConversation,
   setCachedConversations,
   setCachedThread,
@@ -146,7 +147,17 @@ type PendingAttachment = {
   mimeType: string;
   kind: ChatAttachmentKind;
   isObjectUrl?: boolean;
+  /** Kept for upload after blob: preview URL is revoked. */
+  file?: File;
 };
+
+function revokePendingAttachmentUrls(items: PendingAttachment[]) {
+  for (const item of items) {
+    if (item.isObjectUrl) {
+      URL.revokeObjectURL(item.uri);
+    }
+  }
+}
 
 function attachmentKindFromMime(mimeType: string): ChatAttachmentKind {
   if (mimeType.startsWith('image/')) {
@@ -232,16 +243,18 @@ function getClipboardImageFiles(clipboardData: DataTransfer | null): File[] {
     if (!file || !file.type.startsWith('image/')) {
       return;
     }
-    const normalized = normalizeClipboardImageFile(file);
-    const key = `${normalized.name}:${normalized.size}:${normalized.lastModified}`;
+    // Deduplicate before rename: browsers expose the same paste in both
+    // `items` and `files`, and normalizeClipboardImageFile() changes name/lastModified.
+    const key = `${file.type}:${file.size}:${file.lastModified}:${file.name}`;
     if (seen.has(key)) {
       return;
     }
     seen.add(key);
-    collected.push(normalized);
+    collected.push(normalizeClipboardImageFile(file));
   };
 
   const items = clipboardData.items;
+  let pushedFromItems = false;
   if (items) {
     for (let index = 0; index < items.length; index += 1) {
       const item = items[index];
@@ -249,13 +262,17 @@ function getClipboardImageFiles(clipboardData: DataTransfer | null): File[] {
         continue;
       }
       push(item.getAsFile());
+      pushedFromItems = true;
     }
   }
 
-  const files = clipboardData.files;
-  if (files) {
-    for (let index = 0; index < files.length; index += 1) {
-      push(files[index] ?? null);
+  // Fallback only when items had no image files — avoid double-counting the same paste.
+  if (!pushedFromItems) {
+    const files = clipboardData.files;
+    if (files) {
+      for (let index = 0; index < files.length; index += 1) {
+        push(files[index] ?? null);
+      }
     }
   }
 
@@ -443,22 +460,25 @@ function buildChatTimeline(
   return items;
 }
 
-/** Одинаковый путь (игнор query) — оставляем старый url, чтобы Image не перезагружался. */
-function stableAvatarUrl(prevUrl?: string | null, nextUrl?: string | null) {
-  const prev = prevUrl?.trim() || null;
-  const next = nextUrl?.trim() || null;
-  if (!prev) {
+/** Не дёргаем peer.avatarUrl на каждый refetch — только если сменился объект. */
+function withStablePeerAvatar(
+  prev: ConversationListItem | null | undefined,
+  next: ConversationListItem,
+): ConversationListItem {
+  if (!next.peer || !prev?.peer || prev.peer.id !== next.peer.id) {
     return next;
   }
-  if (!next) {
-    return prev;
+  const avatarUrl = stableAvatarUrl(prev.peer.avatarUrl, next.peer.avatarUrl);
+  if (avatarUrl === next.peer.avatarUrl) {
+    return next;
   }
-  if (prev === next) {
-    return prev;
-  }
-  const prevPath = prev.split('?')[0];
-  const nextPath = next.split('?')[0];
-  return prevPath === nextPath ? prev : next;
+  return {
+    ...next,
+    peer: {
+      ...next.peer,
+      avatarUrl,
+    },
+  };
 }
 
 function formatLastSeen(online: boolean, lastSeenAt: string | null) {
@@ -1510,6 +1530,30 @@ export default function ChatThreadScreen() {
   const [members, setMembers] = useState<ChatMember[]>([]);
   const [membersLoading, setMembersLoading] = useState(false);
   const [membersBusy, setMembersBusy] = useState(false);
+  /** Presigned sender avatars in groups — keep path-stable urls across message refreshes. */
+  const stableSenderAvatarsRef = useRef<Map<string, string>>(new Map());
+
+  useEffect(() => {
+    stableSenderAvatarsRef.current.clear();
+  }, [conversationId]);
+
+  const resolveStableSenderAvatar = useCallback(
+    (senderId: string | undefined, nextUrl?: string | null) => {
+      if (!senderId) {
+        return nextUrl?.trim() || null;
+      }
+      const incoming = nextUrl?.trim() || null;
+      if (!incoming) {
+        return stableSenderAvatarsRef.current.get(senderId) ?? null;
+      }
+      const prev = stableSenderAvatarsRef.current.get(senderId) ?? null;
+      const stable = stableAvatarUrl(prev, incoming) ?? incoming;
+      stableSenderAvatarsRef.current.set(senderId, stable);
+      return stable;
+    },
+    [],
+  );
+
   const [renameOpen, setRenameOpen] = useState(false);
   const [addMembersOpen, setAddMembersOpen] = useState(false);
   const [addMemberContacts, setAddMemberContacts] = useState<
@@ -1701,11 +1745,9 @@ export default function ChatThreadScreen() {
     [appendMessage, myId, voiceActiveHere],
   );
 
-  const clearPendingAttachments = useCallback(() => {
-    for (const item of pendingAttachmentsRef.current) {
-      if (item.isObjectUrl) {
-        URL.revokeObjectURL(item.uri);
-      }
+  const clearPendingAttachments = useCallback((options?: { revoke?: boolean }) => {
+    if (options?.revoke !== false) {
+      revokePendingAttachmentUrls(pendingAttachmentsRef.current);
     }
     pendingAttachmentsRef.current = [];
     setPendingAttachments([]);
@@ -1714,8 +1756,8 @@ export default function ChatThreadScreen() {
   const removePendingAttachment = useCallback((id: string) => {
     setPendingAttachments((prev) => {
       const target = prev.find((item) => item.id === id);
-      if (target?.isObjectUrl) {
-        URL.revokeObjectURL(target.uri);
+      if (target) {
+        revokePendingAttachmentUrls([target]);
       }
       const next = prev.filter((item) => item.id !== id);
       pendingAttachmentsRef.current = next;
@@ -1739,20 +1781,12 @@ export default function ChatThreadScreen() {
     setPendingAttachments((prev) => {
       const room = MAX_CHAT_ATTACHMENTS - prev.length;
       if (room <= 0) {
-        for (const item of items) {
-          if (item.isObjectUrl) {
-            URL.revokeObjectURL(item.uri);
-          }
-        }
+        revokePendingAttachmentUrls(items);
         limitToast([...prev, ...items]);
         return prev;
       }
       if (items.length > room) {
-        for (const item of items.slice(room)) {
-          if (item.isObjectUrl) {
-            URL.revokeObjectURL(item.uri);
-          }
-        }
+        revokePendingAttachmentUrls(items.slice(room));
         limitToast([...prev, ...items]);
       }
       const next = [...prev, ...items.slice(0, room)];
@@ -1763,11 +1797,7 @@ export default function ChatThreadScreen() {
 
   useEffect(() => {
     return () => {
-      for (const item of pendingAttachmentsRef.current) {
-        if (item.isObjectUrl) {
-          URL.revokeObjectURL(item.uri);
-        }
-      }
+      revokePendingAttachmentUrls(pendingAttachmentsRef.current);
     };
   }, []);
 
@@ -1846,7 +1876,7 @@ export default function ChatThreadScreen() {
     const list = await listConversations();
     setCachedConversations(list);
     const found = list.find((item) => item.id === conversationId) ?? null;
-    setConversation(found);
+    setConversation((prev) => (found ? withStablePeerAvatar(prev, found) : null));
     if (found) {
       upsertCachedConversation(found);
       setPeerLastReadAt(found.peerLastReadAt);
@@ -1858,8 +1888,7 @@ export default function ChatThreadScreen() {
     if (!conversationId) {
       return;
     }
-    const page = await listMessages(conversationId);
-    const merged = mergeCachedThreadMessages(conversationId, page);
+    const merged = await prefetchChatThread(conversationId);
     setMessages((prev) => {
       const byId = new Map(merged.messages.map((item) => [item.id, item]));
       for (const item of prev) {
@@ -1882,11 +1911,11 @@ export default function ChatThreadScreen() {
       if (!next) {
         return prev;
       }
-      return {
+      return withStablePeerAvatar(prev, {
         ...next,
-        blockedByMe: page.blockedByMe ?? next.blockedByMe,
-        blockedMe: page.blockedMe ?? next.blockedMe,
-      };
+        blockedByMe: next.blockedByMe,
+        blockedMe: next.blockedMe,
+      });
     });
   }, [conversationId]);
 
@@ -1937,9 +1966,9 @@ export default function ChatThreadScreen() {
 
       setRefreshing(true);
       try {
-        const [list, page] = await Promise.all([
+        const [list, merged] = await Promise.all([
           listConversations(),
-          listMessages(conversationId),
+          prefetchChatThread(conversationId),
         ]);
         if (cancelled) {
           return;
@@ -1954,12 +1983,13 @@ export default function ChatThreadScreen() {
         }
 
         upsertCachedConversation(found);
-        const merged = mergeCachedThreadMessages(conversationId, page, found);
-        setConversation({
-          ...found,
-          blockedByMe: page.blockedByMe ?? found.blockedByMe,
-          blockedMe: page.blockedMe ?? found.blockedMe,
-        });
+        setConversation((prev) =>
+          withStablePeerAvatar(prev, {
+            ...found,
+            blockedByMe: merged.conversation?.blockedByMe ?? found.blockedByMe,
+            blockedMe: merged.conversation?.blockedMe ?? found.blockedMe,
+          }),
+        );
         setMessages((prev) => {
           const byId = new Map(merged.messages.map((item) => [item.id, item]));
           for (const item of prev) {
@@ -1975,7 +2005,18 @@ export default function ChatThreadScreen() {
           );
         });
         setNextCursor(merged.nextCursor);
-        setPeerLastReadAt(merged.peerLastReadAt);
+        setPeerLastReadAt(merged.peerLastReadAt ?? found.peerLastReadAt);
+        // Подклеим conversation из списка к уже закэшированной странице сообщений.
+        setCachedThread(conversationId, {
+          conversation: {
+            ...found,
+            blockedByMe: merged.conversation?.blockedByMe ?? found.blockedByMe,
+            blockedMe: merged.conversation?.blockedMe ?? found.blockedMe,
+          },
+          messages: merged.messages,
+          nextCursor: merged.nextCursor,
+          peerLastReadAt: merged.peerLastReadAt ?? found.peerLastReadAt,
+        });
         await markConversationRead(conversationId);
       } catch (error) {
         if (cancelled) {
@@ -2252,6 +2293,7 @@ export default function ChatThreadScreen() {
           mimeType,
           kind: attachmentKindFromMime(mimeType),
           isObjectUrl: true,
+          file,
         });
       }
 
@@ -2453,7 +2495,8 @@ export default function ChatThreadScreen() {
     selectionRef.current = { start: 0, end: 0 };
     setEmojiPanelOpen(false);
     setReplyTo(null);
-    clearPendingAttachments();
+    // Keep blob URLs alive until upload finishes (optimistic preview + FormData fetch).
+    clearPendingAttachments({ revoke: false });
     scrollToBottom();
 
     try {
@@ -2464,8 +2507,10 @@ export default function ChatThreadScreen() {
           uri: item.uri,
           name: item.name,
           mimeType: item.mimeType,
+          blob: item.file,
         })),
       });
+      revokePendingAttachmentUrls(attachments);
       setMessages((prev) => {
         const withoutPending = prev.filter((item) => item.id !== pendingId);
         if (withoutPending.some((item) => item.id === message.id)) {
@@ -2513,7 +2558,9 @@ export default function ChatThreadScreen() {
       skin?: string;
       mode: DiceRollMode;
     }) => {
-      if (!conversationId || diceRollBusy || conversation?.blockedMe || localDiceRoll) {
+      // Синхронный лок: между setBusy и стартом броска есть await(rAF×2) —
+      // за это окно второй onPress видит старый state и шлёт второй POST.
+      if (!conversationId || diceRollBusyRef.current || conversation?.blockedMe) {
         return;
       }
       diceRollBusyRef.current = true;
@@ -2541,6 +2588,10 @@ export default function ChatThreadScreen() {
       });
 
       try {
+        // Протухший resolve после второго тапа / смены token — не шлём в API.
+        if (token !== localDiceRollTokenRef.current) {
+          return;
+        }
         if (!outcome || outcome.groups.length === 0) {
           toast.error('Не удалось бросить кости');
           return;
@@ -2554,6 +2605,9 @@ export default function ChatThreadScreen() {
           })),
           ...(input.mode !== 'normal' ? { mode: input.mode } : {}),
         });
+        if (token !== localDiceRollTokenRef.current) {
+          return;
+        }
         const rolled = parseDiceRollPayload(message.body);
         if (rolled && ((!rolled.color && input.color) || (!rolled.skin && input.skin))) {
           message = {
@@ -2578,20 +2632,14 @@ export default function ChatThreadScreen() {
       } catch (error) {
         toast.error(localizeErrorMessage(error, 'Не удалось бросить кости'));
       } finally {
-        suppressOwnDiceAnimRef.current = false;
-        diceRollBusyRef.current = false;
-        setDiceRollBusy(false);
+        if (token === localDiceRollTokenRef.current) {
+          suppressOwnDiceAnimRef.current = false;
+          diceRollBusyRef.current = false;
+          setDiceRollBusy(false);
+        }
       }
     },
-    [
-      appendMessage,
-      conversation?.blockedMe,
-      conversationId,
-      diceRollBusy,
-      localDiceRoll,
-      scrollToBottom,
-      user?.nickname,
-    ],
+    [appendMessage, conversation?.blockedMe, conversationId, scrollToBottom, user?.nickname],
   );
 
   const toReplyPreview = useCallback((message: ChatMessage): ChatReplyPreviewData => {
@@ -2805,7 +2853,7 @@ export default function ChatThreadScreen() {
       setIsMenuBusy(true);
       try {
         const next = await blockPeer(conversationId);
-        setConversation(next);
+        setConversation((prev) => withStablePeerAvatar(prev, next));
         setPendingBlock(false);
         toast.success(`${nickname} заблокирован`);
         if (deleteChat) {
@@ -2873,7 +2921,7 @@ export default function ChatThreadScreen() {
       setMembersBusy(true);
       try {
         const summary = await renameGroupChat(conversationId, nextTitle);
-        setConversation(summary);
+        setConversation((prev) => withStablePeerAvatar(prev, summary));
         setRenameOpen(false);
         toast.success('Название обновлено');
       } catch (error) {
@@ -3033,7 +3081,7 @@ export default function ChatThreadScreen() {
     setUnblocking(true);
     try {
       const next = await unblockPeer(conversationId);
-      setConversation(next);
+      setConversation((prev) => withStablePeerAvatar(prev, next));
       await loadMessages();
       toast.success(`${conversation.peer?.nickname ?? 'Пользователь'} разблокирован`);
     } catch (error) {
@@ -3809,11 +3857,12 @@ export default function ChatThreadScreen() {
                           style={styles.authorAvatarButton}>
                           <UserAvatar
                             nickname={item.sender?.nickname ?? 'Игрок'}
-                            avatarUrl={
+                            avatarUrl={resolveStableSenderAvatar(
+                              item.senderId,
                               item.sender?.avatarUrl ??
-                              members.find((member) => member.id === item.senderId)?.avatarUrl ??
-                              null
-                            }
+                                members.find((member) => member.id === item.senderId)?.avatarUrl ??
+                                null,
+                            )}
                             size={30}
                             badges={
                               item.sender?.badges ??
@@ -4438,7 +4487,7 @@ export default function ChatThreadScreen() {
           conversationId={conversationId}
           onClose={() => setBackgroundPickerOpen(false)}
           onConversationUpdated={(next) => {
-            setConversation(next);
+            setConversation((prev) => withStablePeerAvatar(prev, next));
             publishConversationUpdate(next);
           }}
         />

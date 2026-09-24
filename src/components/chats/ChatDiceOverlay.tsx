@@ -535,6 +535,8 @@ export function ChatDiceOverlay({
 
     return () => {
       cancelled = true;
+      // Чтобы Strict Mode / смена stageReady могли заново стартовать тот же token.
+      startedLocalTokensRef.current.delete(active.token);
       stageRef.current?.clear();
     };
   }, [localRoll, stageReady]);

@@ -192,7 +192,7 @@ function resolveSealIcon(emphasis: ToastEmphasis, variant: ToastVariant): IconNa
   return 'notifications';
 }
 
-export function ToastBanner({ text1, text2, onPress, variant, props }: ToastBannerProps) {
+export function ToastBanner({ text1, text2, variant, props }: ToastBannerProps) {
   const colors = useTheme();
   const { colorScheme } = useThemePreference();
   const isDark = colorScheme === 'dark';
@@ -219,6 +219,10 @@ export function ToastBanner({ text1, text2, onPress, variant, props }: ToastBann
     onAction?.();
     Toast.hide();
   };
+
+  // react-native-toast-message defaults onPress to a noop — Boolean(onPress) is always
+  // true and forces a web <button>, which Safari paints white over dark theme text.
+  const isInteractive = Boolean(actionLabel && onAction);
 
   const leading = showAvatar ? (
     <View style={styles.leading}>
@@ -289,8 +293,8 @@ export function ToastBanner({ text1, text2, onPress, variant, props }: ToastBann
     </>
   );
 
-  // Web: CSS vars on the card → +html !important rules. Don't rely on html[data-theme] alone
-  // (Safari paints Pressable white; RN color then reads as white-on-white).
+  // Web: theme modifier class + CSS vars. Hard colors live in +html.tsx (!important) so
+  // Safari cannot leave a white Pressable over white/dark text.
   const webThemeVars =
     Platform.OS === 'web'
       ? ({
@@ -322,30 +326,58 @@ export function ToastBanner({ text1, text2, onPress, variant, props }: ToastBann
     emphasis !== 'default' && variant === 'warning' ? styles.cardWarningEmphasis : null,
   ];
 
-  const isInteractive = Boolean(onAction) || Boolean(onPress);
+  const toastClassName = isDark
+    ? 'adventura-toast adventura-toast--dark'
+    : 'adventura-toast adventura-toast--light';
+
+  // Web: never use Pressable / role=button — Safari paints those white and kills contrast.
+  // Native keeps Pressable for press feedback.
+  const inner =
+    Platform.OS === 'web' ? (
+      <View
+        {...({
+          className: 'adventura-toast-hit',
+          // No accessibilityRole/role="button" — WebKit UA stylesheet forces white fill.
+          'aria-label': isInteractive ? (actionLabel ?? text1 ?? 'Уведомление') : undefined,
+          tabIndex: isInteractive ? 0 : undefined,
+          onClick: isInteractive ? handleAction : undefined,
+          onKeyDown: isInteractive
+            ? (event: { key: string; preventDefault: () => void }) => {
+                if (event.key === 'Enter' || event.key === ' ') {
+                  event.preventDefault();
+                  handleAction();
+                }
+              }
+            : undefined,
+          style: [
+            styles.cardInner,
+            {
+              backgroundColor: colors.surface,
+              background: colors.surface,
+              cursor: isInteractive ? 'pointer' : 'default',
+            },
+          ],
+        } as object)}>
+        {body}
+      </View>
+    ) : isInteractive ? (
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={actionLabel ?? text1 ?? 'Уведомление'}
+        onPress={handleAction}
+        style={({ pressed }) => [styles.cardInner, pressed && styles.cardPressed]}>
+        {body}
+      </Pressable>
+    ) : (
+      <View style={styles.cardInner}>{body}</View>
+    );
 
   return (
     <View pointerEvents="box-none" style={[styles.outer, getAlignmentStyle(alignment, styles)]}>
       <View
-        {...(Platform.OS === 'web' ? ({ className: 'adventura-toast' } as object) : null)}
+        {...(Platform.OS === 'web' ? ({ className: toastClassName } as object) : null)}
         style={cardStyle}>
-        {isInteractive ? (
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={actionLabel ?? text1 ?? 'Уведомление'}
-            onPress={onAction ? handleAction : onPress}
-            style={({ pressed }) => [
-              styles.cardInner,
-              Platform.OS === 'web'
-                ? ({ backgroundColor: 'transparent', background: 'transparent' } as object)
-                : null,
-              pressed && styles.cardPressed,
-            ]}>
-            {body}
-          </Pressable>
-        ) : (
-          <View style={styles.cardInner}>{body}</View>
-        )}
+        {inner}
       </View>
     </View>
   );

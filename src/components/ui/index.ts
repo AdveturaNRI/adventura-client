@@ -45,6 +45,7 @@ export {
   SwipeBlock,
   type SwipeAction,
   type SwipeBlockVariant,
+  type SwipeDismissDirection,
   type SwipeDismissRequest,
 } from './swipe/SwipeBlock';
 export { getSwipeSpecs, type SwipeBlockSpec, type SwipeDirection } from './swipe/swipe.config';

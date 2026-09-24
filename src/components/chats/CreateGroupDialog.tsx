@@ -1,9 +1,10 @@
 import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Modal,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -17,8 +18,10 @@ import { FontSize, Spacing, type ThemeColors } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { useThemedStyles } from '@/hooks/use-themed-styles';
 import type { ConversationListItem } from '@/services/chats/chatsApi';
+import { searchWanderers } from '@/services/profile/wanderersApi';
+import { localizeErrorMessage } from '@/utils/localizeError';
 
-type ContactOption = {
+export type ContactOption = {
   id: string;
   nickname: string;
   avatarUrl: string | null;
@@ -31,6 +34,20 @@ type CreateGroupDialogProps = {
   onCancel: () => void;
   onSubmit: (title: string, memberIds: string[]) => void;
 };
+
+function matchesNickname(nickname: string, query: string): boolean {
+  const q = query.trim().toLocaleLowerCase('ru');
+  if (!q) {
+    return true;
+  }
+  const nick = nickname.toLocaleLowerCase('ru');
+  if (nick.includes(q)) {
+    return true;
+  }
+  const compactNick = nick.replace(/[_\s.\-]+/g, '');
+  const compactQuery = q.replace(/[_\s.\-]+/g, '');
+  return compactQuery.length > 0 && compactNick.includes(compactQuery);
+}
 
 function createStyles(colors: ThemeColors) {
   return StyleSheet.create({
@@ -72,18 +89,51 @@ function createStyles(colors: ThemeColors) {
     },
     input: {
       borderWidth: 1,
-      borderColor: colors.border,
+      borderColor: colors.borderLight,
       borderRadius: 14,
       paddingHorizontal: Spacing.md,
       paddingVertical: 12,
       fontSize: FontSize.input,
       color: colors.text,
       backgroundColor: colors.surface,
+      ...Platform.select({
+        web: { outlineStyle: 'none' } as object,
+        default: {},
+      }),
+    },
+    listPanel: {
+      borderWidth: 1,
+      borderColor: colors.borderLight,
+      borderRadius: 14,
+      overflow: 'hidden',
+      backgroundColor: colors.surface,
+    },
+    searchWrap: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: Spacing.sm,
+      minHeight: 48,
+      paddingHorizontal: Spacing.md,
+      backgroundColor: colors.surfaceMuted,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: colors.borderLight,
+    },
+    searchWrapFocused: {
+      backgroundColor: 'rgba(21, 122, 254, 0.08)',
+    },
+    searchInput: {
+      flex: 1,
+      fontSize: FontSize.input,
+      color: colors.text,
+      paddingVertical: Platform.OS === 'web' ? 12 : 10,
+      minWidth: 0,
+      ...Platform.select({
+        web: { outlineStyle: 'none' } as object,
+        default: {},
+      }),
     },
     list: {
-      borderWidth: 1,
-      borderColor: colors.border,
-      borderRadius: 14,
+      // height capped inline
     },
     empty: {
       padding: Spacing.md,
@@ -97,10 +147,11 @@ function createStyles(colors: ThemeColors) {
       paddingHorizontal: Spacing.md,
       paddingVertical: 10,
       borderBottomWidth: StyleSheet.hairlineWidth,
-      borderBottomColor: colors.border,
+      borderBottomColor: colors.borderLight,
+      backgroundColor: colors.surface,
     },
     rowPressed: {
-      opacity: 0.72,
+      backgroundColor: colors.surfaceMuted,
     },
     avatar: {
       width: 36,
@@ -134,6 +185,7 @@ function createStyles(colors: ThemeColors) {
       borderColor: colors.border,
       alignItems: 'center',
       justifyContent: 'center',
+      backgroundColor: colors.surface,
     },
     checkOn: {
       backgroundColor: colors.primary,
@@ -174,6 +226,10 @@ function createStyles(colors: ThemeColors) {
     submitLabel: {
       color: colors.onPrimary,
     },
+    searchStatus: {
+      paddingHorizontal: Spacing.md,
+      paddingBottom: Spacing.sm,
+    },
   });
 }
 
@@ -194,8 +250,8 @@ export function contactsFromConversations(items: ConversationListItem[]): Contac
   return [...map.values()].sort((a, b) => a.nickname.localeCompare(b.nickname, 'ru'));
 }
 
-/** Title, name field, actions and paddings — leave the rest for the list. */
-const CREATE_GROUP_CHROME_HEIGHT = 320;
+const CREATE_GROUP_CHROME_HEIGHT = 360;
+const SEARCH_DEBOUNCE_MS = 280;
 
 export function CreateGroupDialog({
   visible,
@@ -212,26 +268,138 @@ export function CreateGroupDialog({
     Math.max(120, Math.round(windowHeight * 0.88 - CREATE_GROUP_CHROME_HEIGHT)),
   );
   const [title, setTitle] = useState('');
+  const [memberQuery, setMemberQuery] = useState('');
+  const [searchFocused, setSearchFocused] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [selectedMeta, setSelectedMeta] = useState<Map<string, ContactOption>>(new Map());
+  const [remoteContacts, setRemoteContacts] = useState<ContactOption[]>([]);
+  const [searchBusy, setSearchBusy] = useState(false);
+  const [searchError, setSearchError] = useState<string | null>(null);
+  const searchGenerationRef = useRef(0);
 
   useEffect(() => {
     if (!visible) {
       setTitle('');
+      setMemberQuery('');
+      setSearchFocused(false);
       setSelected(new Set());
+      setSelectedMeta(new Map());
+      setRemoteContacts([]);
+      setSearchBusy(false);
+      setSearchError(null);
+      searchGenerationRef.current += 1;
     }
   }, [visible]);
 
+  const trimmedQuery = memberQuery.trim();
+
+  useEffect(() => {
+    if (!visible) {
+      return;
+    }
+
+    if (trimmedQuery.length === 0) {
+      searchGenerationRef.current += 1;
+      setRemoteContacts([]);
+      setSearchBusy(false);
+      setSearchError(null);
+      return;
+    }
+
+    const generation = ++searchGenerationRef.current;
+    setSearchBusy(true);
+    setSearchError(null);
+
+    const timer = setTimeout(() => {
+      void (async () => {
+        try {
+          const results = await searchWanderers(trimmedQuery);
+          if (generation !== searchGenerationRef.current) {
+            return;
+          }
+          setRemoteContacts(
+            results.map((item) => ({
+              id: item.id,
+              nickname: item.nickname,
+              avatarUrl:
+                item.profileCard?.small ??
+                item.profileCard?.thumb ??
+                item.profileCard?.medium ??
+                null,
+            })),
+          );
+        } catch (error) {
+          if (generation !== searchGenerationRef.current) {
+            return;
+          }
+          setRemoteContacts([]);
+          setSearchError(localizeErrorMessage(error, 'Не удалось найти игроков'));
+        } finally {
+          if (generation === searchGenerationRef.current) {
+            setSearchBusy(false);
+          }
+        }
+      })();
+    }, SEARCH_DEBOUNCE_MS);
+
+    return () => {
+      clearTimeout(timer);
+    };
+  }, [trimmedQuery, visible]);
+
   const canSubmit = title.trim().length > 0 && selected.size > 0 && !isBusy;
 
-  const sortedContacts = useMemo(() => contacts, [contacts]);
+  const visibleContacts = useMemo(() => {
+    const byId = new Map<string, ContactOption>();
 
-  const toggle = (id: string) => {
+    for (const contact of selectedMeta.values()) {
+      if (selected.has(contact.id)) {
+        byId.set(contact.id, contact);
+      }
+    }
+
+    const localMatches = trimmedQuery
+      ? contacts.filter((contact) => matchesNickname(contact.nickname, trimmedQuery))
+      : contacts;
+
+    for (const contact of localMatches) {
+      byId.set(contact.id, contact);
+    }
+
+    if (trimmedQuery) {
+      for (const contact of remoteContacts) {
+        if (!byId.has(contact.id)) {
+          byId.set(contact.id, contact);
+        }
+      }
+    }
+
+    return [...byId.values()].sort((a, b) => {
+      const aSelected = selected.has(a.id) ? 0 : 1;
+      const bSelected = selected.has(b.id) ? 0 : 1;
+      if (aSelected !== bSelected) {
+        return aSelected - bSelected;
+      }
+      return a.nickname.localeCompare(b.nickname, 'ru');
+    });
+  }, [contacts, remoteContacts, selected, selectedMeta, trimmedQuery]);
+
+  const toggle = (contact: ContactOption) => {
     setSelected((prev) => {
       const next = new Set(prev);
-      if (next.has(id)) {
-        next.delete(id);
+      if (next.has(contact.id)) {
+        next.delete(contact.id);
       } else {
-        next.add(id);
+        next.add(contact.id);
+      }
+      return next;
+    });
+    setSelectedMeta((prev) => {
+      const next = new Map(prev);
+      if (next.has(contact.id)) {
+        next.delete(contact.id);
+      } else {
+        next.set(contact.id, contact);
       }
       return next;
     });
@@ -241,8 +409,6 @@ export function CreateGroupDialog({
     if (isBusy) {
       return;
     }
-    setTitle('');
-    setSelected(new Set());
     onCancel();
   };
 
@@ -252,6 +418,15 @@ export function CreateGroupDialog({
     }
     onSubmit(title.trim(), [...selected]);
   };
+
+  const emptyHint =
+    contacts.length === 0 && !trimmedQuery
+      ? 'Введите ник — найдём игрока, даже если с ним ещё не было лички.'
+      : trimmedQuery
+        ? searchBusy
+          ? 'Ищем…'
+          : searchError ?? 'Никого не нашли по этому нику.'
+        : 'Сначала напишите кому-нибудь в личку — оттуда можно будет выбрать людей.';
 
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={handleClose}>
@@ -273,46 +448,80 @@ export function CreateGroupDialog({
           </View>
 
           <View style={styles.listBlock}>
-            <Text style={styles.label}>Участники из переписок</Text>
-            <ScrollView
-              style={[styles.list, { maxHeight: listMaxHeight }]}
-              nestedScrollEnabled
-              keyboardShouldPersistTaps="handled">
-              {sortedContacts.length === 0 ? (
-                <Text style={styles.empty}>
-                  Сначала напишите кому-нибудь в личку — оттуда можно будет выбрать людей.
-                </Text>
-              ) : (
-                sortedContacts.map((contact) => {
-                  const on = selected.has(contact.id);
-                  const initial = [...contact.nickname.trim()][0]?.toUpperCase() ?? '?';
-                  return (
-                    <Pressable
-                      key={contact.id}
-                      accessibilityRole="checkbox"
-                      accessibilityState={{ checked: on }}
-                      onPress={() => toggle(contact.id)}
-                      style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}>
-                      <View style={styles.avatar}>
-                        {contact.avatarUrl ? (
-                          <Image source={{ uri: contact.avatarUrl }} style={styles.avatarImage} />
-                        ) : (
-                          <Text style={styles.avatarInitial}>{initial}</Text>
-                        )}
-                      </View>
-                      <Text style={styles.nickname} numberOfLines={1}>
-                        {contact.nickname}
-                      </Text>
-                      <View style={[styles.check, on && styles.checkOn]}>
-                        {on ? (
-                          <Ionicons name="checkmark" size={14} color={colors.onPrimary} />
-                        ) : null}
-                      </View>
-                    </Pressable>
-                  );
-                })
-              )}
-            </ScrollView>
+            <Text style={styles.label}>Участники</Text>
+            <View style={styles.listPanel}>
+              <View style={[styles.searchWrap, searchFocused && styles.searchWrapFocused]}>
+                <Ionicons name="search" size={18} color={colors.textMuted} />
+                <TextInput
+                  value={memberQuery}
+                  onChangeText={setMemberQuery}
+                  onFocus={() => setSearchFocused(true)}
+                  onBlur={() => setSearchFocused(false)}
+                  placeholder="Поиск по нику"
+                  placeholderTextColor={colors.textMuted}
+                  style={styles.searchInput}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  autoComplete="off"
+                  returnKeyType="search"
+                  editable={!isBusy}
+                />
+                {memberQuery.length > 0 ? (
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel="Очистить поиск"
+                    onPress={() => setMemberQuery('')}
+                    hitSlop={8}
+                    disabled={isBusy}>
+                    <Ionicons name="close-circle" size={18} color={colors.textMuted} />
+                  </Pressable>
+                ) : null}
+              </View>
+              <ScrollView
+                style={[styles.list, { maxHeight: listMaxHeight }]}
+                nestedScrollEnabled
+                keyboardShouldPersistTaps="handled">
+                {searchBusy && visibleContacts.length === 0 ? (
+                  <View style={styles.searchStatus}>
+                    <ActivityIndicator
+                      color={colors.primary}
+                      style={{ marginVertical: Spacing.md }}
+                    />
+                  </View>
+                ) : visibleContacts.length === 0 ? (
+                  <Text style={styles.empty}>{emptyHint}</Text>
+                ) : (
+                  visibleContacts.map((contact) => {
+                    const on = selected.has(contact.id);
+                    const initial = [...contact.nickname.trim()][0]?.toUpperCase() ?? '?';
+                    return (
+                      <Pressable
+                        key={contact.id}
+                        accessibilityRole="checkbox"
+                        accessibilityState={{ checked: on }}
+                        onPress={() => toggle(contact)}
+                        style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}>
+                        <View style={styles.avatar}>
+                          {contact.avatarUrl ? (
+                            <Image source={{ uri: contact.avatarUrl }} style={styles.avatarImage} />
+                          ) : (
+                            <Text style={styles.avatarInitial}>{initial}</Text>
+                          )}
+                        </View>
+                        <Text style={styles.nickname} numberOfLines={1}>
+                          {contact.nickname}
+                        </Text>
+                        <View style={[styles.check, on && styles.checkOn]}>
+                          {on ? (
+                            <Ionicons name="checkmark" size={14} color={colors.onPrimary} />
+                          ) : null}
+                        </View>
+                      </Pressable>
+                    );
+                  })
+                )}
+              </ScrollView>
+            </View>
           </View>
 
           <View style={styles.actions}>

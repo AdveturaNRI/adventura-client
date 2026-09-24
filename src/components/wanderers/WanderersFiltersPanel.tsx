@@ -54,6 +54,8 @@ type WanderersFiltersPanelProps = {
   onExpandedChange: (expanded: boolean) => void;
   onChange: (next: WanderersFilters) => void;
   onClear: () => void;
+  nicknameQuery: string;
+  onNicknameQueryChange: (query: string) => void;
   bucket: WandererBucket;
   bucketOptions: SwitcherOption[];
   onBucketChange: (bucket: WandererBucket) => void;
@@ -153,6 +155,32 @@ function createStyles(colors: ThemeColors) {
       fontSize: FontSize.caption,
       fontWeight: '600',
       color: colors.primary,
+    },
+    searchWrap: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: Spacing.sm,
+      width: '100%',
+      minHeight: 44,
+      paddingHorizontal: Spacing.md,
+      borderRadius: Radius.pill,
+      borderWidth: 1,
+      borderColor: colors.borderLight,
+      backgroundColor: colors.surface,
+    },
+    searchInput: {
+      flex: 1,
+      minWidth: 0,
+      fontSize: FontSize.input,
+      color: colors.text,
+      paddingVertical: Platform.OS === 'web' ? 10 : 8,
+      ...Platform.select({
+        web: { outlineStyle: 'none' } as object,
+        default: {},
+      }),
+    },
+    searchClear: {
+      padding: 2,
     },
     activeChipsScroll: {
       maxWidth: '100%',
@@ -454,6 +482,8 @@ export function WanderersFiltersPanel({
   onExpandedChange,
   onChange,
   onClear,
+  nicknameQuery,
+  onNicknameQueryChange,
   bucket,
   bucketOptions,
   onBucketChange,
@@ -672,6 +702,31 @@ export function WanderersFiltersPanel({
           />
         </View>
         <View style={styles.toolbarActions}>{filterActions}</View>
+      </View>
+
+      <View style={styles.searchWrap}>
+        <Ionicons name="search" size={16} color={colors.textMuted} />
+        <TextInput
+          value={nicknameQuery}
+          onChangeText={onNicknameQueryChange}
+          placeholder="Поиск по нику"
+          placeholderTextColor={colors.textMuted}
+          style={styles.searchInput}
+          autoCapitalize="none"
+          autoCorrect={false}
+          returnKeyType="search"
+          clearButtonMode="never"
+        />
+        {nicknameQuery.length > 0 ? (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Очистить поиск"
+            onPress={() => onNicknameQueryChange('')}
+            hitSlop={8}
+            style={styles.searchClear}>
+            <Ionicons name="close-circle" size={18} color={colors.textMuted} />
+          </Pressable>
+        ) : null}
       </View>
 
       {activeCount > 0 && !expanded && !isMobileLayout ? (

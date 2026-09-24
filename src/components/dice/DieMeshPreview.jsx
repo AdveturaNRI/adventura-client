@@ -144,7 +144,7 @@ function applyDieAccent(BABYLON, themeRoot, scene, mat, hex) {
     diffuseTex.hasAlpha = true;
     mat.setTexture('diffuseSampler', diffuseTex);
 }
-export function DieMeshPreview({ sides, size = 56, active = true, themeColor, }) {
+export function DieMeshPreview({ sides, size = 56, active = true, themeColor, paused = false, }) {
     const colors = useTheme();
     const accent = themeColor?.trim() || colors.primary;
     const shared = useContext(SharedCtx);
@@ -152,6 +152,8 @@ export function DieMeshPreview({ sides, size = 56, active = true, themeColor, })
     const materialRef = useRef(null);
     const accentRef = useRef(accent);
     accentRef.current = accent;
+    const pausedRef = useRef(paused);
+    pausedRef.current = paused;
     const [ready, setReady] = useState(false);
     const [failed, setFailed] = useState(false);
     // Build WebGL scene once per die — remounting all 7 on color change hits browser context limits.
@@ -254,6 +256,15 @@ export function DieMeshPreview({ sides, size = 56, active = true, themeColor, })
                 mesh.getChildMeshes?.(true)?.forEach((child) => {
                     child.material = mat;
                 });
+                if (disposed) {
+                    try {
+                        mat.dispose?.();
+                    }
+                    catch {
+                        // ignore
+                    }
+                    return;
+                }
                 materialRef.current = { BABYLON, themeRoot, scene, mat };
                 mesh.computeWorldMatrix(true);
                 const bi = mesh.getHierarchyBoundingVectors(true);
@@ -262,10 +273,10 @@ export function DieMeshPreview({ sides, size = 56, active = true, themeColor, })
                 camera.setTarget(BABYLON.Vector3.Center(bi.min, bi.max));
                 camera.radius = maxDim * 2.35;
                 camera.lowerRadiusLimit = camera.upperRadiusLimit = camera.radius;
-                // Static pose — matches settled dice on the tray (no idle spin).
                 engine.runRenderLoop(() => {
-                    if (!disposed)
-                        scene.render();
+                    if (disposed || pausedRef.current)
+                        return;
+                    scene.render();
                 });
                 engine.resize();
                 setReady(true);
@@ -290,7 +301,16 @@ export function DieMeshPreview({ sides, size = 56, active = true, themeColor, })
                     setFailed(true);
             });
         }
-        const onResize = () => engine?.resize?.();
+        const onResize = () => {
+            if (disposed || pausedRef.current)
+                return;
+            try {
+                engine?.resize?.();
+            }
+            catch {
+                // ignore
+            }
+        };
         window.addEventListener('resize', onResize);
         return () => {
             disposed = true;

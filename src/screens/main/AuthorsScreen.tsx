@@ -1,3 +1,5 @@
+import { Ionicons } from '@expo/vector-icons';
+import { useRouter } from 'expo-router';
 import { useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -12,8 +14,8 @@ import {
 
 import { AuthorFilters } from '@/components/authors/AuthorFilters';
 import { AuthorPostCard } from '@/components/authors/AuthorPostCard';
+import { AuthorPostCreate } from '@/components/authors/AuthorPostCreate';
 import { BecomeAuthorBanner } from '@/components/authors/BecomeAuthorBanner';
-import { PartnersTicker } from '@/components/partners/PartnersTicker';
 import {
   useIsDesktopSidebarVisible,
   useIsDesktopWeb,
@@ -24,11 +26,12 @@ import {
   ScrollToTopButton,
   shouldShowScrollToTop,
 } from '@/components/navigation/ScrollToTopButton';
-import { useRouter } from 'expo-router';
+import { PartnersTicker } from '@/components/partners/PartnersTicker';
+import { Button } from '@/components/ui';
+import { FontSize, Spacing, type ThemeColors } from '@/constants/theme';
 import { useAuthors } from '@/context/AuthorsContext';
 import { filterPostsByCategory } from '@/data/authors/helpers';
 import type { Author, AuthorPost, CreativityCategoryFilter } from '@/data/authors/types';
-import { FontSize, Spacing, type ThemeColors } from '@/constants/theme';
 import { useRequireAuth } from '@/hooks/use-require-auth';
 import { useTheme } from '@/hooks/use-theme';
 import { useThemedStyles } from '@/hooks/use-themed-styles';
@@ -61,6 +64,17 @@ function createLocalStyles(colors: ThemeColors, isDesktopWeb: boolean) {
       paddingBottom: Spacing.xl,
     },
     headerBlock: {
+      gap: Spacing.sm,
+    },
+    headerRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: Spacing.md,
+    },
+    headerCopy: {
+      flex: 1,
+      minWidth: 0,
       gap: Spacing.xs,
     },
     pageTitle: {
@@ -74,6 +88,14 @@ function createLocalStyles(colors: ThemeColors, isDesktopWeb: boolean) {
       color: colors.textMuted,
       lineHeight: FontSize.label * 1.45,
       maxWidth: 520,
+    },
+    createButtonDesktop: {
+      alignSelf: 'center',
+      minWidth: 140,
+      flexShrink: 0,
+    },
+    createButtonMobile: {
+      alignSelf: 'stretch',
     },
     masonry: {
       flexDirection: 'row',
@@ -132,12 +154,25 @@ export default function AuthorsScreen() {
   const hasDesktopSidebar = useIsDesktopSidebarVisible();
   const showCompactNav = !hasDesktopSidebar;
   const styles = useThemedStyles((theme) => createLocalStyles(theme, isDesktopWeb));
-  const { authors, posts, toggleLike, isLoading, error, refresh } = useAuthors();
+  const { authors, posts, myAuthorId, createPost, toggleLike, isLoading, error, refresh } =
+    useAuthors();
   const requireAuth = useRequireAuth();
 
   const [filter, setFilter] = useState<CreativityCategoryFilter>('all');
+  const [editorOpen, setEditorOpen] = useState(false);
   const [showScrollTop, setShowScrollTop] = useState(false);
   const scrollRef = useRef<ScrollView>(null);
+
+  const openCreate = () => {
+    if (!requireAuth('/authors')) {
+      return;
+    }
+    if (!myAuthorId) {
+      router.push('/author-cabinet');
+      return;
+    }
+    setEditorOpen(true);
+  };
 
   const feedPosts = useMemo(() => {
     const authorsById = new Map(authors.map((author) => [author.id, author]));
@@ -177,13 +212,27 @@ export default function AuthorsScreen() {
                 <Text style={styles.pageSubtitle}>
                   Работы авторов крупным планом.
                 </Text>
+                <Button
+                  label="Добавить"
+                  icon={<Ionicons name="add" size={18} color={colors.onPrimary} />}
+                  onPress={openCreate}
+                  style={styles.createButtonMobile}
+                />
               </View>
             ) : (
-              <View style={styles.headerBlock}>
-                <Text style={styles.pageTitle}>Публикации</Text>
-                <Text style={styles.pageSubtitle}>
-                  Работы авторов крупным планом.
-                </Text>
+              <View style={styles.headerRow}>
+                <View style={styles.headerCopy}>
+                  <Text style={styles.pageTitle}>Публикации</Text>
+                  <Text style={styles.pageSubtitle}>
+                    Работы авторов крупным планом.
+                  </Text>
+                </View>
+                <Button
+                  label="Добавить"
+                  icon={<Ionicons name="add" size={18} color={colors.onPrimary} />}
+                  onPress={openCreate}
+                  style={styles.createButtonDesktop}
+                />
               </View>
             )}
 
@@ -250,6 +299,15 @@ export default function AuthorsScreen() {
           visible={showScrollTop}
           onPress={() => scrollRef.current?.scrollTo({ y: 0, animated: true })}
         />
+
+        {myAuthorId ? (
+          <AuthorPostCreate
+            authorId={myAuthorId}
+            visible={editorOpen}
+            onClose={() => setEditorOpen(false)}
+            onSubmit={createPost}
+          />
+        ) : null}
       </View>
     </ScreenTransition>
   );

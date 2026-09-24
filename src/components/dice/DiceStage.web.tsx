@@ -122,7 +122,9 @@ export const DiceStage = forwardRef<DiceStageHandle, DiceStageProps>(function Di
   useEffect(() => {
     const onWindowMessage = (event: MessageEvent) => {
       const iframeWindow = iframeRef.current?.contentWindow;
-      if (iframeWindow && event.source !== iframeWindow) {
+      // Без iframe не принимаем чужие postMessage (вкладки «Дайсы» + чат
+      // иначе ловят done друг друга и плодят лишние resolve/onDone).
+      if (!iframeWindow || event.source !== iframeWindow) {
         return;
       }
       try {

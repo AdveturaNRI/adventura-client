@@ -39,6 +39,7 @@ import {
   resetGlobalChatBackground,
   resolveChatBackground,
   resolveChatBackgroundSync,
+  resolvePresetColors,
   saveConversationChatBackground,
   saveGlobalChatBackground,
   subscribeChatBackgroundHistory,
@@ -273,6 +274,7 @@ export function ChatBackgroundPickerSheet({
   onConversationUpdated,
 }: ChatBackgroundPickerSheetProps) {
   const colors = useTheme();
+  const isDark = colors.background === '#000000';
   const styles = useThemedStyles(createStyles);
   const isPerChat = Boolean(conversationId);
   const [setting, setSetting] = useState<ChatBackgroundSetting>(() =>
@@ -611,11 +613,17 @@ export function ChatBackgroundPickerSheet({
                       disabled={busy}
                       onPress={() => void handleSelectPreset(preset.id)}
                       style={[styles.tile, selected && styles.tileSelected]}>
-                      <PresetSwatch colors={preset.colors} />
+                      <PresetSwatch colors={resolvePresetColors(preset, isDark)} />
                       <View
                         style={[
                           StyleSheet.absoluteFill,
-                          { backgroundColor: `rgba(0,0,0,${preset.dimmer * 0.55})` },
+                          {
+                            backgroundColor: `rgba(0,0,0,${
+                              (isDark && preset.darkDimmer != null
+                                ? preset.darkDimmer
+                                : preset.dimmer) * 0.55
+                            })`,
+                          },
                         ]}
                       />
                       <View style={styles.tileLabel}>

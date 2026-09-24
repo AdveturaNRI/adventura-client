@@ -1,6 +1,7 @@
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useCallback, useEffect, useMemo, useRef, useState, type ComponentProps, type ReactNode } from 'react';
 import {
+  ActivityIndicator,
   Modal,
   Platform,
   Pressable,
@@ -168,15 +169,25 @@ function reactionToastMessage(
     : `${nickname} добавлен в скрытые`;
 }
 
+type FeedUndoKind = 'reaction' | 'browse';
+
 type WandererDeckProps = {
   items: WandererCardItem[];
   bucket: WandererBucket;
+  /** Nickname search results — list layout with feed actions. */
+  searchActive?: boolean;
+  /** Keep header/search mounted while a nickname request is in flight. */
+  contentLoading?: boolean;
+  contentError?: string | null;
   filtersSignature?: string;
   feedSourceEmpty?: boolean;
   filtersSlot?: ReactNode;
   onRestart?: () => void;
   onReactionSaved?: (targetUserId: string, type: WandererReactionType) => void;
   onReactionCleared?: (targetUserId: string, type: WandererReactionType) => void;
+  /** Session-only dismiss: card leaves the deck, no favorite/hide. */
+  onBrowseSkipped?: (targetUserId: string) => void;
+  onBrowseRestored?: (targetUserId: string) => void;
   onUnblocked?: (targetUserId: string) => void;
 };
 
@@ -204,6 +215,14 @@ function createStyles(
       alignItems: 'stretch',
       paddingHorizontal: isDesktopWeb ? Spacing.xl : isMobileNative ? Spacing.md : Spacing.lg,
       minHeight: 0,
+    },
+    listHeader: {
+      flexGrow: 0,
+      flexShrink: 0,
+      width: '100%',
+      maxWidth: isDesktopWeb ? DESKTOP_DECK_MAX_WIDTH : undefined,
+      alignSelf: 'center',
+      paddingHorizontal: isDesktopWeb ? Spacing.xl : isMobileNative ? Spacing.md : Spacing.lg,
     },
     header: {
       flexShrink: 0,
@@ -491,12 +510,17 @@ function createStyles(
 export function WandererDeck({
   items,
   bucket,
+  searchActive = false,
+  contentLoading = false,
+  contentError = null,
   filtersSignature = '',
   feedSourceEmpty = false,
   filtersSlot,
   onRestart,
   onReactionSaved,
   onReactionCleared,
+  onBrowseSkipped,
+  onBrowseRestored,
   onUnblocked,
 }: WandererDeckProps) {
   const colors = useTheme();
@@ -561,6 +585,7 @@ export function WandererDeck({
   const [history, setHistory] = useState<number[]>([]);
   const [reactionHistory, setReactionHistory] = useState<WandererReactionType[]>([]);
   const [feedUndoIds, setFeedUndoIds] = useState<string[]>([]);
+  const [feedUndoKinds, setFeedUndoKinds] = useState<FeedUndoKind[]>([]);
   const [dismissRequest, setDismissRequest] = useState<SwipeDismissRequest | null>(null);
   const [isReacting, setIsReacting] = useState(false);
   const isReactingRef = useRef(false);
@@ -578,12 +603,13 @@ export function WandererDeck({
     setHistory([]);
     setReactionHistory([]);
     setFeedUndoIds([]);
+    setFeedUndoKinds([]);
     setDismissRequest(null);
     isReactingRef.current = false;
     setIsReacting(false);
     setCardMenuTarget(null);
     setCardMenuAnchor(null);
-  }, [bucket, filtersSignature]);
+  }, [bucket, filtersSignature, searchActive]);
 
   useEffect(() => {
     setIndex((prev) => {
@@ -610,7 +636,9 @@ export function WandererDeck({
   );
   const canUndo =
     !isReacting &&
-    (bucket === 'feed' ? feedUndoIds.length > 0 : history.length > 0);
+    (bucket === 'feed' && !searchActive
+      ? feedUndoKinds.length > 0
+      : history.length > 0);
 
   const currentCardProps = useMemo(
     () => (currentItem ? wandererCardToUserCardProps(currentItem) : null),
@@ -623,6 +651,10 @@ export function WandererDeck({
   );
 
   const subtitle = useMemo(() => {
+    if (searchActive) {
+      return WANDERERS_SCREEN.subtitleSearch;
+    }
+
     if (bucket === 'favorites') {
       return WANDERERS_SCREEN.subtitleFavorites;
     }
@@ -632,13 +664,21 @@ export function WandererDeck({
     }
 
     return isDesktopWeb ? WANDERERS_SCREEN.subtitleDesktop : WANDERERS_SCREEN.subtitle;
-  }, [bucket, isDesktopWeb]);
+  }, [bucket, isDesktopWeb, searchActive]);
 
   const advance = useCallback(() => {
     setHistory((prev) => [...prev, index]);
     setIndex((prev) => prev + 1);
     setDismissRequest(null);
   }, [index]);
+
+  const handleBrowseSkip = useCallback(() => {
+    if (!currentItemRef.current || isReactingRef.current || bucket !== 'feed' || searchActive) {
+      return;
+    }
+
+    setDismissRequest({ direction: 'up', token: Date.now() });
+  }, [bucket, searchActive]);
 
   const persistReaction = useCallback(
     async (
@@ -670,16 +710,17 @@ export function WandererDeck({
 
       // В ленте сразу убираем карточку — иначе анимация входа дважды
       // крутит одного и того же человека, пока ждём ответ API.
-      if (bucket === 'feed') {
+      if (bucket === 'feed' && !searchActive) {
         setReactionHistory((prev) => [...prev, type]);
         setFeedUndoIds((prev) => [...prev, target.id]);
+        setFeedUndoKinds((prev) => [...prev, 'reaction']);
         onReactionSaved?.(target.id, type);
       }
 
       try {
         await upsertWandererReaction(target.id, type);
 
-        if (bucket !== 'feed') {
+        if (bucket !== 'feed' || searchActive) {
           onReactionSaved?.(target.id, type);
           if (advanceCard) {
             advance();
@@ -693,8 +734,9 @@ export function WandererDeck({
         setDismissRequest(null);
         return true;
       } catch (error) {
-        if (bucket === 'feed') {
+        if (bucket === 'feed' && !searchActive) {
           setFeedUndoIds((prev) => prev.slice(0, -1));
+          setFeedUndoKinds((prev) => prev.slice(0, -1));
           setReactionHistory((prev) => prev.slice(0, -1));
           onReactionCleared?.(target.id, type);
         }
@@ -706,17 +748,30 @@ export function WandererDeck({
         setIsReacting(false);
       }
     },
-    [advance, bucket, onReactionCleared, onReactionSaved],
+    [advance, bucket, onReactionCleared, onReactionSaved, searchActive],
   );
 
   const handleDismiss = useCallback(
-    async (direction: 'left' | 'right') => {
+    (direction: 'left' | 'right' | 'up') => {
+      if (direction === 'up') {
+        const target = currentItemRef.current;
+        if (!target) {
+          return;
+        }
+
+        setFeedUndoIds((prev) => [...prev, target.id]);
+        setFeedUndoKinds((prev) => [...prev, 'browse']);
+        onBrowseSkipped?.(target.id);
+        setDismissRequest(null);
+        return;
+      }
+
       const type = direction === 'right' ? 'favorite' : 'skipped';
       // Capture before optimistic remove — currentItemRef may already advance.
       const item = currentItemRef.current ?? undefined;
-      await persistReaction(type, { item });
+      void persistReaction(type, { item });
     },
-    [persistReaction],
+    [onBrowseSkipped, persistReaction],
   );
 
   const requestDismiss = useCallback(
@@ -735,12 +790,22 @@ export function WandererDeck({
       return;
     }
 
-    if (bucket === 'feed') {
-      if (feedUndoIds.length === 0) {
+    if (bucket === 'feed' && !searchActive) {
+      if (feedUndoKinds.length === 0 || feedUndoIds.length === 0) {
         return;
       }
 
+      const kind = feedUndoKinds[feedUndoKinds.length - 1];
       const itemId = feedUndoIds[feedUndoIds.length - 1];
+
+      if (kind === 'browse') {
+        setFeedUndoIds((prev) => prev.slice(0, -1));
+        setFeedUndoKinds((prev) => prev.slice(0, -1));
+        onBrowseRestored?.(itemId);
+        setDismissRequest(null);
+        return;
+      }
+
       const clearedType = reactionHistory[reactionHistory.length - 1];
 
       isReactingRef.current = true;
@@ -753,6 +818,7 @@ export function WandererDeck({
         }
 
         setFeedUndoIds((prev) => prev.slice(0, -1));
+        setFeedUndoKinds((prev) => prev.slice(0, -1));
         setReactionHistory((prev) => prev.slice(0, -1));
         setDismissRequest(null);
       } catch (error) {
@@ -799,13 +865,24 @@ export function WandererDeck({
       isReactingRef.current = false;
       setIsReacting(false);
     }
-  }, [bucket, feedUndoIds, history, items, onReactionCleared, reactionHistory]);
+  }, [
+    bucket,
+    feedUndoIds,
+    feedUndoKinds,
+    history,
+    items,
+    onBrowseRestored,
+    onReactionCleared,
+    reactionHistory,
+    searchActive,
+  ]);
 
   const handleRestart = useCallback(() => {
     setIndex(0);
     setHistory([]);
     setReactionHistory([]);
     setFeedUndoIds([]);
+    setFeedUndoKinds([]);
     setDismissRequest(null);
     onRestart?.();
   }, [onRestart]);
@@ -813,7 +890,11 @@ export function WandererDeck({
   const handleRemoveFromList = useCallback(async (item?: WandererCardItem) => {
     const target = item ?? currentItemRef.current;
 
-    if (!target || isReactingRef.current || (bucket !== 'favorites' && bucket !== 'skipped')) {
+    if (
+      !target ||
+      isReactingRef.current ||
+      (bucket !== 'favorites' && bucket !== 'skipped' && !searchActive)
+    ) {
       return;
     }
 
@@ -822,7 +903,8 @@ export function WandererDeck({
       return;
     }
 
-    const clearedType: WandererReactionType = bucket === 'favorites' ? 'favorite' : 'skipped';
+    const clearedType: WandererReactionType =
+      searchActive || bucket === 'favorites' ? 'favorite' : 'skipped';
 
     isReactingRef.current = true;
     setIsReacting(true);
@@ -836,7 +918,7 @@ export function WandererDeck({
       toast.error(
         localizeErrorMessage(
           error,
-          bucket === 'favorites'
+          clearedType === 'favorite'
             ? 'Не удалось удалить из избранных'
             : 'Не удалось удалить из скрытых',
         ),
@@ -845,7 +927,7 @@ export function WandererDeck({
       isReactingRef.current = false;
       setIsReacting(false);
     }
-  }, [bucket, onReactionCleared]);
+  }, [bucket, onReactionCleared, searchActive]);
 
   const handleChat = useCallback(
     async (item?: WandererCardItem) => {
@@ -906,7 +988,7 @@ export function WandererDeck({
     <>
       <DeckActionButton
         styles={styles}
-        size="large"
+        size="small"
         disabled={!canUndo}
         icon="arrow-undo-outline"
         backgroundColor={colors.surfaceMuted}
@@ -932,6 +1014,18 @@ export function WandererDeck({
 
       <DeckActionButton
         styles={styles}
+        size="small"
+        disabled={isReacting || !currentItem}
+        icon="play-skip-forward-outline"
+        backgroundColor={colors.surface}
+        borderColor={colors.primary}
+        iconColor={colors.primary}
+        onPress={handleBrowseSkip}
+        accessibilityLabel={WANDERERS_SCREEN.browseAction}
+      />
+
+      <DeckActionButton
+        styles={styles}
         size="large"
         disabled={isReacting || !currentItem}
         icon="chatbubble-ellipses-outline"
@@ -945,6 +1039,70 @@ export function WandererDeck({
       />
 
       {feedLikeButton}
+    </>
+  );
+
+  const renderSearchActions = (item: WandererCardItem) => (
+    <>
+      <DeckActionButton
+        styles={styles}
+        size="large"
+        disabled={isReacting}
+        icon="chatbubble-ellipses-outline"
+        backgroundColor={colors.primary}
+        borderColor={colors.primary}
+        iconColor={colors.onPrimary}
+        onPress={() => {
+          void handleChat(item);
+        }}
+        accessibilityLabel={WANDERERS_SCREEN.chatAction}
+      />
+
+      <DeckActionButton
+        styles={styles}
+        size="large"
+        disabled={isReacting}
+        icon="eye-off-outline"
+        backgroundColor={colors.surface}
+        borderColor={colors.destructive}
+        iconColor={colors.destructive}
+        onPress={() => {
+          void persistReaction('skipped', { item, toastMode: 'added' });
+        }}
+        accessibilityLabel={WANDERERS_SCREEN.passAction}
+      />
+
+      {item.isFavorite ? (
+        <DeckActionButton
+          styles={styles}
+          size="large"
+          disabled={isReacting}
+          icon="crown"
+          iconSet="material-community"
+          backgroundColor={colors.surfaceMuted}
+          borderColor={LIKE_COLOR}
+          iconColor={LIKE_COLOR}
+          onPress={() => {
+            void handleRemoveFromList(item);
+          }}
+          accessibilityLabel={WANDERERS_SCREEN.removeFavoriteAction}
+        />
+      ) : (
+        <DeckActionButton
+          styles={styles}
+          size="large"
+          disabled={isReacting}
+          icon="crown"
+          iconSet="material-community"
+          backgroundColor={LIKE_COLOR}
+          borderColor={LIKE_COLOR}
+          iconColor={colors.onPrimary}
+          onPress={() => {
+            void persistReaction('favorite', { item, toastMode: 'added' });
+          }}
+          accessibilityLabel={WANDERERS_SCREEN.likeAction}
+        />
+      )}
     </>
   );
 
@@ -1014,6 +1172,13 @@ export function WandererDeck({
   );
 
   const emptyCopy = useMemo(() => {
+    if (searchActive) {
+      return {
+        title: WANDERERS_SCREEN.emptySearch,
+        hint: WANDERERS_SCREEN.emptySearchHint,
+      };
+    }
+
     if (!feedSourceEmpty) {
       return {
         title: WANDERERS_SCREEN.emptyFiltered,
@@ -1039,7 +1204,7 @@ export function WandererDeck({
       title: WANDERERS_SCREEN.empty,
       hint: WANDERERS_SCREEN.emptyHint,
     };
-  }, [bucket, feedSourceEmpty]);
+  }, [bucket, feedSourceEmpty, searchActive]);
 
   const finishedCopy = useMemo(() => {
     if (bucket === 'favorites') {
@@ -1109,6 +1274,32 @@ export function WandererDeck({
     );
   };
 
+  if (contentLoading) {
+    return (
+      <View style={styles.root}>
+        <View style={styles.inner}>
+          {renderHeader(subtitle)}
+          <View style={styles.emptyWrap}>
+            <ActivityIndicator color={colors.primary} size="large" />
+          </View>
+        </View>
+      </View>
+    );
+  }
+
+  if (contentError && isEmptyFiltered) {
+    return (
+      <View style={styles.root}>
+        <View style={styles.inner}>
+          {renderHeader(subtitle)}
+          <View style={styles.emptyWrap}>
+            <Text style={styles.emptyTitle}>{contentError}</Text>
+          </View>
+        </View>
+      </View>
+    );
+  }
+
   if (isEmptyFiltered) {
     return (
       <View style={styles.root}>
@@ -1123,7 +1314,7 @@ export function WandererDeck({
     );
   }
 
-  const isListBucket = bucket === 'favorites' || bucket === 'skipped';
+  const isListBucket = searchActive || bucket === 'favorites' || bucket === 'skipped';
 
   if (isListBucket) {
     const listLayout = isDesktopWeb ? 'deckWide' : 'deck';
@@ -1147,13 +1338,14 @@ export function WandererDeck({
 
     return (
       <View style={styles.root}>
+        <View style={styles.listHeader}>{renderHeader(subtitle)}</View>
         {/* ScrollView spans the full content pane so wheel works on side margins too. */}
         <ScrollView
           style={styles.listScroll}
           contentContainerStyle={styles.listScrollContent}
+          keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}>
           <View style={styles.listInner}>
-            {renderHeader(subtitle)}
             {items.map((item) => {
               const cardProps = wandererCardToUserCardProps(item);
               const listDeckSize = isDesktopWeb ? deckSize : mobileListDeckSize;
@@ -1196,33 +1388,39 @@ export function WandererDeck({
                         />
                       </Pressable>
                     </View>
-                    <View
-                      ref={(node) => {
-                        cardMenuTriggerRefs.current[item.id] = node;
-                      }}
-                      collapsable={false}
-                      style={styles.cardMenuButton}>
-                      <Pressable
-                        accessibilityRole="button"
-                        accessibilityLabel={WANDERERS_SCREEN.moreActionsLabel}
-                        disabled={isReacting}
-                        onPress={() => openCardMenu(item)}
-                        style={({ pressed }) => [
-                          {
-                            flex: 1,
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                          },
-                          pressed && styles.cardMenuButtonPressed,
-                        ]}>
-                        <Ionicons name="ellipsis-vertical" size={18} color={colors.text} />
-                      </Pressable>
-                    </View>
+                    {!searchActive ? (
+                      <View
+                        ref={(node) => {
+                          cardMenuTriggerRefs.current[item.id] = node;
+                        }}
+                        collapsable={false}
+                        style={styles.cardMenuButton}>
+                        <Pressable
+                          accessibilityRole="button"
+                          accessibilityLabel={WANDERERS_SCREEN.moreActionsLabel}
+                          disabled={isReacting}
+                          onPress={() => openCardMenu(item)}
+                          style={({ pressed }) => [
+                            {
+                              flex: 1,
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                            },
+                            pressed && styles.cardMenuButtonPressed,
+                          ]}>
+                          <Ionicons name="ellipsis-vertical" size={18} color={colors.text} />
+                        </Pressable>
+                      </View>
+                    ) : null}
                   </View>
                   {isDesktopWeb ? (
-                    <View style={styles.actionRail}>{renderListActions(item)}</View>
+                    <View style={styles.actionRail}>
+                      {searchActive ? renderSearchActions(item) : renderListActions(item)}
+                    </View>
                   ) : (
-                    <View style={styles.actionBar}>{renderListActions(item)}</View>
+                    <View style={styles.actionBar}>
+                      {searchActive ? renderSearchActions(item) : renderListActions(item)}
+                    </View>
                   )}
                 </View>
                 </AnalyticsImpression>
@@ -1231,6 +1429,7 @@ export function WandererDeck({
           </View>
         </ScrollView>
 
+        {!searchActive ? (
         <Modal
           visible={cardMenuTarget != null}
           transparent
@@ -1283,6 +1482,7 @@ export function WandererDeck({
             ) : null}
           </View>
         </Modal>
+        ) : null}
       </View>
     );
   }
@@ -1367,7 +1567,7 @@ export function WandererDeck({
             showVisibility={false}
             swipe={{
                     dismissible: true,
-                    resetKey: `${currentItem.id}-${index}`,
+                    resetKey: `${currentItem.id}-${index}-${feedUndoIds.length}`,
                     dismissRequest,
                     leftAction: {
                       label: WANDERERS_SCREEN.likeAction,

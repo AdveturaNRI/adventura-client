@@ -70,63 +70,86 @@ body {
 }
 
 /*
- * In-app toasts: Safari/Chrome paint Pressable as white <button> and ignore RN colors.
- * Colors come from CSS vars set on .adventura-toast by ToastBanner (theme), not data-theme.
+ * In-app toasts: never trust Pressable/button fill on web (Safari → white).
+ * Shell + .adventura-toast-hit get hard theme fills; title/action colors match.
  */
-.adventura-toast {
+.adventura-toast,
+.adventura-toast .adventura-toast-hit {
   -webkit-appearance: none !important;
   appearance: none !important;
   background-image: none !important;
-  background: var(--adventura-toast-bg, #1c1c1e) !important;
-  background-color: var(--adventura-toast-bg, #1c1c1e) !important;
-  border-color: var(--adventura-toast-border, #38383a) !important;
-  color: var(--adventura-toast-fg, #ffffff) !important;
 }
 
-.adventura-toast [role="button"],
 .adventura-toast button {
   -webkit-appearance: none !important;
   appearance: none !important;
   background: transparent !important;
   background-color: transparent !important;
   background-image: none !important;
-  color: inherit !important;
   border: none !important;
   box-shadow: none !important;
 }
 
-.adventura-toast-title {
-  color: var(--adventura-toast-fg, #ffffff) !important;
+.adventura-toast--dark,
+.adventura-toast--dark .adventura-toast-hit,
+html[data-theme="dark"] .adventura-toast,
+html[data-theme="dark"] .adventura-toast .adventura-toast-hit {
+  background: #1c1c1e !important;
+  background-color: #1c1c1e !important;
+  border-color: #38383a !important;
+  color: #ffffff !important;
 }
 
-.adventura-toast-message {
-  color: var(--adventura-toast-muted, #c7c7cc) !important;
+.adventura-toast--dark .adventura-toast-title,
+html[data-theme="dark"] .adventura-toast-title {
+  color: #ffffff !important;
 }
 
-.adventura-toast-action {
-  background: var(--adventura-toast-action-bg, rgba(21, 122, 254, 0.22)) !important;
+.adventura-toast--dark .adventura-toast-message,
+html[data-theme="dark"] .adventura-toast-message {
+  color: #c7c7cc !important;
 }
 
-.adventura-toast-action-label {
-  color: var(--adventura-toast-action-fg, #84b9ff) !important;
+.adventura-toast--dark .adventura-toast-action,
+html[data-theme="dark"] .adventura-toast-action {
+  background: rgba(21, 122, 254, 0.28) !important;
+  background-color: rgba(21, 122, 254, 0.28) !important;
 }
 
-html[data-theme="light"] .adventura-toast {
-  --adventura-toast-bg: #ffffff;
-  --adventura-toast-fg: #000000;
-  --adventura-toast-muted: #4c4c4c;
-  --adventura-toast-border: #e8e8e8;
-  --adventura-toast-action-bg: rgba(21, 122, 254, 0.12);
-  --adventura-toast-action-fg: #157afe;
+.adventura-toast--dark .adventura-toast-action-label,
+html[data-theme="dark"] .adventura-toast-action-label {
+  color: #84b9ff !important;
 }
 
-html[data-theme="dark"] .adventura-toast {
-  --adventura-toast-bg: #1c1c1e;
-  --adventura-toast-fg: #ffffff;
-  --adventura-toast-muted: #c7c7cc;
-  --adventura-toast-border: #38383a;
-  --adventura-toast-action-bg: rgba(21, 122, 254, 0.22);
-  --adventura-toast-action-fg: #84b9ff;
+.adventura-toast--light,
+.adventura-toast--light .adventura-toast-hit,
+html[data-theme="light"] .adventura-toast,
+html[data-theme="light"] .adventura-toast .adventura-toast-hit {
+  background: #ffffff !important;
+  background-color: #ffffff !important;
+  border-color: #e8e8e8 !important;
+  color: #000000 !important;
+}
+
+.adventura-toast--light .adventura-toast-title,
+html[data-theme="light"] .adventura-toast-title {
+  color: #000000 !important;
+}
+
+.adventura-toast--light .adventura-toast-message,
+html[data-theme="light"] .adventura-toast-message {
+  color: #4c4c4c !important;
+}
+
+.adventura-toast--light .adventura-toast-action,
+html[data-theme="light"] .adventura-toast-action {
+  background: rgba(21, 122, 254, 0.12) !important;
+  background-color: rgba(21, 122, 254, 0.12) !important;
+}
+
+.adventura-toast--light .adventura-toast-action-label,
+html[data-theme="light"] .adventura-toast-action-label {
+  color: #157afe !important;
 }
 
 /*
@@ -289,9 +312,9 @@ export default function Root({ children }: PropsWithChildren) {
           content="width=device-width, initial-scale=1, shrink-to-fit=no, viewport-fit=cover"
         />
         <meta name="theme-color" content="#208AEF" />
-        <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png" />
-        <link rel="icon" type="image/png" sizes="48x48" href="/favicon.png" />
-        <link rel="shortcut icon" href="/favicon.png" />
+        <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png?v=d20-white" />
+        <link rel="icon" type="image/png" sizes="48x48" href="/favicon.png?v=d20-white" />
+        <link rel="shortcut icon" href="/favicon.png?v=d20-white" />
         <link rel="manifest" href="/manifest.json" />
         <link rel="apple-touch-icon" href="/icons/icon-192.png" />
         <ScrollViewStyleReset />
