@@ -347,6 +347,15 @@ export function DieMeshPreview({
         mesh.getChildMeshes?.(true)?.forEach((child: any) => {
           child.material = mat;
         });
+        if (disposed) {
+          try {
+            mat.dispose?.();
+          } catch {
+            // ignore
+          }
+          return;
+        }
+
         materialRef.current = { BABYLON, themeRoot, scene, mat };
 
         mesh.computeWorldMatrix(true);
@@ -357,12 +366,10 @@ export function DieMeshPreview({
         camera.radius = maxDim * 2.35;
         camera.lowerRadiusLimit = camera.upperRadiusLimit = camera.radius;
 
-        // Static pose — matches settled dice on the tray (no idle spin).
-
-        engine.runRenderLoop(() => {
-          if (!disposed) scene.render();
-        });
+        // Static pose — one paint, no render loop. A loop + popover unmount
+        // on "Бросить" was spamming WebGL getProgramParameter (deleted program).
         engine.resize();
+        scene.render();
         setReady(true);
       };
 
@@ -394,7 +401,17 @@ export function DieMeshPreview({
       });
     }
 
-    const onResize = () => engine?.resize?.();
+    const onResize = () => {
+      if (disposed) {
+        return;
+      }
+      try {
+        engine?.resize?.();
+        scene?.render?.();
+      } catch {
+        // ignore
+      }
+    };
     window.addEventListener('resize', onResize);
 
     return () => {
@@ -418,6 +435,11 @@ export function DieMeshPreview({
       return;
     }
     applyDieAccent(handle.BABYLON, handle.themeRoot, handle.scene, handle.mat, accent);
+    try {
+      handle.scene?.render?.();
+    } catch {
+      // ignore
+    }
   }, [accent]);
 
   const showText = Platform.OS !== 'web' || failed || !shared || !ready;

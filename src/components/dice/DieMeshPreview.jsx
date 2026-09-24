@@ -254,6 +254,15 @@ export function DieMeshPreview({ sides, size = 56, active = true, themeColor, })
                 mesh.getChildMeshes?.(true)?.forEach((child) => {
                     child.material = mat;
                 });
+                if (disposed) {
+                    try {
+                        mat.dispose?.();
+                    }
+                    catch {
+                        // ignore
+                    }
+                    return;
+                }
                 materialRef.current = { BABYLON, themeRoot, scene, mat };
                 mesh.computeWorldMatrix(true);
                 const bi = mesh.getHierarchyBoundingVectors(true);
@@ -262,12 +271,9 @@ export function DieMeshPreview({ sides, size = 56, active = true, themeColor, })
                 camera.setTarget(BABYLON.Vector3.Center(bi.min, bi.max));
                 camera.radius = maxDim * 2.35;
                 camera.lowerRadiusLimit = camera.upperRadiusLimit = camera.radius;
-                // Static pose — matches settled dice on the tray (no idle spin).
-                engine.runRenderLoop(() => {
-                    if (!disposed)
-                        scene.render();
-                });
+                // Static pose — one paint, no render loop (avoids WebGL spam on unmount).
                 engine.resize();
+                scene.render();
                 setReady(true);
             };
             const onError = (_s, message) => {
@@ -290,7 +296,17 @@ export function DieMeshPreview({ sides, size = 56, active = true, themeColor, })
                     setFailed(true);
             });
         }
-        const onResize = () => engine?.resize?.();
+        const onResize = () => {
+            if (disposed)
+                return;
+            try {
+                engine?.resize?.();
+                scene?.render?.();
+            }
+            catch {
+                // ignore
+            }
+        };
         window.addEventListener('resize', onResize);
         return () => {
             disposed = true;
@@ -313,6 +329,12 @@ export function DieMeshPreview({ sides, size = 56, active = true, themeColor, })
             return;
         }
         applyDieAccent(handle.BABYLON, handle.themeRoot, handle.scene, handle.mat, accent);
+        try {
+            handle.scene?.render?.();
+        }
+        catch {
+            // ignore
+        }
     }, [accent]);
     const showText = Platform.OS !== 'web' || failed || !shared || !ready;
     if (Platform.OS !== 'web') {

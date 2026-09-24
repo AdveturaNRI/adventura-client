@@ -291,6 +291,8 @@ export type ChatUploadFile = {
   uri: string;
   name: string;
   mimeType: string;
+  /** Prefer this on web when available — blob: URLs may already be revoked. */
+  blob?: Blob;
 };
 
 export async function setConversationBackground(
@@ -377,8 +379,12 @@ export async function sendChatMessage(
     const mimeType = file.mimeType || 'application/octet-stream';
 
     if (Platform.OS === 'web') {
-      const response = await fetch(file.uri);
-      const blob = await response.blob();
+      const blob =
+        file.blob ??
+        (await (async () => {
+          const response = await fetch(file.uri);
+          return response.blob();
+        })());
       formData.append('files', blob, fileName);
     } else {
       formData.append('files', {

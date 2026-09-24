@@ -185,8 +185,10 @@ export async function sendChatMessage(conversationId, options) {
         const fileName = file.name || 'attachment';
         const mimeType = file.mimeType || 'application/octet-stream';
         if (Platform.OS === 'web') {
-            const response = await fetch(file.uri);
-            const blob = await response.blob();
+            const blob = file.blob ?? (await (async () => {
+                const response = await fetch(file.uri);
+                return response.blob();
+            })());
             formData.append('files', blob, fileName);
         }
         else {

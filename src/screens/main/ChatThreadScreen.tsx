@@ -146,7 +146,17 @@ type PendingAttachment = {
   mimeType: string;
   kind: ChatAttachmentKind;
   isObjectUrl?: boolean;
+  /** Kept for upload after blob: preview URL is revoked. */
+  file?: File;
 };
+
+function revokePendingAttachmentUrls(items: PendingAttachment[]) {
+  for (const item of items) {
+    if (item.isObjectUrl) {
+      URL.revokeObjectURL(item.uri);
+    }
+  }
+}
 
 function attachmentKindFromMime(mimeType: string): ChatAttachmentKind {
   if (mimeType.startsWith('image/')) {
@@ -1701,11 +1711,9 @@ export default function ChatThreadScreen() {
     [appendMessage, myId, voiceActiveHere],
   );
 
-  const clearPendingAttachments = useCallback(() => {
-    for (const item of pendingAttachmentsRef.current) {
-      if (item.isObjectUrl) {
-        URL.revokeObjectURL(item.uri);
-      }
+  const clearPendingAttachments = useCallback((options?: { revoke?: boolean }) => {
+    if (options?.revoke !== false) {
+      revokePendingAttachmentUrls(pendingAttachmentsRef.current);
     }
     pendingAttachmentsRef.current = [];
     setPendingAttachments([]);
@@ -1714,8 +1722,8 @@ export default function ChatThreadScreen() {
   const removePendingAttachment = useCallback((id: string) => {
     setPendingAttachments((prev) => {
       const target = prev.find((item) => item.id === id);
-      if (target?.isObjectUrl) {
-        URL.revokeObjectURL(target.uri);
+      if (target) {
+        revokePendingAttachmentUrls([target]);
       }
       const next = prev.filter((item) => item.id !== id);
       pendingAttachmentsRef.current = next;
@@ -1739,20 +1747,12 @@ export default function ChatThreadScreen() {
     setPendingAttachments((prev) => {
       const room = MAX_CHAT_ATTACHMENTS - prev.length;
       if (room <= 0) {
-        for (const item of items) {
-          if (item.isObjectUrl) {
-            URL.revokeObjectURL(item.uri);
-          }
-        }
+        revokePendingAttachmentUrls(items);
         limitToast([...prev, ...items]);
         return prev;
       }
       if (items.length > room) {
-        for (const item of items.slice(room)) {
-          if (item.isObjectUrl) {
-            URL.revokeObjectURL(item.uri);
-          }
-        }
+        revokePendingAttachmentUrls(items.slice(room));
         limitToast([...prev, ...items]);
       }
       const next = [...prev, ...items.slice(0, room)];
@@ -1763,11 +1763,7 @@ export default function ChatThreadScreen() {
 
   useEffect(() => {
     return () => {
-      for (const item of pendingAttachmentsRef.current) {
-        if (item.isObjectUrl) {
-          URL.revokeObjectURL(item.uri);
-        }
-      }
+      revokePendingAttachmentUrls(pendingAttachmentsRef.current);
     };
   }, []);
 
@@ -2252,6 +2248,7 @@ export default function ChatThreadScreen() {
           mimeType,
           kind: attachmentKindFromMime(mimeType),
           isObjectUrl: true,
+          file,
         });
       }
 
@@ -2453,7 +2450,8 @@ export default function ChatThreadScreen() {
     selectionRef.current = { start: 0, end: 0 };
     setEmojiPanelOpen(false);
     setReplyTo(null);
-    clearPendingAttachments();
+    // Keep blob URLs alive until upload finishes (optimistic preview + FormData fetch).
+    clearPendingAttachments({ revoke: false });
     scrollToBottom();
 
     try {
@@ -2464,8 +2462,10 @@ export default function ChatThreadScreen() {
           uri: item.uri,
           name: item.name,
           mimeType: item.mimeType,
+          blob: item.file,
         })),
       });
+      revokePendingAttachmentUrls(attachments);
       setMessages((prev) => {
         const withoutPending = prev.filter((item) => item.id !== pendingId);
         if (withoutPending.some((item) => item.id === message.id)) {
@@ -2513,7 +2513,9 @@ export default function ChatThreadScreen() {
       skin?: string;
       mode: DiceRollMode;
     }) => {
-      if (!conversationId || diceRollBusy || conversation?.blockedMe || localDiceRoll) {
+      // Синхронный лок: между setBusy и стартом броска есть await(rAF×2) —
+      // за это окно второй onPress видит старый state и шлёт второй POST.
+      if (!conversationId || diceRollBusyRef.current || conversation?.blockedMe) {
         return;
       }
       diceRollBusyRef.current = true;
@@ -2525,6 +2527,15 @@ export default function ChatThreadScreen() {
       setDicePopoverOpen(false);
       setEmojiPanelOpen(false);
       emojiPanelOpenRef.current = false;
+
+      // Mobile: closing the popover tears down 7 DieMeshPreview WebGL contexts.
+      // Wait two frames so dispose finishes before the roll iframe animates —
+      // otherwise the console floods with getProgramParameter (deleted object).
+      if (Platform.OS === 'web') {
+        await new Promise<void>((resolve) => {
+          requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+        });
+      }
 
       const token = ++localDiceRollTokenRef.current;
       const outcome = await new Promise<DiceRollOutcome | null>((resolve) => {
@@ -2541,6 +2552,10 @@ export default function ChatThreadScreen() {
       });
 
       try {
+        // Протухший resolve после второго тапа / смены token — не шлём в API.
+        if (token !== localDiceRollTokenRef.current) {
+          return;
+        }
         if (!outcome || outcome.groups.length === 0) {
           toast.error('Не удалось бросить кости');
           return;
@@ -2554,6 +2569,9 @@ export default function ChatThreadScreen() {
           })),
           ...(input.mode !== 'normal' ? { mode: input.mode } : {}),
         });
+        if (token !== localDiceRollTokenRef.current) {
+          return;
+        }
         const rolled = parseDiceRollPayload(message.body);
         if (rolled && ((!rolled.color && input.color) || (!rolled.skin && input.skin))) {
           message = {
@@ -2578,20 +2596,14 @@ export default function ChatThreadScreen() {
       } catch (error) {
         toast.error(localizeErrorMessage(error, 'Не удалось бросить кости'));
       } finally {
-        suppressOwnDiceAnimRef.current = false;
-        diceRollBusyRef.current = false;
-        setDiceRollBusy(false);
+        if (token === localDiceRollTokenRef.current) {
+          suppressOwnDiceAnimRef.current = false;
+          diceRollBusyRef.current = false;
+          setDiceRollBusy(false);
+        }
       }
     },
-    [
-      appendMessage,
-      conversation?.blockedMe,
-      conversationId,
-      diceRollBusy,
-      localDiceRoll,
-      scrollToBottom,
-      user?.nickname,
-    ],
+    [appendMessage, conversation?.blockedMe, conversationId, scrollToBottom, user?.nickname],
   );
 
   const toReplyPreview = useCallback((message: ChatMessage): ChatReplyPreviewData => {
