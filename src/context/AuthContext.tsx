@@ -87,7 +87,15 @@ type AuthContextValue = {
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
-export function AuthProvider({ children }: { children: ReactNode }) {
+export function AuthProvider({
+  children,
+  enabled = true,
+}: {
+  children: ReactNode;
+  /** Public landings keep the context available for Router pre-renders, but do
+   * not restore a session or perform auth-related side effects. */
+  enabled?: boolean;
+}) {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [token, setToken] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -97,30 +105,37 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   );
 
   useEffect(() => {
+    if (!enabled) return;
     return onAccessTokenRefreshed((accessToken) => {
       setToken(accessToken);
     });
-  }, []);
+  }, [enabled]);
 
   useEffect(() => {
-    if (Platform.OS !== 'web') {
+    if (!enabled || Platform.OS !== 'web') {
       return;
     }
     void bootstrapOauthPublicConfig().then((state) => {
       setOauthIdsReady(Boolean(state.vkAppId || state.yandexClientId));
     });
-  }, []);
+  }, [enabled]);
 
   useEffect(() => {
-    if (Platform.OS !== 'web') {
+    if (!enabled || Platform.OS !== 'web') {
       return;
     }
     void bootstrapYandexMetrika().then(() => {
       setYandexMetrikaUserId(user?.id ?? null);
     });
-  }, [user?.id]);
+  }, [enabled, user?.id]);
 
   useEffect(() => {
+    if (!enabled) {
+      // Keep the value in a loading state. If Expo Router pre-renders a main
+      // route while a public landing is active, it renders a harmless loader
+      // instead of reading a missing context or redirecting prematurely.
+      return;
+    }
     void ensureUploadLimits().catch(() => {});
 
     let isMounted = true;
@@ -180,7 +195,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => {
       isMounted = false;
     };
-  }, []);
+  }, [enabled]);
 
   const signIn = useCallback(async (email: string, password: string) => {
     try {

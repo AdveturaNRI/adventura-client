@@ -70,25 +70,23 @@ function AppRouteProviders() {
     </View>
   );
 
-  // A public landing must not restore a session, open sockets, ask for push
-  // permissions, or surface app-level authorization errors.
-  if (isPublicLanding) {
-    return navigator;
-  }
-
   return (
-    <AuthProvider>
-      <RealtimeProvider>
-        <ProfileProvider>
-          <AuthorsProvider>
-            <VoiceCallProvider>
-              <MusicPlayerProvider>
-                <PushPromptProvider>{navigator}</PushPromptProvider>
-              </MusicPlayerProvider>
-            </VoiceCallProvider>
-          </AuthorsProvider>
-        </ProfileProvider>
-      </RealtimeProvider>
+    <AuthProvider enabled={!isPublicLanding}>
+      {isPublicLanding ? (
+        navigator
+      ) : (
+        <RealtimeProvider>
+          <ProfileProvider>
+            <AuthorsProvider>
+              <VoiceCallProvider>
+                <MusicPlayerProvider>
+                  <PushPromptProvider>{navigator}</PushPromptProvider>
+                </MusicPlayerProvider>
+              </VoiceCallProvider>
+            </AuthorsProvider>
+          </ProfileProvider>
+        </RealtimeProvider>
+      )}
     </AuthProvider>
   );
 }
