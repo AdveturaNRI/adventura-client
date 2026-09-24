@@ -215,7 +215,7 @@ function createStyles(colors: ThemeColors) {
     },
     railScrollContent: {
       alignItems: 'center',
-      gap: 8,
+      gap: 6,
       paddingBottom: 4,
       ...(Platform.OS === 'web' ? ({ overflow: 'visible' } as object) : null),
     },
@@ -231,8 +231,10 @@ function createStyles(colors: ThemeColors) {
     },
     dieSection: {
       alignItems: 'center',
-      gap: 5,
+      justifyContent: 'flex-start',
+      gap: 4,
       width: '100%',
+      minHeight: 92,
       position: 'relative',
       zIndex: 1,
       ...(Platform.OS === 'web' ? ({ overflow: 'visible' } as object) : null),
@@ -357,7 +359,12 @@ function createStyles(colors: ThemeColors) {
       height: 18,
       borderRadius: 7,
     },
+    dieMinusSpacer: {
+      width: 30,
+      height: 22,
+    },
     dieMinusSpacerCompact: {
+      width: 24,
       height: 18,
     },
     railDivider: {
@@ -1249,9 +1256,13 @@ export default function DiceScreen() {
             ]}>
             <Ionicons name="remove" size={14} color={colors.primaryLight} />
           </Pressable>
-        ) : compact ? (
-          <View style={styles.dieMinusSpacerCompact} />
-        ) : null}
+        ) : (
+          <View
+            style={[styles.dieMinusSpacer, compact && styles.dieMinusSpacerCompact]}
+            accessibilityElementsHidden
+            importantForAccessibility="no-hide-descendants"
+          />
+        )}
       </View>
     );
   });
