@@ -144,7 +144,7 @@ function applyDieAccent(BABYLON, themeRoot, scene, mat, hex) {
     diffuseTex.hasAlpha = true;
     mat.setTexture('diffuseSampler', diffuseTex);
 }
-export function DieMeshPreview({ sides, size = 56, active = true, themeColor, }) {
+export function DieMeshPreview({ sides, size = 56, active = true, themeColor, paused = false, }) {
     const colors = useTheme();
     const accent = themeColor?.trim() || colors.primary;
     const shared = useContext(SharedCtx);
@@ -152,6 +152,8 @@ export function DieMeshPreview({ sides, size = 56, active = true, themeColor, })
     const materialRef = useRef(null);
     const accentRef = useRef(accent);
     accentRef.current = accent;
+    const pausedRef = useRef(paused);
+    pausedRef.current = paused;
     const [ready, setReady] = useState(false);
     const [failed, setFailed] = useState(false);
     // Build WebGL scene once per die — remounting all 7 on color change hits browser context limits.
@@ -271,9 +273,12 @@ export function DieMeshPreview({ sides, size = 56, active = true, themeColor, })
                 camera.setTarget(BABYLON.Vector3.Center(bi.min, bi.max));
                 camera.radius = maxDim * 2.35;
                 camera.lowerRadiusLimit = camera.upperRadiusLimit = camera.radius;
-                // Static pose — one paint, no render loop (avoids WebGL spam on unmount).
+                engine.runRenderLoop(() => {
+                    if (disposed || pausedRef.current)
+                        return;
+                    scene.render();
+                });
                 engine.resize();
-                scene.render();
                 setReady(true);
             };
             const onError = (_s, message) => {
@@ -297,11 +302,10 @@ export function DieMeshPreview({ sides, size = 56, active = true, themeColor, })
             });
         }
         const onResize = () => {
-            if (disposed)
+            if (disposed || pausedRef.current)
                 return;
             try {
                 engine?.resize?.();
-                scene?.render?.();
             }
             catch {
                 // ignore
@@ -329,12 +333,6 @@ export function DieMeshPreview({ sides, size = 56, active = true, themeColor, })
             return;
         }
         applyDieAccent(handle.BABYLON, handle.themeRoot, handle.scene, handle.mat, accent);
-        try {
-            handle.scene?.render?.();
-        }
-        catch {
-            // ignore
-        }
     }, [accent]);
     const showText = Platform.OS !== 'web' || failed || !shared || !ready;
     if (Platform.OS !== 'web') {

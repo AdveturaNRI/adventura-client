@@ -18,6 +18,8 @@ type DieMeshPreviewProps = {
   active?: boolean;
   /** Hex body color; defaults to saved dice accent / theme primary. */
   themeColor?: string;
+  /** Stop the render loop without disposing (hidden but kept-alive popover). */
+  paused?: boolean;
 };
 
 type SharedAssets = {
@@ -210,6 +212,7 @@ export function DieMeshPreview({
   size = 56,
   active = true,
   themeColor,
+  paused = false,
 }: DieMeshPreviewProps) {
   const colors = useTheme();
   const accent = themeColor?.trim() || colors.primary;
@@ -220,6 +223,8 @@ export function DieMeshPreview({
   );
   const accentRef = useRef(accent);
   accentRef.current = accent;
+  const pausedRef = useRef(paused);
+  pausedRef.current = paused;
   const [ready, setReady] = useState(false);
   const [failed, setFailed] = useState(false);
 
@@ -366,10 +371,15 @@ export function DieMeshPreview({
         camera.radius = maxDim * 2.35;
         camera.lowerRadiusLimit = camera.upperRadiusLimit = camera.radius;
 
-        // Static pose — one paint, no render loop. A loop + popover unmount
-        // on "Бросить" was spamming WebGL getProgramParameter (deleted program).
+        // Static pose — loop keeps textures compiling; paused skips draws
+        // so closing the popover for a roll doesn't dispose mid-frame.
+        engine.runRenderLoop(() => {
+          if (disposed || pausedRef.current) {
+            return;
+          }
+          scene.render();
+        });
         engine.resize();
-        scene.render();
         setReady(true);
       };
 
@@ -402,12 +412,11 @@ export function DieMeshPreview({
     }
 
     const onResize = () => {
-      if (disposed) {
+      if (disposed || pausedRef.current) {
         return;
       }
       try {
         engine?.resize?.();
-        scene?.render?.();
       } catch {
         // ignore
       }
@@ -435,11 +444,6 @@ export function DieMeshPreview({
       return;
     }
     applyDieAccent(handle.BABYLON, handle.themeRoot, handle.scene, handle.mat, accent);
-    try {
-      handle.scene?.render?.();
-    } catch {
-      // ignore
-    }
   }, [accent]);
 
   const showText = Platform.OS !== 'web' || failed || !shared || !ready;

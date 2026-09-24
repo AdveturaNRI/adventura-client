@@ -394,17 +394,20 @@ export function ChatDicePopover({ visible, busy, onClose, onRoll }: ChatDicePopo
     : Math.max(320, windowHeight - Math.max(insets.top, 8) - 8);
 
   useEffect(() => {
-    if (visible) {
+    if (visible || busy) {
       setKeptAlive(true);
-      void loadDiceAnimationSpeed().then(setAnimationSpeed);
+      if (visible) {
+        void loadDiceAnimationSpeed().then(setAnimationSpeed);
+      }
       return;
     }
-    // На телефоне не держим 7 WebGL — лимит контекстов. На desktop оставляем
-    // тёплые превью, но паркуем шит за экраном (см. hiddenPark ниже).
+    // На телефоне не держим 7 WebGL — лимит контекстов. Но во время броска
+    // (busy) не снимаем их: dispose mid-roll валит контекст сцены → белый экран.
+    // На desktop оставляем тёплые превью, паркуем шит за экраном.
     if (!isDesktop) {
       setKeptAlive(false);
     }
-  }, [isDesktop, visible]);
+  }, [busy, isDesktop, visible]);
 
   const handleAnimationSpeedChange = (next: DiceAnimationSpeed) => {
     setAnimationSpeed(next);
@@ -605,6 +608,7 @@ export function ChatDicePopover({ visible, busy, onClose, onRoll }: ChatDicePopo
                         size={isDesktop ? PREVIEW_SIZE : PREVIEW_SIZE_COMPACT}
                         active={active || total === 0}
                         themeColor={accent}
+                        paused={!visible}
                       />
                     </View>
                     <Text style={[styles.dieLabel, !active ? styles.dieLabelMuted : null]}>

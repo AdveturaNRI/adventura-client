@@ -242,16 +242,18 @@ function getClipboardImageFiles(clipboardData: DataTransfer | null): File[] {
     if (!file || !file.type.startsWith('image/')) {
       return;
     }
-    const normalized = normalizeClipboardImageFile(file);
-    const key = `${normalized.name}:${normalized.size}:${normalized.lastModified}`;
+    // Deduplicate before rename: browsers expose the same paste in both
+    // `items` and `files`, and normalizeClipboardImageFile() changes name/lastModified.
+    const key = `${file.type}:${file.size}:${file.lastModified}:${file.name}`;
     if (seen.has(key)) {
       return;
     }
     seen.add(key);
-    collected.push(normalized);
+    collected.push(normalizeClipboardImageFile(file));
   };
 
   const items = clipboardData.items;
+  let pushedFromItems = false;
   if (items) {
     for (let index = 0; index < items.length; index += 1) {
       const item = items[index];
@@ -259,13 +261,17 @@ function getClipboardImageFiles(clipboardData: DataTransfer | null): File[] {
         continue;
       }
       push(item.getAsFile());
+      pushedFromItems = true;
     }
   }
 
-  const files = clipboardData.files;
-  if (files) {
-    for (let index = 0; index < files.length; index += 1) {
-      push(files[index] ?? null);
+  // Fallback only when items had no image files — avoid double-counting the same paste.
+  if (!pushedFromItems) {
+    const files = clipboardData.files;
+    if (files) {
+      for (let index = 0; index < files.length; index += 1) {
+        push(files[index] ?? null);
+      }
     }
   }
 
@@ -2527,15 +2533,6 @@ export default function ChatThreadScreen() {
       setDicePopoverOpen(false);
       setEmojiPanelOpen(false);
       emojiPanelOpenRef.current = false;
-
-      // Mobile: closing the popover tears down 7 DieMeshPreview WebGL contexts.
-      // Wait two frames so dispose finishes before the roll iframe animates —
-      // otherwise the console floods with getProgramParameter (deleted object).
-      if (Platform.OS === 'web') {
-        await new Promise<void>((resolve) => {
-          requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
-        });
-      }
 
       const token = ++localDiceRollTokenRef.current;
       const outcome = await new Promise<DiceRollOutcome | null>((resolve) => {

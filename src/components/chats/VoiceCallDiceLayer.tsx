@@ -122,12 +122,6 @@ export function VoiceCallDiceLayer({
       setBusy(true);
       onOpenChange(false);
 
-      if (Platform.OS === 'web') {
-        await new Promise<void>((resolve) => {
-          requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
-        });
-      }
-
       const token = ++tokenRef.current;
       const outcome = await new Promise<DiceRollOutcome | null>((resolve) => {
         resolveRef.current = resolve;
