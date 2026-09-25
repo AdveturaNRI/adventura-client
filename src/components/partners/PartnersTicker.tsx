@@ -67,6 +67,13 @@ function createStyles(colors: ThemeColors) {
       gap: ITEM_GAP,
       paddingHorizontal: Spacing.sm,
     },
+    measureRow: {
+      position: 'absolute',
+      opacity: 0,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: ITEM_GAP,
+    },
     item: {
       flexDirection: 'row',
       alignItems: 'center',
@@ -140,6 +147,7 @@ export function PartnersTicker({ partners: partnersProp }: PartnersTickerProps) 
   const styles = useThemedStyles(createStyles);
   const translateX = useSharedValue(0);
   const [setWidth, setSetWidth] = useState(0);
+  const [viewportWidth, setViewportWidth] = useState(0);
   const [reduceMotion, setReduceMotion] = useState(false);
   const [loadedPartners, setLoadedPartners] = useState<Partner[]>(
     () => getPartnersCache() ?? [],
@@ -173,6 +181,10 @@ export function PartnersTicker({ partners: partnersProp }: PartnersTickerProps) 
   }, [loadedPartners, partnersProp]);
 
   useEffect(() => {
+    setSetWidth(0);
+  }, [items]);
+
+  useEffect(() => {
     let mounted = true;
     void AccessibilityInfo.isReduceMotionEnabled().then((enabled) => {
       if (mounted) {
@@ -186,11 +198,15 @@ export function PartnersTicker({ partners: partnersProp }: PartnersTickerProps) 
     };
   }, []);
 
+  const innerViewport = Math.max(0, viewportWidth - Spacing.sm * 2);
+  const fitsViewport = innerViewport > 0 && setWidth > 0 && setWidth <= innerViewport;
+  const shouldScroll = !reduceMotion && !fitsViewport && setWidth > 0 && items.length > 0;
+
   useEffect(() => {
     cancelAnimation(translateX);
     translateX.value = 0;
 
-    if (reduceMotion || setWidth <= 0 || items.length === 0) {
+    if (!shouldScroll) {
       return;
     }
 
@@ -204,7 +220,7 @@ export function PartnersTicker({ partners: partnersProp }: PartnersTickerProps) 
     return () => {
       cancelAnimation(translateX);
     };
-  }, [items.length, reduceMotion, setWidth, translateX]);
+  }, [shouldScroll, setWidth, translateX]);
 
   const animatedStyle = useAnimatedStyle(() => ({
     transform: [{ translateX: translateX.value }],
@@ -212,6 +228,13 @@ export function PartnersTicker({ partners: partnersProp }: PartnersTickerProps) 
 
   const openPartner = (partner: Partner) => {
     void Linking.openURL(partner.href);
+  };
+
+  const onViewportLayout = (event: LayoutChangeEvent) => {
+    const next = Math.floor(event.nativeEvent.layout.width);
+    if (next > 0 && next !== viewportWidth) {
+      setViewportWidth(next);
+    }
   };
 
   const onSetLayout = (event: LayoutChangeEvent) => {
@@ -232,15 +255,10 @@ export function PartnersTicker({ partners: partnersProp }: PartnersTickerProps) 
       </View>
       <View
         style={styles.root}
+        onLayout={onViewportLayout}
         accessibilityRole={Platform.OS === 'web' ? 'list' : undefined}
         accessibilityLabel="Список партнёров">
-        {reduceMotion ? (
-          <View style={styles.staticRow}>
-            {items.map((partner) => (
-              <PartnerChip key={partner.id} partner={partner} styles={styles} onPress={openPartner} />
-            ))}
-          </View>
-        ) : (
+        {shouldScroll ? (
           <Animated.View style={[styles.track, { paddingLeft: Spacing.sm }, animatedStyle]}>
             <View style={styles.set} onLayout={onSetLayout}>
               {items.map((partner) => (
@@ -258,6 +276,23 @@ export function PartnersTicker({ partners: partnersProp }: PartnersTickerProps) 
               ))}
             </View>
           </Animated.View>
+        ) : (
+          <View style={styles.staticRow}>
+            {items.map((partner) => (
+              <PartnerChip key={partner.id} partner={partner} styles={styles} onPress={openPartner} />
+            ))}
+            {/* Hidden measure: same chips without wrap, so we know if they overflow. */}
+            <View pointerEvents="none" onLayout={onSetLayout} style={styles.measureRow}>
+              {items.map((partner) => (
+                <PartnerChip
+                  key={`measure-${partner.id}`}
+                  partner={partner}
+                  styles={styles}
+                  onPress={() => undefined}
+                />
+              ))}
+            </View>
+          </View>
         )}
       </View>
     </View>
