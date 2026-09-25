@@ -12,7 +12,7 @@ export type NavbarSpec = {
   icon: NavbarIconKey;
 };
 
-const HIDDEN_NAV_KEYS = new Set<NavbarIconKey>(['characters']);
+const HIDDEN_NAV_KEYS = new Set<NavbarIconKey>(['characters', 'handbook']);
 
 export const NAVBAR_ITEMS: NavbarItem[] = [
   { key: 'wanderers', label: 'Странники', icon: 'wanderers' },
