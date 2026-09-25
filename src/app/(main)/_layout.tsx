@@ -37,6 +37,7 @@ function MainStack() {
       <Stack.Screen name="games/[id]" />
       <Stack.Screen name="users/[id]" />
       <Stack.Screen name="authors" />
+      <Stack.Screen name="handbook" />
       <Stack.Screen name="rewards-lab" />
       <Stack.Screen name="profile-appearance" />
     </Stack>
