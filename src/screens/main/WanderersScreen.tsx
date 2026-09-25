@@ -1,13 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Text, View } from 'react-native';
 
-import { useIsDesktopSidebarVisible } from '@/components/navigation/DesktopThemeToggle';
-import { MobileScreenHeader } from '@/components/navigation/MobileScreenHeader';
 import { ScreenTransition } from '@/components/navigation/ScreenTransition';
 import { WanderersFiltersPanel } from '@/components/wanderers/WanderersFiltersPanel';
 import type { SwitcherOption } from '@/components/ui';
 import { useAuth } from '@/context/AuthContext';
-import { useTheme } from '@/hooks/use-theme';
 import { WandererDeck } from '@/screens/main/WandererDeck';
 import { WANDERERS_SCREEN } from '@/screens/main/profile.config';
 import {
@@ -30,8 +26,6 @@ import {
   type WanderersFilters,
 } from '@/utils/wanderers-filters';
 
-import { useMainScreenStyles } from './main-screen.styles';
-
 const BUCKET_OPTIONS = [
   { key: 'feed', label: WANDERERS_SCREEN.bucketFeed, icon: 'albums-outline' as const },
   { key: 'favorites', label: WANDERERS_SCREEN.bucketFavorites, icon: 'crown-outline', iconSet: 'material-community' as const },
@@ -47,11 +41,7 @@ const NICKNAME_SEARCH_MIN = 1;
 const NICKNAME_SEARCH_DEBOUNCE_MS = 300;
 
 export default function WanderersScreen() {
-  const styles = useMainScreenStyles();
-  const colors = useTheme();
   const { user } = useAuth();
-  const hasDesktopSidebar = useIsDesktopSidebarVisible();
-  const showCompactNav = !hasDesktopSidebar;
   const [isLoading, setIsLoading] = useState(true);
   const [isFiltersReady, setIsFiltersReady] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -426,12 +416,6 @@ export default function WanderersScreen() {
     [bucket, loadBucketCounts, loadWanderers, searchActive],
   );
 
-  const pageHeader = showCompactNav ? (
-    <MobileScreenHeader title={WANDERERS_SCREEN.title} />
-  ) : (
-    <Text style={styles.title}>{WANDERERS_SCREEN.title}</Text>
-  );
-
   const filtersPanel = isFiltersReady ? (
     <WanderersFiltersPanel
       filters={filters}
@@ -449,35 +433,9 @@ export default function WanderersScreen() {
     />
   ) : null;
 
-  // Keep one tree while typing in search — swapping spinner/deck remounts the input and steals focus.
+  // Keep one tree while switching buckets/search — a separate spinner layout remounts the header and jumps.
   const showBucketLoading = isLoading && !searchActive && items.length === 0;
   const showBucketError = Boolean(errorMessage) && items.length === 0 && !searchActive;
-
-  if (showBucketLoading) {
-    return (
-      <ScreenTransition animateOnFocus>
-        <View style={styles.container}>
-          {pageHeader}
-          {filtersPanel}
-          <View style={[styles.stateWrap, { flex: 1, justifyContent: 'center' }]}>
-            <ActivityIndicator color={colors.primary} size="large" />
-          </View>
-        </View>
-      </ScreenTransition>
-    );
-  }
-
-  if (showBucketError) {
-    return (
-      <ScreenTransition animateOnFocus>
-        <View style={styles.container}>
-          {pageHeader}
-          {filtersPanel}
-          <Text style={styles.stateText}>{errorMessage}</Text>
-        </View>
-      </ScreenTransition>
-    );
-  }
 
   const sourceEmpty = searchActive
     ? !isSearching && searchResults.length === 0
@@ -489,8 +447,12 @@ export default function WanderersScreen() {
         items={deckItems}
         bucket={bucket}
         searchActive={searchActive}
-        contentLoading={searchActive && isSearching && searchResults.length === 0}
-        contentError={searchActive ? searchError : null}
+        contentLoading={
+          showBucketLoading || (searchActive && isSearching && searchResults.length === 0)
+        }
+        contentError={
+          searchActive ? searchError : showBucketError ? errorMessage : null
+        }
         filtersSignature={filtersSignature}
         feedSourceEmpty={sourceEmpty}
         filtersSlot={filtersPanel}

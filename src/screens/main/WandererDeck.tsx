@@ -398,6 +398,11 @@ function createStyles(
       gap: Spacing.md,
       paddingHorizontal: Spacing.lg,
     },
+    loadingSlot: {
+      alignItems: 'center',
+      justifyContent: 'center',
+      alignSelf: 'center',
+    },
     emptyTitle: {
       fontSize: 22,
       fontWeight: '700',
@@ -1275,13 +1280,29 @@ export function WandererDeck({
   };
 
   if (contentLoading) {
+    const loadingFrame = (
+      <View
+        style={[
+          styles.loadingSlot,
+          deckSize
+            ? isDesktopWeb
+              ? { width: deckSize.width, height: deckSize.height }
+              : { width: deckSize.width, height: deckSize.height, maxWidth: '100%' }
+            : { width: 52, height: 52 },
+        ]}>
+        <ActivityIndicator color={colors.primary} />
+      </View>
+    );
+
     return (
       <View style={styles.root}>
         <View style={styles.inner}>
           {renderHeader(subtitle)}
-          <View style={styles.emptyWrap}>
-            <ActivityIndicator color={colors.primary} size="large" />
-          </View>
+          {isDesktopWeb ? (
+            <View style={styles.desktopStage}>{loadingFrame}</View>
+          ) : (
+            <View style={styles.mobileDeckSlot}>{loadingFrame}</View>
+          )}
         </View>
       </View>
     );

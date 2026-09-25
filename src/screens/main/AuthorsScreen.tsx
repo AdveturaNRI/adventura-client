@@ -249,10 +249,9 @@ export default function AuthorsScreen() {
 
             <AuthorFilters value={filter} onChange={setFilter} />
 
-            {isLoading ? (
+            {isLoading && feedPosts.length === 0 ? (
               <View style={styles.stateWrap}>
                 <ActivityIndicator color={colors.primary} />
-                <Text style={styles.emptyHint}>Загружаем публикации…</Text>
               </View>
             ) : error && feedPosts.length === 0 ? (
               <View style={styles.stateWrap}>

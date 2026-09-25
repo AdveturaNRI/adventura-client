@@ -225,6 +225,11 @@ function createLocalStyles(colors: ThemeColors, isDesktopWeb: boolean) {
       paddingHorizontal: Spacing.xl,
       paddingVertical: Spacing.xl,
     },
+    stateWrapFixed: {
+      alignSelf: isDesktopWeb ? 'flex-start' : 'center',
+      width: isDesktopWeb ? DESKTOP_CARD_WIDTH : undefined,
+      minHeight: 220,
+    },
     emptyIconWrap: {
       width: 56,
       height: 56,
@@ -786,8 +791,8 @@ export default function GamesScreen() {
             </View>
           </View>
 
-          {loading ? (
-            <View style={styles.stateWrap}>
+          {loading && items.length === 0 ? (
+            <View style={[styles.stateWrap, styles.stateWrapFixed]}>
               <ActivityIndicator color={colors.primary} />
             </View>
           ) : items.length === 0 ? (
