@@ -6,6 +6,7 @@ import type { NavbarIconKey } from '@/components/ui/navigation/navbar-icon-asset
 export const PUBLIC_TAB_KEYS = [
   'games',
   'authors',
+  'handbook',
   'clubs',
   'dice',
   'generators',
@@ -42,6 +43,7 @@ export function isPublicAppPath(pathname: string): boolean {
   if (
     path === '/games' ||
     path === '/authors' ||
+    path === '/handbook' ||
     path === '/clubs' ||
     path === '/dice' ||
     path === '/generators'
@@ -53,6 +55,7 @@ export function isPublicAppPath(pathname: string): boolean {
   if (/^\/clubs\/[^/]+$/.test(path)) return true;
   if (/^\/authors\/[^/]+$/.test(path)) return true;
   if (/^\/authors\/[^/]+\/posts\/[^/]+$/.test(path)) return true;
+  if (/^\/handbook\/[^/]+$/.test(path)) return true;
 
   return false;
 }

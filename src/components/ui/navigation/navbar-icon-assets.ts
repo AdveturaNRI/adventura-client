@@ -3,6 +3,7 @@ export type NavbarIconKey =
   | 'games'
   | 'characters'
   | 'authors'
+  | 'handbook'
   | 'clubs'
   | 'dice'
   | 'generators'
@@ -18,6 +19,8 @@ export const NAVBAR_ICON_SVGS: Record<NavbarIconKey, string> = {
     '<svg width="22" height="22" viewBox="0 0 22 22" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="11" cy="11" r="8.25" stroke="#828282" stroke-width="2"/><circle cx="11" cy="9" r="2.25" stroke="#828282" stroke-width="2"/><path d="M6.75 16.25C7.4 13.9 9 12.75 11 12.75C13 12.75 14.6 13.9 15.25 16.25" stroke="#828282" stroke-width="2" stroke-linecap="round"/></svg>',
   authors:
     '<svg width="22" height="22" viewBox="0 0 22 22" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M4.5 6.5h9.5a2 2 0 0 1 2 2v9a1.5 1.5 0 0 1-1.5 1.5H6.5a2 2 0 0 1-2-2V6.5z" stroke="#828282" stroke-width="2" stroke-linejoin="round"/><path d="M7.5 6.5V5a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v9.5a2 2 0 0 1-2 2h-1.5" stroke="#828282" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><circle cx="9.25" cy="11" r="1.35" stroke="#828282" stroke-width="1.6"/><path d="M6.75 16.25c.55-1.55 1.85-2.35 3.5-2.35s2.95.8 3.5 2.35" stroke="#828282" stroke-width="1.6" stroke-linecap="round"/></svg>',
+  handbook:
+    '<svg width="22" height="22" viewBox="0 0 22 22" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H18v14.5H6.5A2.5 2.5 0 0 0 4 20V5.5Z" stroke="#828282" stroke-width="2" stroke-linejoin="round"/><path d="M4 17.5A2.5 2.5 0 0 1 6.5 15H18" stroke="#828282" stroke-width="2" stroke-linecap="round"/><path d="M8.5 7.5h6M8.5 10.5h4.5" stroke="#828282" stroke-width="2" stroke-linecap="round"/></svg>',
   clubs:
     '<svg width="22" height="22" viewBox="0 0 22 22" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M11 2.75C7.96243 2.75 5.5 5.21243 5.5 8.25C5.5 12.375 11 19.25 11 19.25C11 19.25 16.5 12.375 16.5 8.25C16.5 5.21243 14.0376 2.75 11 2.75Z" stroke="#828282" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><circle cx="11" cy="8.25" r="2.25" stroke="#828282" stroke-width="2"/></svg>',
   dice:

@@ -9,9 +9,10 @@ import {
   Text,
   TextInput,
   View,
-  useWindowDimensions,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { useIsDesktopWeb } from '@/components/navigation/DesktopThemeToggle';
 import { AvailabilityPicker } from '@/components/questionnaire/AvailabilityPicker';
 import {
   GameSystemsPicker,
@@ -45,7 +46,6 @@ import {
 } from '@/screens/questionnaire/questionnaire-validation';
 
 const MODAL_SWITCH_DELAY_MS = 280;
-const MOBILE_LAYOUT_MAX_WIDTH = 768;
 
 type WanderersFiltersPanelProps = {
   filters: WanderersFilters;
@@ -70,7 +70,11 @@ type FilterChipProps = {
   icon?: keyof typeof Ionicons.glyphMap;
 };
 
-function createStyles(colors: ThemeColors) {
+function createStyles(
+  colors: ThemeColors,
+  isDesktopWeb = false,
+  bottomInset = 0,
+) {
   return StyleSheet.create({
     root: {
       width: '100%',
@@ -78,28 +82,21 @@ function createStyles(colors: ThemeColors) {
       zIndex: 20,
     },
     toolbar: {
+      flexDirection: isDesktopWeb ? 'row' : 'column',
+      alignItems: isDesktopWeb ? 'center' : 'stretch',
+      gap: Spacing.sm,
+      width: '100%',
+    },
+    toolbarTop: {
       flexDirection: 'row',
       alignItems: 'center',
       justifyContent: 'space-between',
       gap: Spacing.sm,
-      width: '100%',
-    },
-    toolbarStacked: {
-      gap: Spacing.sm,
-      width: '100%',
-    },
-    switcherRow: {
-      width: '100%',
-    },
-    filtersRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'flex-end',
-      gap: Spacing.xs,
-      width: '100%',
+      width: isDesktopWeb ? undefined : '100%',
+      flexShrink: 0,
     },
     toolbarPrimary: {
-      flex: 1,
+      flexShrink: 0,
       minWidth: 0,
     },
     toolbarActions: {
@@ -107,6 +104,20 @@ function createStyles(colors: ThemeColors) {
       alignItems: 'center',
       flexShrink: 0,
       gap: Spacing.xs,
+    },
+    searchWrap: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: Spacing.sm,
+      flex: isDesktopWeb ? 1 : undefined,
+      width: isDesktopWeb ? undefined : '100%',
+      minWidth: isDesktopWeb ? 200 : 0,
+      minHeight: 44,
+      paddingHorizontal: Spacing.md,
+      borderRadius: Radius.pill,
+      borderWidth: 1,
+      borderColor: colors.borderLight,
+      backgroundColor: colors.surface,
     },
     toggleButton: {
       flexDirection: 'row',
@@ -156,18 +167,6 @@ function createStyles(colors: ThemeColors) {
       fontWeight: '600',
       color: colors.primary,
     },
-    searchWrap: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: Spacing.sm,
-      width: '100%',
-      minHeight: 44,
-      paddingHorizontal: Spacing.md,
-      borderRadius: Radius.pill,
-      borderWidth: 1,
-      borderColor: colors.borderLight,
-      backgroundColor: colors.surface,
-    },
     searchInput: {
       flex: 1,
       minWidth: 0,
@@ -193,24 +192,31 @@ function createStyles(colors: ThemeColors) {
     },
     modalRoot: {
       flex: 1,
-      justifyContent: 'flex-start',
-      paddingTop: 120,
-      paddingHorizontal: Spacing.lg,
-      backgroundColor: 'rgba(15, 18, 24, 0.35)',
+      justifyContent: isDesktopWeb ? 'center' : 'flex-end',
+      alignItems: isDesktopWeb ? 'center' : 'stretch',
+      paddingHorizontal: isDesktopWeb ? Spacing.lg : 0,
+      paddingVertical: isDesktopWeb ? Spacing.xl : 0,
+      backgroundColor: 'rgba(15, 18, 24, 0.4)',
     },
     modalCard: {
-      width: '100%',
-      maxWidth: 720,
-      maxHeight: '78%',
-      alignSelf: 'center',
-      borderRadius: 20,
+      width: isDesktopWeb ? '100%' : undefined,
+      maxWidth: isDesktopWeb ? 720 : undefined,
+      maxHeight: isDesktopWeb ? '82%' : '88%',
+      alignSelf: isDesktopWeb ? 'center' : 'stretch',
+      borderTopLeftRadius: 20,
+      borderTopRightRadius: 20,
+      borderBottomLeftRadius: isDesktopWeb ? 20 : 0,
+      borderBottomRightRadius: isDesktopWeb ? 20 : 0,
       borderWidth: 1,
       borderColor: colors.borderLight,
       backgroundColor: colors.surface,
       overflow: 'hidden',
-      ...({
-        boxShadow: '0 16px 40px rgba(0, 0, 0, 0.18)',
-      } as object),
+      paddingBottom: isDesktopWeb ? 0 : bottomInset,
+      ...(isDesktopWeb
+        ? ({
+            boxShadow: '0 16px 40px rgba(0, 0, 0, 0.18)',
+          } as object)
+        : {}),
     },
     modalHeader: {
       flexDirection: 'row',
@@ -490,9 +496,12 @@ export function WanderersFiltersPanel({
   bucketDisabled = false,
 }: WanderersFiltersPanelProps) {
   const colors = useTheme();
-  const styles = useThemedStyles(createStyles);
-  const { width: windowWidth, height: windowHeight } = useWindowDimensions();
-  const isMobileLayout = Platform.OS !== 'web' || windowWidth < MOBILE_LAYOUT_MAX_WIDTH;
+  const isDesktopWeb = useIsDesktopWeb();
+  const insets = useSafeAreaInsets();
+  const styles = useThemedStyles((theme) =>
+    createStyles(theme, isDesktopWeb, insets.bottom),
+  );
+  const isMobileLayout = !isDesktopWeb;
   const activeCount = countActiveWanderersFilters(filters);
   const availabilityLabel = formatWanderersAvailabilityFilter(filters.availability);
   const ageFilterLabel = formatWanderersAgeFilter(filters);
@@ -687,49 +696,55 @@ export function WanderersFiltersPanel({
     </>
   );
 
+  const searchField = (
+    <View style={styles.searchWrap}>
+      <Ionicons name="search" size={16} color={colors.textMuted} />
+      <TextInput
+        value={nicknameQuery}
+        onChangeText={onNicknameQueryChange}
+        placeholder="Поиск по нику"
+        placeholderTextColor={colors.textMuted}
+        style={styles.searchInput}
+        autoCapitalize="none"
+        autoCorrect={false}
+        returnKeyType="search"
+        clearButtonMode="never"
+      />
+      {nicknameQuery.length > 0 ? (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Очистить поиск"
+          onPress={() => onNicknameQueryChange('')}
+          hitSlop={8}
+          style={styles.searchClear}>
+          <Ionicons name="close-circle" size={18} color={colors.textMuted} />
+        </Pressable>
+      ) : null}
+    </View>
+  );
+
   return (
     <View style={styles.root}>
       <View style={styles.toolbar}>
-        <View style={styles.toolbarPrimary}>
-          <Switcher
-            stretch={isMobileLayout}
-            showLabelOnlyWhenActive={isMobileLayout}
-            size="compact"
-            options={bucketOptions}
-            value={bucket}
-            onChange={(key) => onBucketChange(key as WandererBucket)}
-            disabled={bucketDisabled}
-          />
+        <View style={styles.toolbarTop}>
+          <View style={styles.toolbarPrimary}>
+            <Switcher
+              stretch={isMobileLayout}
+              showLabelOnlyWhenActive={isMobileLayout}
+              size="compact"
+              options={bucketOptions}
+              value={bucket}
+              onChange={(key) => onBucketChange(key as WandererBucket)}
+              disabled={bucketDisabled}
+            />
+          </View>
+          {isMobileLayout ? <View style={styles.toolbarActions}>{filterActions}</View> : null}
         </View>
-        <View style={styles.toolbarActions}>{filterActions}</View>
+        {searchField}
+        {isDesktopWeb ? <View style={styles.toolbarActions}>{filterActions}</View> : null}
       </View>
 
-      <View style={styles.searchWrap}>
-        <Ionicons name="search" size={16} color={colors.textMuted} />
-        <TextInput
-          value={nicknameQuery}
-          onChangeText={onNicknameQueryChange}
-          placeholder="Поиск по нику"
-          placeholderTextColor={colors.textMuted}
-          style={styles.searchInput}
-          autoCapitalize="none"
-          autoCorrect={false}
-          returnKeyType="search"
-          clearButtonMode="never"
-        />
-        {nicknameQuery.length > 0 ? (
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Очистить поиск"
-            onPress={() => onNicknameQueryChange('')}
-            hitSlop={8}
-            style={styles.searchClear}>
-            <Ionicons name="close-circle" size={18} color={colors.textMuted} />
-          </Pressable>
-        ) : null}
-      </View>
-
-      {activeCount > 0 && !expanded && !isMobileLayout ? (
+      {activeCount > 0 && !expanded ? (
         <ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
@@ -816,10 +831,10 @@ export function WanderersFiltersPanel({
       <Modal
         visible={expanded}
         transparent
-        animationType="fade"
+        animationType={isDesktopWeb ? 'fade' : 'slide'}
         presentationStyle="overFullScreen"
         onRequestClose={() => onExpandedChange(false)}>
-        <View style={[styles.modalRoot, { paddingTop: Math.max(72, windowHeight * 0.08) }]}>
+        <View style={styles.modalRoot}>
           <Pressable style={StyleSheet.absoluteFill} onPress={() => onExpandedChange(false)} />
           <View style={styles.modalCard} collapsable={false}>
             <View style={styles.modalHeader}>

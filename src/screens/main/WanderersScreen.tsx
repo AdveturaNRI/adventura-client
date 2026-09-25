@@ -229,10 +229,32 @@ export default function WanderersScreen() {
 
   const deckItems = searchActive ? searchResults : filteredItems;
 
-  const handleFiltersChange = useCallback((next: WanderersFilters) => {
-    setFilters(next);
-    void saveWanderersFilters(next);
+  const restoreBrowsedCards = useCallback(() => {
+    if (browseSkippedCardsRef.current.size === 0) {
+      return;
+    }
+
+    setItems((prev) => {
+      const existing = new Set(prev.map((item) => item.id));
+      const restored = [...browseSkippedCardsRef.current.values()].filter(
+        (item) => !existing.has(item.id),
+      );
+      browseSkippedCardsRef.current.clear();
+      if (restored.length === 0) {
+        return prev;
+      }
+      return [...restored, ...prev];
+    });
   }, []);
+
+  const handleFiltersChange = useCallback(
+    (next: WanderersFilters) => {
+      restoreBrowsedCards();
+      setFilters(next);
+      void saveWanderersFilters(next);
+    },
+    [restoreBrowsedCards],
+  );
 
   const handleFiltersClear = useCallback(() => {
     handleFiltersChange({
@@ -267,17 +289,24 @@ export default function WanderersScreen() {
       }
 
       const next = prev.filter((item) => item.id !== targetUserId);
+      const remainingVisible = applyWanderersFilters(
+        user?.id ? next.filter((item) => item.id !== user.id) : next,
+        filters,
+      );
 
-      // Всех только пролистали — начинаем круг заново, без избранных/скрытых.
-      if (next.length === 0 && browseSkippedCardsRef.current.size > 0) {
-        const looped = [...browseSkippedCardsRef.current.values()];
+      // Пролистали всех, кто проходит фильтр — круг с начала, без избранных/скрытых.
+      if (remainingVisible.length === 0 && browseSkippedCardsRef.current.size > 0) {
+        const existing = new Set(next.map((item) => item.id));
+        const looped = [...browseSkippedCardsRef.current.values()].filter(
+          (item) => !existing.has(item.id),
+        );
         browseSkippedCardsRef.current.clear();
-        return looped;
+        return [...looped, ...next];
       }
 
       return next;
     });
-  }, []);
+  }, [filters, user?.id]);
 
   const handleBrowseRestored = useCallback((targetUserId: string) => {
     const cached = browseSkippedCardsRef.current.get(targetUserId);
