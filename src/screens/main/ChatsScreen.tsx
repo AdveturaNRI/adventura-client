@@ -1,7 +1,7 @@
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import { useFocusEffect, usePathname, useRouter } from 'expo-router';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
@@ -10,6 +10,7 @@ import {
   Pressable,
   StyleSheet,
   Text,
+  TextInput,
   View,
 } from 'react-native';
 import DraggableFlatList, {
@@ -29,7 +30,7 @@ import { PartnersTicker } from '@/components/partners/PartnersTicker';
 import { ScreenTransition } from '@/components/navigation/ScreenTransition';
 import { avatarFrameOuterSize } from '@/components/rewards/AvatarFrame';
 import { toast } from '@/components/ui';
-import { FontSize, Spacing, type ThemeColors } from '@/constants/theme';
+import { FontSize, Radius, Spacing, type ThemeColors } from '@/constants/theme';
 import { useAuth } from '@/context/AuthContext';
 import { useRealtime } from '@/context/RealtimeContext';
 import { useVoicePlayback } from '@/context/VoicePlaybackContext';
@@ -129,6 +130,35 @@ function conversationTitle(item: ConversationListItem) {
   }
   return item.peer?.nickname ?? 'Чат';
 }
+
+function conversationMatchesQuery(item: ConversationListItem, query: string) {
+  const q = query.trim().toLowerCase();
+  if (!q) {
+    return true;
+  }
+
+  const title = conversationTitle(item).toLowerCase();
+  if (title.includes(q)) {
+    return true;
+  }
+
+  const preview = item.lastMessage?.body?.trim().toLowerCase();
+  if (preview && preview.includes(q)) {
+    return true;
+  }
+
+  if (isGroupChat(item)) {
+    const memberHit = item.membersPreview?.some((member) =>
+      member.nickname?.trim().toLowerCase().includes(q),
+    );
+    if (memberHit) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 function createStyles(colors: ThemeColors, isRail: boolean, isDark: boolean) {
   return StyleSheet.create({
     container: {
@@ -172,6 +202,34 @@ function createStyles(colors: ThemeColors, isRail: boolean, isDark: boolean) {
       paddingHorizontal: isRail ? 0 : undefined,
       marginBottom: Spacing.sm,
       flexShrink: 0,
+    },
+    searchWrap: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: Spacing.sm,
+      width: '100%',
+      minHeight: 44,
+      paddingHorizontal: Spacing.md,
+      marginBottom: Spacing.sm,
+      borderRadius: Radius.pill,
+      borderWidth: 1,
+      borderColor: colors.borderLight,
+      backgroundColor: colors.surface,
+      flexShrink: 0,
+    },
+    searchInput: {
+      flex: 1,
+      minWidth: 0,
+      fontSize: FontSize.input,
+      color: colors.text,
+      paddingVertical: Platform.OS === 'web' ? 10 : 8,
+      ...Platform.select({
+        web: { outlineStyle: 'none' } as object,
+        default: {},
+      }),
+    },
+    searchClear: {
+      padding: 2,
     },
     row: {
       flexDirection: 'row',
@@ -566,6 +624,7 @@ export default function ChatsScreen({ variant = 'page' }: ChatsScreenProps) {
     lastConversationDeleted,
     lastMessage,
     lastPresence,
+    dataResyncAt,
     publishConversationUpdate,
   } = useRealtime();
   const { user } = useAuth();
@@ -583,9 +642,16 @@ export default function ChatsScreen({ variant = 'page' }: ChatsScreenProps) {
   const [menuAnchor, setMenuAnchor] = useState<{ x: number; y: number; width: number; height: number } | null>(
     null,
   );
+  const [searchQuery, setSearchQuery] = useState('');
   const menuTriggerRefs = useRef<Record<string, View | null>>({});
   const itemsRef = useRef<ConversationListItem[]>([]);
   itemsRef.current = items;
+
+  const filteredItems = useMemo(
+    () => items.filter((item) => conversationMatchesQuery(item, searchQuery)),
+    [items, searchQuery],
+  );
+  const searchActive = searchQuery.trim().length > 0;
 
   const load = useCallback(async () => {
     try {
@@ -631,6 +697,13 @@ export default function ChatsScreen({ variant = 'page' }: ChatsScreenProps) {
       void load();
     }, [load]),
   );
+
+  useEffect(() => {
+    if (!dataResyncAt) {
+      return;
+    }
+    void load();
+  }, [dataResyncAt, load]);
 
   useEffect(() => {
     if (!lastConversationUpdate) {
@@ -908,6 +981,9 @@ export default function ChatsScreen({ variant = 'page' }: ChatsScreenProps) {
 
   const handlePinnedReorder = useCallback(
     (data: ConversationListItem[]) => {
+      if (searchQuery.trim()) {
+        return;
+      }
       const pinned = data.filter((item) => item.isPinned);
       const unpinned = data
         .filter((item) => !item.isPinned)
@@ -941,7 +1017,7 @@ export default function ChatsScreen({ variant = 'page' }: ChatsScreenProps) {
           void load();
         });
     },
-    [load],
+    [load, searchQuery],
   );
 
   const handleLeaveGroup = useCallback(
@@ -1203,6 +1279,33 @@ export default function ChatsScreen({ variant = 'page' }: ChatsScreenProps) {
 
         {!isRail ? <PartnersTicker /> : null}
 
+        {items.length > 0 || searchActive ? (
+          <View style={localStyles.searchWrap}>
+            <Ionicons name="search" size={16} color={colors.textMuted} />
+            <TextInput
+              value={searchQuery}
+              onChangeText={setSearchQuery}
+              placeholder="Поиск по чатам"
+              placeholderTextColor={colors.textMuted}
+              style={localStyles.searchInput}
+              autoCapitalize="none"
+              autoCorrect={false}
+              returnKeyType="search"
+              clearButtonMode="never"
+            />
+            {searchQuery.length > 0 ? (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Очистить поиск"
+                onPress={() => setSearchQuery('')}
+                hitSlop={8}
+                style={localStyles.searchClear}>
+                <Ionicons name="close-circle" size={18} color={colors.textMuted} />
+              </Pressable>
+            ) : null}
+          </View>
+        ) : null}
+
         {loading ? (
           <View style={pageStyles.stateWrap}>
             <ActivityIndicator />
@@ -1214,13 +1317,20 @@ export default function ChatsScreen({ variant = 'page' }: ChatsScreenProps) {
               Напишите страннику или соберите группу из тех, с кем уже переписывались.
             </Text>
           </View>
+        ) : filteredItems.length === 0 ? (
+          <View style={localStyles.empty}>
+            <Text style={localStyles.emptyTitle}>Ничего не нашли</Text>
+            <Text style={localStyles.emptyHint}>
+              Попробуйте другой ник, название группы или фрагмент сообщения.
+            </Text>
+          </View>
         ) : (
           <GestureHandlerRootView style={localStyles.listWrap}>
-            {Platform.OS === 'web' ? (
+            {Platform.OS === 'web' || searchActive ? (
               <FlatList
                 style={localStyles.list}
                 contentContainerStyle={localStyles.listContent}
-                data={items}
+                data={filteredItems}
                 keyExtractor={(item) => item.id}
                 renderItem={({ item }) =>
                   renderChatRow({
@@ -1235,7 +1345,7 @@ export default function ChatsScreen({ variant = 'page' }: ChatsScreenProps) {
               <DraggableFlatList
                 style={localStyles.list}
                 contentContainerStyle={localStyles.listContent}
-                data={items}
+                data={filteredItems}
                 keyExtractor={(item) => item.id}
                 onDragEnd={({ data }) => handlePinnedReorder(data)}
                 activationDistance={12}

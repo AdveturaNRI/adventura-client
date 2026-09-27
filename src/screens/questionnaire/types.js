@@ -42,4 +42,9 @@ export const INITIAL_QUESTIONNAIRE_DRAFT = {
     readyToLearnNew: false,
     openToAnySystem: false,
     isPublic: true,
+    gameCostFormat: null,
+    sessionPriceKind: null,
+    sessionPriceMin: '',
+    sessionPriceMax: '',
+    playerPaymentFormat: null,
 };

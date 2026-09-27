@@ -1,4 +1,10 @@
-export type UserCardIconKey = 'play' | 'systems' | 'experience' | 'schedule';
+export type UserCardIconKey =
+  | 'play'
+  | 'systems'
+  | 'experience'
+  | 'schedule'
+  | 'cost'
+  | 'payment';
 
 export const USER_CARD_ICON_SVGS: Record<UserCardIconKey, string> = {
   play: `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -40,5 +46,19 @@ export const USER_CARD_ICON_SVGS: Record<UserCardIconKey, string> = {
 </svg>`,
   schedule: `<svg width="15" height="16" viewBox="0 0 15 16" fill="none" xmlns="http://www.w3.org/2000/svg">
 <path d="M0.5 5.20506H14.4216M3.59369 0.5V2.06835M11.3279 0.5V2.06835M7.45895 8.11584C6.91771 7.50489 6.0152 7.34052 5.3371 7.90003C4.65899 8.45946 4.56352 9.39491 5.09604 10.0566C5.39669 10.4302 6.11103 11.085 6.67609 11.5846C6.94409 11.8215 7.07804 11.9399 7.24015 11.9884C7.37836 12.0297 7.53954 12.0297 7.67776 11.9884C7.83986 11.9399 7.97382 11.8215 8.24181 11.5846C8.80688 11.085 9.52121 10.4302 9.82184 10.0566C10.3544 9.39491 10.2706 8.45358 9.58084 7.90003C8.89102 7.3464 8.00019 7.50489 7.45895 8.11584ZM2.97495 14.6152H11.9467C12.813 14.6152 13.2462 14.6152 13.577 14.4442C13.8681 14.2939 14.1047 14.0539 14.253 13.7588C14.4216 13.4234 14.4216 12.9842 14.4216 12.1058V4.57771C14.4216 3.69935 14.4216 3.26017 14.253 2.92469C14.1047 2.62958 13.8681 2.38965 13.577 2.23929C13.2462 2.06835 12.813 2.06835 11.9467 2.06835H2.97495C2.10864 2.06835 1.67548 2.06835 1.34459 2.23929C1.05353 2.38965 0.816895 2.62958 0.668598 2.92469C0.5 3.26017 0.5 3.69935 0.5 4.57771V12.1058C0.5 12.9842 0.5 13.4234 0.668598 13.7588C0.816895 14.0539 1.05353 14.2939 1.34459 14.4442C1.67548 14.6152 2.10864 14.6152 2.97495 14.6152Z" stroke="#636363" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>`,
+  /** Master session price */
+  cost: `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+<path d="M2.5 5.5H13.5C14.0523 5.5 14.5 5.94772 14.5 6.5V11.5C14.5 12.0523 14.0523 12.5 13.5 12.5H2.5C1.94772 12.5 1.5 12.0523 1.5 11.5V6.5C1.5 5.94772 1.94772 5.5 2.5 5.5Z" stroke="#636363" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M1.5 7.5H14.5" stroke="#636363" stroke-linecap="round"/>
+<path d="M4.5 10H6" stroke="#636363" stroke-linecap="round"/>
+<path d="M4 3.5L5.2 5.5H10.8L12 3.5" stroke="#636363" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>`,
+  /** Player readiness to play paid games */
+  payment: `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+<path d="M8 1.75V3" stroke="#636363" stroke-linecap="round"/>
+<path d="M5.5 6.25C5.5 5.2835 6.50736 4.5 8 4.5C9.49264 4.5 10.5 5.2835 10.5 6.25C10.5 7.2165 9.49264 8 8 8C6.50736 8 5.5 8.7835 5.5 9.75C5.5 10.7165 6.50736 11.5 8 11.5C9.49264 11.5 10.5 10.7165 10.5 9.75" stroke="#636363" stroke-linecap="round"/>
+<path d="M8 11.5V13.25" stroke="#636363" stroke-linecap="round"/>
+<circle cx="8" cy="8" r="6.25" stroke="#636363"/>
 </svg>`,
 };

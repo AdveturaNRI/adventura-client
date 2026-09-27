@@ -31,9 +31,11 @@ import {
 } from '@/components/ui/navigation/navbar.config';
 import { Radius, Spacing, type ThemeColors } from '@/constants/theme';
 import { useAuth } from '@/context/AuthContext';
+import { useProfile } from '@/context/ProfileContext';
 import { useRealtimeOptional } from '@/context/RealtimeContext';
 import { useTheme } from '@/hooks/use-theme';
 import { useThemedStyles } from '@/hooks/use-themed-styles';
+import { getQuestionnaireCompletion } from '@/utils/questionnaire-completion';
 import { formatUnreadBadge } from '@/utils/unread-badge';
 
 type MobileAppMenuContextValue = {
@@ -66,8 +68,6 @@ function createStyles(colors: ThemeColors) {
       right: 0,
       bottom: 0,
       backgroundColor: colors.background,
-      borderTopLeftRadius: 24,
-      borderBottomLeftRadius: 24,
       overflow: 'hidden',
       shadowColor: colors.shadow,
       shadowOffset: { width: -8, height: 0 },
@@ -122,17 +122,15 @@ function AnimatedMenuRow({
   children: ReactNode;
 }) {
   const styles = useThemedStyles(createStyles);
-  const enterStart = 0.22 + index * 0.08;
-  const enterEnd = enterStart + 0.34;
+  // Stagger must finish at progress=1 — otherwise last rows stay semi-transparent (look “disabled”).
+  const enterStart = Math.min(0.18 + index * 0.05, 0.72);
+  const enterEnd = Math.min(enterStart + 0.28, 1);
 
   const itemStyle = useAnimatedStyle(() => ({
     opacity: interpolate(progress.value, [enterStart, enterEnd], [0, 1], 'clamp'),
     transform: [
       {
-        translateY: interpolate(progress.value, [enterStart, enterEnd], [18, 0], 'clamp'),
-      },
-      {
-        scale: interpolate(progress.value, [enterStart, enterEnd], [0.96, 1], 'clamp'),
+        translateX: interpolate(progress.value, [enterStart, enterEnd], [16, 0], 'clamp'),
       },
     ],
   }));
@@ -158,6 +156,8 @@ function MobileAppMenuModal({
   const styles = useThemedStyles(createStyles);
   const realtime = useRealtimeOptional();
   const unreadChats = realtime?.unreadChats ?? 0;
+  const { profile, refreshProfile } = useProfile();
+  const profileIncomplete = !getQuestionnaireCompletion(profile).isComplete;
   const { width: windowWidth } = useWindowDimensions();
   const sheetWidth = Math.min(windowWidth, 420);
   const [renderModal, setRenderModal] = useState(visible);
@@ -168,6 +168,7 @@ function MobileAppMenuModal({
       setRenderModal(true);
       progress.value = 0;
       progress.value = withSpring(1, MENU_SPRING);
+      void refreshProfile();
       return;
     }
 
@@ -183,7 +184,7 @@ function MobileAppMenuModal({
         }
       },
     );
-  }, [progress, visible]);
+  }, [progress, refreshProfile, visible]);
 
   const backdropStyle = useAnimatedStyle(() => ({
     opacity: interpolate(progress.value, [0, 1], [0, 0.46]),
@@ -193,13 +194,9 @@ function MobileAppMenuModal({
     width: sheetWidth,
     transform: [
       {
-        translateX: interpolate(progress.value, [0, 1], [sheetWidth + 24, 0]),
-      },
-      {
-        scale: interpolate(progress.value, [0, 1], [0.94, 1]),
+        translateX: interpolate(progress.value, [0, 1], [sheetWidth, 0]),
       },
     ],
-    opacity: interpolate(progress.value, [0, 0.2, 1], [0, 1, 1]),
   }));
 
   if (!renderModal) {
@@ -238,6 +235,7 @@ function MobileAppMenuModal({
                         ? formatUnreadBadge(unreadChats)
                         : undefined
                     }
+                    iconAlert={item.key === 'profile' && profileIncomplete}
                     onPress={() => onNavigate(item)}
                   />
                 </AnimatedMenuRow>

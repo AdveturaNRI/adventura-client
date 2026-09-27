@@ -5,6 +5,11 @@ import {
 } from '@/screens/questionnaire/questionnaire.config';
 import type { QuestionnaireDraft } from '@/screens/questionnaire/types';
 import { formatAvailability } from '@/screens/questionnaire/availability';
+import {
+  formatMasterGameCostLabel,
+  parseSessionPriceValue,
+  playerPaymentFormatLabel,
+} from '@/utils/questionnaire-payment';
 import { formatTimezoneLabel } from '@/utils/timezones';
 
 export type QuestionnaireMapNodeStatus = 'completed' | 'current' | 'upcoming';
@@ -26,8 +31,27 @@ function getRoleLabel(draft: QuestionnaireDraft): string | null {
 
 function getRoleSummaryLines(draft: QuestionnaireDraft): string[] {
   const roleLabel = getRoleLabel(draft);
+  const lines = roleLabel ? [roleLabel] : ['Не выбрана'];
 
-  return roleLabel ? [roleLabel] : ['Не выбрана'];
+  if (draft.role === 'master' || draft.role === 'both') {
+    const costLabel = formatMasterGameCostLabel({
+      format: draft.gameCostFormat,
+      kind: draft.sessionPriceKind,
+      min: parseSessionPriceValue(draft.sessionPriceMin),
+      max: parseSessionPriceValue(draft.sessionPriceMax),
+    });
+    lines.push(costLabel ?? `Стоимость: ${ROLES_STEP.unspecifiedLabel}`);
+  }
+
+  if (draft.role === 'player' || draft.role === 'both') {
+    lines.push(
+      draft.playerPaymentFormat
+        ? playerPaymentFormatLabel(draft.playerPaymentFormat)
+        : `Оплата: ${ROLES_STEP.unspecifiedLabel}`,
+    );
+  }
+
+  return lines;
 }
 
 function getProfileSummaryLines(draft: QuestionnaireDraft): string[] {

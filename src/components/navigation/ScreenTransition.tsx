@@ -91,17 +91,21 @@ export function ScreenTransition({
     });
   }, [animateOnFocus, isFocused, opacity, translateY]);
 
-  const animatedStyle = useAnimatedStyle(() => ({
-    flex: 1,
-    width: '100%',
-    minHeight: 0,
-    minWidth: 0,
-    overflow: 'hidden',
-    opacity: opacity.value,
-    transform: [{ translateY: translateY.value }],
-    // Web tabs keep screens mounted — hide inactive ones so iframes/overlays don't bleed.
-    pointerEvents: !animateOnFocus || opacity.value > 0.05 ? 'auto' : 'none',
-  }));
+  const animatedStyle = useAnimatedStyle(() => {
+    const visible = !animateOnFocus || opacity.value > 0.05;
+    return {
+      flex: 1,
+      width: '100%',
+      minHeight: 0,
+      minWidth: 0,
+      overflow: 'hidden',
+      opacity: opacity.value,
+      transform: [{ translateY: translateY.value }],
+      // Web tabs keep screens mounted — opacity alone won't hide Leaflet/map layers.
+      pointerEvents: visible ? 'auto' : 'none',
+      visibility: visible ? ('visible' as const) : ('hidden' as const),
+    };
+  });
 
   return <Animated.View style={animatedStyle}>{children}</Animated.View>;
 }

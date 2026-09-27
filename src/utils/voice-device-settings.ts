@@ -24,6 +24,18 @@ type VoiceDevicePrefsListener = (prefs: VoiceDevicePrefs) => void;
 
 const prefsListeners = new Set<VoiceDevicePrefsListener>();
 
+/** Sync snapshot for getUserMedia in the same tap — cannot await storage there. */
+let cachedPrefs: VoiceDevicePrefs | null = null;
+
+export function getCachedVoiceDevicePrefs(): VoiceDevicePrefs | null {
+  return cachedPrefs;
+}
+
+function rememberVoiceDevicePrefs(prefs: VoiceDevicePrefs): VoiceDevicePrefs {
+  cachedPrefs = prefs;
+  return prefs;
+}
+
 /** Live call / composer can hot-apply Settings changes without polling storage. */
 export function subscribeVoiceDevicePrefs(listener: VoiceDevicePrefsListener): () => void {
   prefsListeners.add(listener);
@@ -46,6 +58,18 @@ async function notifyVoiceDevicePrefsChanged(): Promise<void> {
   });
 }
 
+/** Real browser deviceId — not our synthetic `input-0` placeholders. */
+export function isUsableMediaDeviceId(deviceId?: string | null): boolean {
+  const id = deviceId?.trim();
+  if (!id) {
+    return false;
+  }
+  if (/^(input|output|camera)-\d+$/i.test(id)) {
+    return false;
+  }
+  return true;
+}
+
 export function clampMicGain(value: number): number {
   if (!Number.isFinite(value)) {
     return MIC_GAIN_DEFAULT;
@@ -62,13 +86,13 @@ export async function loadVoiceDevicePrefs(): Promise<VoiceDevicePrefs> {
     AsyncStorage.getItem(NOISE_SUPPRESSION_KEY),
   ]);
   const parsedGain = micGainRaw != null ? Number(micGainRaw) : MIC_GAIN_DEFAULT;
-  return {
+  return rememberVoiceDevicePrefs({
     inputDeviceId: inputDeviceId?.trim() || null,
     outputDeviceId: outputDeviceId?.trim() || null,
     videoDeviceId: videoDeviceId?.trim() || null,
     micGain: clampMicGain(parsedGain),
     noiseSuppression: noiseRaw == null ? NOISE_SUPPRESSION_DEFAULT : noiseRaw !== '0',
-  };
+  });
 }
 
 export async function saveVoiceInputDeviceId(deviceId: string | null): Promise<void> {
@@ -76,6 +100,9 @@ export async function saveVoiceInputDeviceId(deviceId: string | null): Promise<v
     await AsyncStorage.removeItem(INPUT_KEY);
   } else {
     await AsyncStorage.setItem(INPUT_KEY, deviceId.trim());
+  }
+  if (cachedPrefs) {
+    cachedPrefs = { ...cachedPrefs, inputDeviceId: deviceId?.trim() || null };
   }
   await notifyVoiceDevicePrefsChanged();
 }
@@ -106,4 +133,10 @@ export async function saveVoiceMicGain(gain: number): Promise<void> {
 export async function saveVoiceNoiseSuppression(enabled: boolean): Promise<void> {
   await AsyncStorage.setItem(NOISE_SUPPRESSION_KEY, enabled ? '1' : '0');
   await notifyVoiceDevicePrefsChanged();
+}
+
+// Prefetch only in the browser — AsyncStorage touches window.localStorage and
+// crashes Node SSR / static export if we load prefs at module evaluate time.
+if (typeof window !== 'undefined') {
+  void loadVoiceDevicePrefs();
 }

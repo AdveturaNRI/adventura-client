@@ -1,12 +1,59 @@
 import { Platform } from 'react-native';
 
 import { unlockWebMediaPlayback } from '@/utils/unlock-web-media';
+import {
+  getCachedVoiceDevicePrefs,
+  isUsableMediaDeviceId,
+} from '@/utils/voice-device-settings';
 
 export type MediaDeviceOption = {
   deviceId: string;
   label: string;
   kind: MediaDeviceKind;
 };
+
+function isMobileWebUa(): boolean {
+  if (Platform.OS !== 'web' || typeof navigator === 'undefined') {
+    return false;
+  }
+  const ua = navigator.userAgent ?? '';
+  const data = (
+    navigator as Navigator & { userAgentData?: { mobile?: boolean } }
+  ).userAgentData;
+  if (data?.mobile === true) {
+    return true;
+  }
+  return /Android|iPhone|iPad|iPod|Mobile|webOS|IEMobile|Opera Mini/i.test(ua);
+}
+
+function shouldPinAudioDevice(): boolean {
+  return !isMobileWebUa();
+}
+
+export function getStreamAudioDeviceId(stream: MediaStream | null | undefined): string | null {
+  const id = stream?.getAudioTracks?.()[0]?.getSettings?.().deviceId;
+  return typeof id === 'string' && id.trim() ? id.trim() : null;
+}
+
+export function streamUsesAudioDevice(
+  stream: MediaStream | null | undefined,
+  deviceId?: string | null,
+): boolean {
+  if (!isUsableMediaDeviceId(deviceId)) {
+    return true;
+  }
+  const actual = getStreamAudioDeviceId(stream);
+  return Boolean(actual && actual === deviceId!.trim());
+}
+
+function resolvePreferredInputDeviceId(deviceId?: string | null): string | null {
+  const explicit = deviceId?.trim() || null;
+  if (isUsableMediaDeviceId(explicit)) {
+    return explicit;
+  }
+  const cached = getCachedVoiceDevicePrefs()?.inputDeviceId ?? null;
+  return isUsableMediaDeviceId(cached) ? cached : null;
+}
 
 function canUseMediaDevices(): boolean {
   return (
@@ -64,7 +111,7 @@ let primedMicError: Error | null = null;
 /** Bumped on discard so late getUserMedia results are stopped instead of kept live. */
 let primedMicGeneration = 0;
 
-export function beginMicrophonePrimeFromGesture(): void {
+export function beginMicrophonePrimeFromGesture(deviceId?: string | null): void {
   if (!canUseMediaDevices() || !navigator.mediaDevices.getUserMedia) {
     unlockWebMediaPlayback();
     return;
@@ -83,10 +130,21 @@ export function beginMicrophonePrimeFromGesture(): void {
 
   primedMicError = null;
   const generation = primedMicGeneration;
+  const preferredId = shouldPinAudioDevice() ? resolvePreferredInputDeviceId(deviceId) : null;
+  const audio: MediaTrackConstraints | true = preferredId
+    ? { deviceId: { exact: preferredId }, echoCancellation: true }
+    : true;
 
   // CRITICAL (iOS Safari): getUserMedia must start in the same sync turn as the tap.
   // Any await before it (AudioContext.resume, network) drops user-activation → NotAllowedError.
-  const gumPromise = navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+  const gumPromise = navigator.mediaDevices
+    .getUserMedia({ audio, video: false })
+    .catch((error) => {
+      if (!preferredId) {
+        throw error;
+      }
+      return navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+    });
 
   // Same gesture: unlock HTMLAudioElement autoplay for shared Bard music (remote play).
   // After GUM starts so mic activation is preserved. Must stay sync — do not await.
@@ -321,6 +379,36 @@ export type MicTestHandle = {
   setOutputDeviceId: (deviceId: string | null) => Promise<void>;
 };
 
+/** Ask the browser to switch the origin's selected mic to the Settings override. */
+export async function applyBrowserMicrophoneOverride(
+  deviceId?: string | null,
+): Promise<void> {
+  if (!canUseMediaDevices() || !navigator.mediaDevices.getUserMedia || !shouldPinAudioDevice()) {
+    return;
+  }
+  const preferredId = resolvePreferredInputDeviceId(deviceId);
+  if (!preferredId) {
+    return;
+  }
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      audio: { deviceId: { exact: preferredId }, echoCancellation: true },
+      video: false,
+    });
+    stopMediaStream(stream);
+  } catch {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: { deviceId: { ideal: preferredId } },
+        video: false,
+      });
+      stopMediaStream(stream);
+    } catch {
+      // keep the previous browser device
+    }
+  }
+}
+
 /** Open mic stream, play it locally, and return 0..1 level meter via AnalyserNode. */
 export async function startMicrophoneTest(
   deviceId?: string | null,
@@ -344,22 +432,29 @@ export async function startMicrophoneTest(
     Math.min(2, Math.max(0, Number.isFinite(value) ? value : 1));
   let gainValue = clampGain(micGain);
 
+  const requestedId = shouldPinAudioDevice() ? resolvePreferredInputDeviceId(deviceId) : null;
+
   let stream: MediaStream | null =
     primedStream && primedStream.getAudioTracks().some((t) => t.readyState === 'live')
       ? primedStream
       : null;
 
-  if (!stream) {
-    // Prefer stream from beginMicrophonePrimeFromGesture() (onPressIn).
-    stream = await takePrimedMicrophone();
+  if (stream && !streamUsesAudioDevice(stream, requestedId)) {
+    stopMediaStream(stream);
+    stream = null;
   }
 
   if (!stream) {
-    const mobile =
-      typeof navigator !== 'undefined' &&
-      (/Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent ?? '') ||
-        (navigator as Navigator & { userAgentData?: { mobile?: boolean } }).userAgentData
-          ?.mobile === true);
+    // Prefer stream from beginMicrophonePrimeFromGesture() (onPressIn).
+    stream = await takePrimedMicrophone();
+    if (stream && !streamUsesAudioDevice(stream, requestedId)) {
+      stopMediaStream(stream);
+      stream = null;
+    }
+  }
+
+  if (!stream) {
+    const mobile = isMobileWebUa();
 
     const audioConstraints: MediaTrackConstraints = mobile
       ? { echoCancellation: true }
@@ -368,12 +463,8 @@ export async function startMicrophoneTest(
           noiseSuppression,
           autoGainControl: Math.abs(gainValue - 1) < 0.05,
         };
-    if (
-      !mobile &&
-      deviceId?.trim() &&
-      !/^(input|output|camera)-\d+$/i.test(deviceId.trim())
-    ) {
-      audioConstraints.deviceId = { ideal: deviceId.trim() };
+    if (requestedId) {
+      audioConstraints.deviceId = { exact: requestedId };
     }
 
     try {

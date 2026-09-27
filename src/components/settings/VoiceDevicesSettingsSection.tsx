@@ -33,6 +33,7 @@ import {
   beginMicrophonePrimeFromGesture,
   ensureCameraPermission,
   ensureMicrophonePermission,
+  applyBrowserMicrophoneOverride,
   listAudioDevices,
   listVideoDevices,
   startMicrophoneTest,
@@ -479,7 +480,9 @@ export function VoiceDevicesSettingsSection() {
       await saveVoiceInputDeviceId(value);
       if (testingRef.current) {
         await beginTest(value, micGain, outputId, noiseSuppression);
+        return;
       }
+      await applyBrowserMicrophoneOverride(value);
     },
     [beginTest, micGain, noiseSuppression, outputId],
   );
@@ -734,7 +737,7 @@ export function VoiceDevicesSettingsSection() {
                     'aria-label': testing ? 'Остановить проверку' : 'Проверить микрофон',
                     onPointerDown: () => {
                       if (!testingRef.current) {
-                        beginMicrophonePrimeFromGesture();
+                        beginMicrophonePrimeFromGesture(inputId);
                       }
                     },
                     onClick: (event: { preventDefault: () => void }) => {
@@ -764,7 +767,7 @@ export function VoiceDevicesSettingsSection() {
                   accessibilityLabel={testing ? 'Остановить проверку' : 'Проверить микрофон'}
                   onPressIn={() => {
                     if (!testingRef.current) {
-                      beginMicrophonePrimeFromGesture();
+                      beginMicrophonePrimeFromGesture(inputId);
                     }
                   }}
                   onPress={() => void handleToggleTest()}

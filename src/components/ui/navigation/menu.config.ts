@@ -123,7 +123,7 @@ export const PROFILE_MENU_SECTIONS: ProfileMenuSectionSpec[] = [
         label: 'Поддержка',
         subtitle: 'Здесь вы можете написать нам и сообщить о проблеме или нарушении',
         icon: 'support',
-        externalUrl: 'https://boosty.to/adventuranring',
+        externalUrl: 'https://t.me/AdventuraNRI',
       },
     ],
   },

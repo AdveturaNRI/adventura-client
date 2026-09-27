@@ -31,6 +31,8 @@ type Props = {
   onLocationDenied?: () => void;
   onRetryLocation?: () => void;
   locationDenied?: boolean;
+  /** Временные coords, пока geocode не вернул точку выбранного города */
+  fallbackCenter?: { lat: number; lng: number };
   onCollapseMap?: () => void;
   collapseLabel?: string;
   collapseIcon?: keyof typeof Ionicons.glyphMap;
@@ -212,6 +214,7 @@ export const MapSearchControls = forwardRef<MapSearchControlsHandle, Props>(
       onLocationDenied,
       onRetryLocation,
       locationDenied,
+      fallbackCenter,
       onCollapseMap,
       collapseLabel = 'Свернуть',
       collapseIcon = 'albums-outline',
@@ -305,16 +308,32 @@ export const MapSearchControls = forwardRef<MapSearchControlsHandle, Props>(
       return;
     }
     setPicking(true);
+
+    // Сразу ставим город из справочника (фильтр по имени), камеру — после geocode
+    const fallbackLat = fallbackCenter?.lat;
+    const fallbackLng = fallbackCenter?.lng;
+    if (isValidLatLng(Number(fallbackLat), Number(fallbackLng))) {
+      onSelectCity(
+        {
+          lat: Number(fallbackLat),
+          lng: Number(fallbackLng),
+          displayName: city.label,
+          shortName: city.label,
+        },
+        { moveCamera: false },
+      );
+    }
+    setQuery(city.label);
+    setOpen(false);
+    setResults([]);
+    setSettled(false);
+
     void geocodeCityLabel(city.label)
       .then((hit) => {
         if (!isValidLatLng(hit.lat, hit.lng)) {
           throw new Error('bad coords');
         }
         onSelectCity(hit, { moveCamera: true });
-        setQuery(city.label);
-        setOpen(false);
-        setResults([]);
-        setSettled(false);
       })
       .catch(() => {
         toast.error('Не удалось найти город на карте');

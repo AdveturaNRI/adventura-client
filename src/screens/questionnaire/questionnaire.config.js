@@ -69,6 +69,31 @@ export const ROLES_STEP = {
             icon: 'people-outline',
         },
     ],
+    masterCostTitle: 'Стоимость игр',
+    masterCostHint: 'Укажите формат оплаты ваших игр.',
+    masterCostOptions: [
+        { key: 'free', label: 'Бесплатно', icon: 'pricetag-outline' },
+        { key: 'paid', label: 'Платно', icon: 'cash-outline' },
+        { key: 'both', label: 'Бесплатно и платно', icon: 'pricetags-outline' },
+    ],
+    sessionPriceTitle: 'Стоимость сессии',
+    sessionPriceHint: 'Укажите примерную стоимость одной сессии.',
+    sessionPriceKinds: [
+        { key: 'fixed', label: 'Сумма' },
+        { key: 'from', label: 'От' },
+        { key: 'range', label: 'Диапазон' },
+    ],
+    playerPaymentTitle: 'Предпочтения по оплате игр',
+    playerPaymentHint: 'Укажите, готовы ли вы на платные игры.',
+    playerPaymentOptions: [
+        { key: 'free_only', label: 'Играю только бесплатно', icon: 'pricetag-outline' },
+        {
+            key: 'free_and_paid',
+            label: 'Рассматриваю бесплатные и платные варианты',
+            icon: 'pricetags-outline',
+        },
+    ],
+    unspecifiedLabel: 'Не указано',
 };
 export const PROFILE_STEP = {
     key: 'profile',
@@ -132,14 +157,12 @@ export const LOCATION_STEP = {
     cityLimitHint: 'Можно выбрать до 3 городов',
     addCityLabel: 'Добавить',
     playsOnlineLabel: 'Играю онлайн',
-    playsOnlineRequiredHint: 'Обязательно, если город не указан',
     changeCityLabel: 'Изменить',
 };
 export const SYSTEMS_STEP = {
     key: 'systems',
     title: 'Игровые системы',
     subtitle: 'Отметьте системы, в которых вы уже играли',
-    hint: 'Выберите системы из списка или добавьте свою. Если конкретных предпочтений нет — отметьте «Любая система». Можно также указать готовность изучить новое.',
     panelTitle: 'Ваши системы',
     panelSubtitle: 'Можно выбрать несколько или добавить свою',
     emptyHint: 'Пока ничего не выбрано',
@@ -164,9 +187,7 @@ export const SYSTEMS_STEP = {
     pickerSearchPlaceholder: 'Поиск по системе',
     pickerSearchEmpty: 'Ничего не найдено',
     openToAnySystemLabel: 'Любая система',
-    openToAnySystemHint: 'Без предпочтений — подойдут любые системы',
     readyToLearnNewLabel: 'Готов изучить новое',
-    readyToLearnNewHint: 'Открыт к новым системам, даже если пока не играл',
 };
 export const FINAL_STEP = {
     key: 'final',

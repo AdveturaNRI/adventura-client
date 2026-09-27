@@ -21,6 +21,7 @@ import {
   connectRealtime,
   disconnectRealtime,
   ensureRealtimeConnected,
+  getRealtimeSocket,
   updateRealtimeAuthToken,
   type CallRealtimeEvent,
   type ConversationDeletedPayload,
@@ -39,6 +40,8 @@ import { hydrateNotificationSoundSettingsFromProfile } from '@/utils/notificatio
 type RealtimeContextValue = {
   unreadChats: number;
   unreadNotifications: number;
+  /** Bumps when the app returns to foreground / socket reconnects — catch up via HTTP. */
+  dataResyncAt: number;
   lastMessage: ChatMessage | null;
   lastConversationUpdate: ConversationListItem | null;
   lastConversationRead: ConversationReadPayload | null;
@@ -58,6 +61,7 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
   const { token, isAuthenticated, isLoading, user } = useAuth();
   const [unreadChats, setUnreadChats] = useState(0);
   const [unreadNotifications, setUnreadNotifications] = useState(0);
+  const [dataResyncAt, setDataResyncAt] = useState(0);
   const [lastMessage, setLastMessage] = useState<ChatMessage | null>(null);
   const [lastConversationUpdate, setLastConversationUpdate] =
     useState<ConversationListItem | null>(null);
@@ -201,44 +205,124 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
   }, [isAuthenticated, isLoading, token]);
 
   // Keep presence alive on any app section — reconnect when the app/tab is focused again.
+  // iOS Safari freezes WS while locked; after unlock we force reconnect + bump dataResyncAt
+  // so screens catch up missed message:new / conversation:updated events via HTTP.
   useEffect(() => {
     if (isLoading || !isAuthenticated || !token) {
       return;
     }
 
-    const keepAlive = () => {
-      ensureRealtimeConnected(token);
+    let hiddenSince: number | null = null;
+    let resyncTimer: ReturnType<typeof setTimeout> | null = null;
+    let sawDisconnect = false;
+
+    const bumpDataResync = () => {
+      if (resyncTimer) {
+        clearTimeout(resyncTimer);
+      }
+      // Debounce: visibility + AppState + focus + socket connect often fire together.
+      resyncTimer = setTimeout(() => {
+        resyncTimer = null;
+        setDataResyncAt((value) => value + 1);
+        void getNotificationsUnreadCount()
+          .then((result) => {
+            setUnreadNotifications(result.count);
+          })
+          .catch(() => {
+            // unread:sync from socket may still arrive.
+          });
+      }, 320);
+    };
+
+    const keepAlive = (options?: { force?: boolean; resync?: boolean }) => {
+      const returning = Boolean(options?.resync);
+      const awayMs = hiddenSince != null ? Date.now() - hiddenSince : 0;
+      // Only force-tear the socket when coming back — not on the 30s heartbeat.
+      const force = Boolean(options?.force) || (returning && awayMs >= 3_000);
+      ensureRealtimeConnected(token, { force });
+      if (returning) {
+        bumpDataResync();
+        hiddenSince = null;
+      }
+    };
+
+    const markHidden = () => {
+      if (hiddenSince == null) {
+        hiddenSince = Date.now();
+      }
+    };
+
+    /** Resync only if we were actually backgrounded — bare `focus` would spam HTTP. */
+    const onResume = () => {
+      if (hiddenSince == null) {
+        keepAlive();
+        return;
+      }
+      keepAlive({ resync: true });
     };
 
     keepAlive();
 
     const appSub = AppState.addEventListener('change', (state) => {
       if (state === 'active') {
-        keepAlive();
+        onResume();
+      } else if (state === 'background' || state === 'inactive') {
+        markHidden();
       }
     });
 
     let visibilityHandler: (() => void) | null = null;
+    let pageshowHandler: ((event: PageTransitionEvent) => void) | null = null;
     if (Platform.OS === 'web' && typeof document !== 'undefined') {
       visibilityHandler = () => {
         if (document.visibilityState === 'visible') {
-          keepAlive();
+          onResume();
+        } else {
+          markHidden();
+        }
+      };
+      pageshowHandler = (event) => {
+        // bfcache restore after iOS freeze — always catch up.
+        if (event.persisted || hiddenSince != null) {
+          keepAlive({ resync: true });
         }
       };
       document.addEventListener('visibilitychange', visibilityHandler);
-      window.addEventListener('focus', keepAlive);
+      window.addEventListener('focus', onResume);
+      window.addEventListener('pageshow', pageshowHandler);
     }
 
-    const interval = setInterval(keepAlive, 30_000);
+    const interval = setInterval(() => keepAlive(), 30_000);
+
+    const socket = getRealtimeSocket();
+    const onSocketDisconnect = () => {
+      sawDisconnect = true;
+    };
+    const onSocketConnect = () => {
+      // Skip the first connect after mount — screens already bootstrap via HTTP.
+      if (sawDisconnect) {
+        bumpDataResync();
+      }
+    };
+    socket?.on('disconnect', onSocketDisconnect);
+    socket?.on('connect', onSocketConnect);
 
     return () => {
       appSub.remove();
       clearInterval(interval);
+      if (resyncTimer) {
+        clearTimeout(resyncTimer);
+      }
+      socket?.off('disconnect', onSocketDisconnect);
+      socket?.off('connect', onSocketConnect);
       if (Platform.OS === 'web' && typeof document !== 'undefined') {
         if (visibilityHandler) {
           document.removeEventListener('visibilitychange', visibilityHandler);
         }
-        window.removeEventListener('focus', keepAlive);
+        window.removeEventListener('focus', onResume);
+        if (pageshowHandler) {
+          window.removeEventListener('pageshow', pageshowHandler);
+        }
       }
     };
   }, [isAuthenticated, isLoading, token]);
@@ -290,6 +374,7 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
     () => ({
       unreadChats,
       unreadNotifications,
+      dataResyncAt,
       lastMessage,
       lastConversationUpdate,
       lastConversationRead,
@@ -305,6 +390,7 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
     [
       unreadChats,
       unreadNotifications,
+      dataResyncAt,
       lastMessage,
       lastConversationUpdate,
       lastConversationRead,

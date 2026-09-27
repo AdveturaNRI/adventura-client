@@ -193,6 +193,114 @@ export function appendCachedThreadMessage(conversationId: string, message: ChatM
   });
 }
 
+export function messageFromConversationPreview(
+  conversation: ConversationListItem,
+): ChatMessage | null {
+  const preview = conversation.lastMessage;
+  if (!preview) {
+    return null;
+  }
+
+  const peer = conversation.peer;
+  const previewMember = conversation.membersPreview?.find((item) => item.id === preview.senderId);
+  const sender =
+    peer && peer.id === preview.senderId
+      ? {
+          id: peer.id,
+          nickname: peer.nickname,
+          avatarUrl: peer.avatarUrl,
+          badges: peer.badges,
+          avatarFrameId: peer.avatarFrameId,
+        }
+      : previewMember
+        ? {
+            id: previewMember.id,
+            nickname: previewMember.nickname,
+            avatarUrl: previewMember.avatarUrl,
+            badges: previewMember.badges,
+            avatarFrameId: previewMember.avatarFrameId,
+          }
+        : undefined;
+
+  return {
+    id: preview.id,
+    conversationId: conversation.id,
+    senderId: preview.senderId,
+    sender,
+    body: preview.body,
+    kind: preview.kind ?? 'user',
+    createdAt: preview.createdAt,
+    image: null,
+    attachment: null,
+    attachments: [],
+  };
+}
+
+export type HydratedChatThread = {
+  conversation: ConversationListItem | null;
+  messages: ChatMessage[];
+  nextCursor: string | null;
+  peerLastReadAt: string | null;
+  ready: boolean;
+};
+
+/** Синхронный снимок для первого кадра: без лоадера, сразу последние сообщения. */
+export function hydrateChatThread(conversationId?: string): HydratedChatThread {
+  if (!conversationId) {
+    return {
+      conversation: null,
+      messages: [],
+      nextCursor: null,
+      peerLastReadAt: null,
+      ready: false,
+    };
+  }
+
+  const thread = getCachedThread(conversationId);
+  const conversation = thread?.conversation ?? getCachedConversation(conversationId);
+  let messages = thread?.messages ?? [];
+  const preview = conversation?.lastMessage;
+
+  if (conversation && preview && !messages.some((item) => item.id === preview.id)) {
+    const stub = messageFromConversationPreview(conversation);
+    if (stub) {
+      appendCachedThreadMessage(conversationId, stub);
+      messages = [...messages, stub].sort((left, right) =>
+        left.createdAt.localeCompare(right.createdAt),
+      );
+    }
+  }
+
+  return {
+    conversation,
+    messages,
+    nextCursor: thread?.nextCursor ?? null,
+    peerLastReadAt: thread?.peerLastReadAt ?? conversation?.peerLastReadAt ?? null,
+    ready: Boolean(conversation) || messages.length > 0,
+  };
+}
+
+export function mergeVisibleThreadMessages(
+  server: ChatMessage[],
+  local: ChatMessage[],
+  hiddenIds?: Iterable<string>,
+): ChatMessage[] {
+  const byId = new Map(server.map((item) => [item.id, item]));
+  for (const item of local) {
+    if (!byId.has(item.id)) {
+      byId.set(item.id, item);
+    }
+  }
+  if (hiddenIds) {
+    for (const id of hiddenIds) {
+      byId.delete(id);
+    }
+  }
+  return [...byId.values()].sort((left, right) =>
+    left.createdAt.localeCompare(right.createdAt),
+  );
+}
+
 export function clearChatCaches() {
   conversationsCache = null;
   threadCache.clear();

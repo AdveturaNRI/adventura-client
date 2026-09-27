@@ -10,21 +10,16 @@ import {
 
 import {
   clampMicGain,
+  isUsableMediaDeviceId,
   MIC_GAIN_DEFAULT,
   NOISE_SUPPRESSION_DEFAULT,
 } from '@/utils/voice-device-settings';
+import {
+  stopMediaStream,
+  streamUsesAudioDevice,
+} from '@/utils/voice-media-devices';
 
-/** Real browser deviceId — not our synthetic `input-0` placeholders. */
-export function isUsableMediaDeviceId(deviceId?: string | null): boolean {
-  const id = deviceId?.trim();
-  if (!id) {
-    return false;
-  }
-  if (/^(input|output|camera)-\d+$/i.test(id)) {
-    return false;
-  }
-  return true;
-}
+export { isUsableMediaDeviceId };
 
 function isMobileWebUa(): boolean {
   if (Platform.OS !== 'web' || typeof navigator === 'undefined') {
@@ -87,10 +82,10 @@ export function buildMicCaptureOptions(opts?: {
         voiceIsolation: false,
       };
 
-  if (isUsableMediaDeviceId(opts?.deviceId)) {
-    // Pass ideal, not a bare string — LiveKit turns strings into { exact }, which
-    // breaks when the saved desktop mic id isn't on this phone.
-    options.deviceId = { ideal: opts!.deviceId!.trim() };
+  if (isUsableMediaDeviceId(opts?.deviceId) && !mobile) {
+    // User override from Settings. exact so Chrome actually leaves "default".
+    // Mobile skips pin — a desktop deviceId is often invalid on the phone.
+    options.deviceId = { exact: opts!.deviceId!.trim() };
   }
 
   if (!mobile && noiseOn && supportsVoiceIsolation()) {
@@ -243,7 +238,8 @@ export async function applyMicPipelineToRoom(
   const noiseSuppression = opts?.noiseSuppression ?? NOISE_SUPPRESSION_DEFAULT;
 
   const primedTrack = opts?.primedStream?.getAudioTracks()?.[0];
-  if (primedTrack && primedTrack.readyState !== 'ended') {
+  const primedMatchesDevice = streamUsesAudioDevice(opts?.primedStream, opts?.deviceId);
+  if (primedTrack && primedTrack.readyState !== 'ended' && primedMatchesDevice) {
     try {
       await withTimeout(
         room.localParticipant.publishTrack(primedTrack, {
@@ -259,6 +255,8 @@ export async function applyMicPipelineToRoom(
     } catch {
       // fall through to getUserMedia path
     }
+  } else if (opts?.primedStream && !primedMatchesDevice) {
+    stopMediaStream(opts.primedStream);
   }
 
   const capture = buildMicCaptureOptions({
@@ -379,6 +377,19 @@ export async function syncVoicePrefsToRoom(
       await room.switchActiveDevice('audioinput', deviceId);
     } catch {
       // device may have been unplugged — keep current mic
+    }
+
+    const pub = room.localParticipant.getTrackPublication(Track.Source.Microphone);
+    const actual = (pub?.track as LocalAudioTrack | undefined)?.mediaStreamTrack
+      ?.getSettings?.()
+      .deviceId;
+    if (actual && actual !== deviceId && room.localParticipant.isMicrophoneEnabled) {
+      try {
+        await room.localParticipant.setMicrophoneEnabled(false);
+      } catch {
+        // continue and reopen on the preferred device
+      }
+      await applyMicPipelineToRoom(room, { deviceId, micGain, noiseSuppression });
     }
   }
 

@@ -14,6 +14,7 @@ import {
 } from 'react-native';
 
 import { ChatBackgroundEditor } from '@/components/chats/ChatBackgroundEditor';
+import { useIsDesktopWeb } from '@/components/navigation/DesktopThemeToggle';
 import { toast } from '@/components/ui';
 import { FontSize, Spacing, type ThemeColors } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
@@ -81,21 +82,30 @@ type PendingEdit = {
   height: number;
 };
 
-function createStyles(colors: ThemeColors) {
+function createStyles(colors: ThemeColors, isDesktopWeb: boolean) {
   return StyleSheet.create({
     root: {
       flex: 1,
-      justifyContent: 'flex-end',
+      justifyContent: isDesktopWeb ? 'center' : 'flex-end',
+      alignItems: isDesktopWeb ? 'center' : 'stretch',
       backgroundColor: 'rgba(0,0,0,0.45)',
+      paddingHorizontal: isDesktopWeb ? Spacing.lg : 0,
+      paddingVertical: isDesktopWeb ? Spacing.xl : 0,
     },
     sheet: {
-      maxHeight: '82%',
+      width: '100%',
+      maxWidth: isDesktopWeb ? 440 : undefined,
+      maxHeight: isDesktopWeb ? '86%' : '82%',
       borderTopLeftRadius: 20,
       borderTopRightRadius: 20,
+      borderBottomLeftRadius: isDesktopWeb ? 20 : 0,
+      borderBottomRightRadius: isDesktopWeb ? 20 : 0,
       backgroundColor: colors.background,
       borderTopWidth: 1,
+      borderWidth: isDesktopWeb ? 1 : 0,
       borderColor: colors.border,
       paddingBottom: Spacing.xl,
+      overflow: 'hidden',
     },
     handle: {
       alignSelf: 'center',
@@ -105,6 +115,7 @@ function createStyles(colors: ThemeColors) {
       backgroundColor: colors.border,
       marginTop: Spacing.sm,
       marginBottom: Spacing.md,
+      opacity: isDesktopWeb ? 0 : 1,
     },
     headerRow: {
       flexDirection: 'row',
@@ -140,9 +151,10 @@ function createStyles(colors: ThemeColors) {
       paddingHorizontal: Spacing.lg,
     },
     tile: {
-      width: '31%',
-      minWidth: 96,
-      flexGrow: 1,
+      width: isDesktopWeb ? 118 : '31%',
+      minWidth: isDesktopWeb ? 118 : 96,
+      maxWidth: isDesktopWeb ? 118 : undefined,
+      flexGrow: isDesktopWeb ? 0 : 1,
       aspectRatio: 0.85,
       borderRadius: 14,
       overflow: 'hidden',
@@ -275,7 +287,8 @@ export function ChatBackgroundPickerSheet({
 }: ChatBackgroundPickerSheetProps) {
   const colors = useTheme();
   const isDark = colors.background === '#000000';
-  const styles = useThemedStyles(createStyles);
+  const isDesktopWeb = useIsDesktopWeb();
+  const styles = useThemedStyles((theme) => createStyles(theme, isDesktopWeb));
   const isPerChat = Boolean(conversationId);
   const [setting, setSetting] = useState<ChatBackgroundSetting>(() =>
     resolveChatBackgroundSync(conversationId),
@@ -499,14 +512,10 @@ export function ChatBackgroundPickerSheet({
 
   const handleEditorSave = useCallback(
     async (uri: string) => {
-      try {
-        const persisted = await persistChatBackgroundUri(uri);
-        await persistSetting({ kind: 'custom', uri: persisted });
-        setPendingEdit(null);
-        toast.success(isPerChat ? 'Фон этого чата сохранён' : 'Общий фон сохранён');
-      } catch (error) {
-        toast.error(localizeErrorMessage(error, 'Не удалось сохранить фон'));
-      }
+      const persisted = await persistChatBackgroundUri(uri);
+      await persistSetting({ kind: 'custom', uri: persisted });
+      setPendingEdit(null);
+      toast.success(isPerChat ? 'Фон этого чата сохранён' : 'Общий фон сохранён');
     },
     [isPerChat, persistSetting],
   );
@@ -517,7 +526,11 @@ export function ChatBackgroundPickerSheet({
 
   return (
     <>
-      <Modal visible={visible && !pendingEdit} transparent animationType="slide" onRequestClose={onClose}>
+      <Modal
+        visible={visible && !pendingEdit}
+        transparent
+        animationType={isDesktopWeb ? 'fade' : 'slide'}
+        onRequestClose={onClose}>
         <View style={styles.root}>
           <Pressable style={StyleSheet.absoluteFill} onPress={onClose} accessibilityLabel="Закрыть" />
           <View style={styles.sheet}>
@@ -775,9 +788,7 @@ export function ChatBackgroundPickerSheet({
           imageWidth={pendingEdit.width}
           imageHeight={pendingEdit.height}
           onCancel={() => setPendingEdit(null)}
-          onSave={(uri) => {
-            void handleEditorSave(uri);
-          }}
+          onSave={handleEditorSave}
         />
       ) : null}
     </>

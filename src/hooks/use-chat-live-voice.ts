@@ -602,6 +602,12 @@ export function useChatLiveVoice(conversationId: string | null): UseChatLiveVoic
         return;
       }
 
+      const prefs = await loadVoiceDevicePrefs();
+      if (intentionalLeaveRef.current) {
+        stopMediaStream(primedMic);
+        return;
+      }
+
       room = new Room({
         adaptiveStream: true,
         dynacast: true,
@@ -615,10 +621,12 @@ export function useChatLiveVoice(conversationId: string | null): UseChatLiveVoic
         // with OverconstrainedError ("Invalid constraint") right after mic permission.
         audioCaptureDefaults: {
           echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true,
+          noiseSuppression: prefs.noiseSuppression,
+          autoGainControl: Math.abs(prefs.micGain - 1) < 0.05,
           voiceIsolation: false,
-          deviceId: { ideal: 'default' },
+          ...(isUsableMediaDeviceId(prefs.inputDeviceId)
+            ? { deviceId: { exact: prefs.inputDeviceId } }
+            : {}),
         },
         videoCaptureDefaults: {
           facingMode: 'user',
@@ -816,7 +824,6 @@ export function useChatLiveVoice(conversationId: string | null): UseChatLiveVoic
         }
       }
 
-      const prefs = await loadVoiceDevicePrefs();
       preferredOutputDeviceId = prefs.outputDeviceId;
       if (isUsableMediaDeviceId(prefs.inputDeviceId)) {
         try {

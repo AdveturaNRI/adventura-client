@@ -61,7 +61,8 @@ export default function NotificationsScreen() {
   const router = useRouter();
   const hasDesktopSidebar = useIsDesktopSidebarVisible();
   const showCompactNav = !hasDesktopSidebar;
-  const { lastNotification, setUnreadNotifications, publishConversationUpdate } = useRealtime();
+  const { lastNotification, setUnreadNotifications, publishConversationUpdate, dataResyncAt } =
+    useRealtime();
   const [items, setItems] = useState<PortalNotification[]>([]);
   const [loading, setLoading] = useState(true);
   const itemsRef = useRef(items);
@@ -109,6 +110,13 @@ export default function NotificationsScreen() {
       void load();
     }, [load]),
   );
+
+  useEffect(() => {
+    if (!dataResyncAt) {
+      return;
+    }
+    void load();
+  }, [dataResyncAt, load]);
 
   useEffect(() => {
     if (!lastNotification) {

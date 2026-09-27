@@ -27,6 +27,7 @@ import {
   resolveChatCropFrame,
   type ChatBgEffect,
 } from '@/components/chats/chat-background-editor.utils';
+import { useIsDesktopWeb } from '@/components/navigation/DesktopThemeToggle';
 import {
   clampTranslation,
   clampTranslationPlain,
@@ -36,7 +37,6 @@ import { FontSize, Spacing, type ThemeColors } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { useThemedStyles } from '@/hooks/use-themed-styles';
 import { localizeErrorMessage } from '@/utils/localizeError';
-import { toast } from '@/components/ui';
 
 const MIN_SCALE = 1;
 const MAX_SCALE = 4;
@@ -66,14 +66,29 @@ type ChatBackgroundEditorProps = {
   imageWidth: number;
   imageHeight: number;
   onCancel: () => void;
-  onSave: (uri: string) => void;
+  onSave: (uri: string) => void | Promise<void>;
 };
 
-function createStyles(colors: ThemeColors) {
+function createStyles(colors: ThemeColors, isDesktopWeb: boolean) {
   return StyleSheet.create({
-    root: {
+    backdrop: {
       flex: 1,
+      backgroundColor: isDesktopWeb ? 'rgba(0,0,0,0.55)' : '#0B0D12',
+      justifyContent: isDesktopWeb ? 'center' : 'flex-start',
+      alignItems: isDesktopWeb ? 'center' : 'stretch',
+      paddingHorizontal: isDesktopWeb ? Spacing.lg : 0,
+      paddingVertical: isDesktopWeb ? Spacing.xl : 0,
+    },
+    root: {
+      flex: isDesktopWeb ? undefined : 1,
+      width: '100%',
+      maxWidth: isDesktopWeb ? 560 : undefined,
+      maxHeight: isDesktopWeb ? '92%' : undefined,
       backgroundColor: '#0B0D12',
+      borderRadius: isDesktopWeb ? 20 : 0,
+      overflow: 'hidden',
+      borderWidth: isDesktopWeb ? 1 : 0,
+      borderColor: 'rgba(255,255,255,0.12)',
     },
     header: {
       flexDirection: 'row',
@@ -104,6 +119,7 @@ function createStyles(colors: ThemeColors) {
     },
     canvas: {
       flex: 1,
+      minHeight: isDesktopWeb ? 360 : undefined,
       overflow: 'hidden',
       ...(Platform.OS === 'web'
         ? ({
@@ -143,6 +159,12 @@ function createStyles(colors: ThemeColors) {
     hint: {
       fontSize: FontSize.caption,
       color: 'rgba(255,255,255,0.55)',
+      textAlign: 'center',
+      lineHeight: FontSize.caption * 1.45,
+    },
+    errorText: {
+      fontSize: FontSize.caption,
+      color: '#FF8B8B',
       textAlign: 'center',
       lineHeight: FontSize.caption * 1.45,
     },
@@ -206,9 +228,9 @@ function createStyles(colors: ThemeColors) {
       borderRadius: 20,
       alignItems: 'center',
       justifyContent: 'center',
-      backgroundColor: 'rgba(0,0,0,0.45)',
+      backgroundColor: 'rgba(0,0,0,0.55)',
       borderWidth: 1,
-      borderColor: 'rgba(255,255,255,0.25)',
+      borderColor: 'rgba(255,255,255,0.22)',
     },
   });
 }
@@ -222,11 +244,16 @@ export function ChatBackgroundEditor({
   onSave,
 }: ChatBackgroundEditorProps) {
   const colors = useTheme();
-  const styles = useThemedStyles(createStyles);
+  const isDesktopWeb = useIsDesktopWeb();
+  const styles = useThemedStyles((theme) => createStyles(theme, isDesktopWeb));
   const insets = useSafeAreaInsets();
   const { height: screenHeight } = useWindowDimensions();
-  const [canvasSize, setCanvasSize] = useState({ width: 0, height: screenHeight * 0.55 });
+  const [canvasSize, setCanvasSize] = useState({
+    width: 0,
+    height: isDesktopWeb ? Math.min(480, screenHeight * 0.5) : screenHeight * 0.55,
+  });
   const [isSaving, setIsSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const [effect, setEffect] = useState<ChatBgEffect>('blur');
   const [touchHint, setTouchHint] = useState(() => isTouchPrimaryDevice());
 
@@ -552,6 +579,7 @@ export function ChatBackgroundEditor({
   const handleSave = async () => {
     if (isSaving || !cropFrame) return;
     setIsSaving(true);
+    setSaveError(null);
     try {
       const uri = await renderChatBackgroundImage({
         imageUri,
@@ -565,9 +593,10 @@ export function ChatBackgroundEditor({
         effect,
         blurPx: 16,
       });
-      onSave(uri);
+      await onSave(uri);
     } catch (error) {
-      toast.error(localizeErrorMessage(error, 'Не удалось обработать фон'));
+      // Toast сидит под RN Modal — ошибку показываем прямо в редакторе.
+      setSaveError(localizeErrorMessage(error, 'Не удалось сохранить фон'));
     } finally {
       setIsSaving(false);
     }
@@ -578,9 +607,21 @@ export function ChatBackgroundEditor({
   const effectMeta = CHAT_BG_EFFECTS.find((item) => item.id === effect);
 
   return (
-    <Modal visible={visible} animationType="slide" onRequestClose={onCancel}>
+    <Modal
+      visible={visible}
+      transparent={isDesktopWeb}
+      animationType={isDesktopWeb ? 'fade' : 'slide'}
+      onRequestClose={onCancel}>
       <GestureHandlerRootView style={{ flex: 1 }}>
-        <View style={[styles.root, { paddingTop: insets.top, paddingBottom: insets.bottom }]}>
+        <View style={styles.backdrop}>
+          <View
+            style={[
+              styles.root,
+              {
+                paddingTop: isDesktopWeb ? Spacing.sm : insets.top,
+                paddingBottom: isDesktopWeb ? Spacing.md : insets.bottom,
+              },
+            ]}>
           <View style={styles.header}>
             <Pressable
               accessibilityRole="button"
@@ -759,6 +800,7 @@ export function ChatBackgroundEditor({
                 ? 'Двигайте и щипком масштабируйте область фона'
                 : 'Тяните мышью, колёсико или ± для масштаба'}
             </Text>
+            {saveError ? <Text style={styles.errorText}>{saveError}</Text> : null}
             <Pressable
               accessibilityRole="button"
               onPress={() => void handleSave()}
@@ -773,6 +815,7 @@ export function ChatBackgroundEditor({
                 <Text style={styles.saveButtonText}>Применить фон</Text>
               )}
             </Pressable>
+          </View>
           </View>
         </View>
       </GestureHandlerRootView>

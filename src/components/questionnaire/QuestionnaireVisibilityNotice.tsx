@@ -144,10 +144,10 @@ export function QuestionnaireVisibilityNotice({
 
       {completion.missingFields.length > 0 ? (
         <View style={styles.missingBox}>
-          <Text style={styles.missingTitle}>Чтобы анкету увидели, заполните:</Text>
+          <Text style={styles.missingTitle}>Заполните обязательные данные:</Text>
           {completion.missingFields.map((field) => (
-            <Text key={field} style={styles.missingItem}>
-              · {field}
+            <Text key={field.key} style={styles.missingItem}>
+              · {field.label}
             </Text>
           ))}
           <Text style={styles.requiredHint}>{QUESTIONNAIRE_REQUIRED_FIELDS_HINT}</Text>

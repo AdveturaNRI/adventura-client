@@ -32,6 +32,8 @@ import {
   countActiveWanderersFilters,
   formatWanderersAgeFilter,
   formatWanderersAvailabilityFilter,
+  formatWanderersGameCostFilter,
+  formatWanderersPlayerPaymentFilter,
   hasActiveAgeFilter,
   hasActiveAvailability,
   WANDERERS_ANY_SYSTEM,
@@ -40,6 +42,12 @@ import {
   type WanderersFilters,
   type WanderersPlayMode,
 } from '@/utils/wanderers-filters';
+import {
+  GAME_COST_FORMATS,
+  PLAYER_PAYMENT_FORMATS,
+  gameCostFormatLabel,
+  playerPaymentFormatLabel,
+} from '@/utils/questionnaire-payment';
 import {
   QUESTIONNAIRE_AGE_MAX,
   QUESTIONNAIRE_AGE_MIN,
@@ -247,11 +255,6 @@ function createStyles(
       paddingVertical: Spacing.lg,
       gap: Spacing.lg,
     },
-    hint: {
-      fontSize: FontSize.caption,
-      color: colors.textMuted,
-      lineHeight: FontSize.caption * 1.45,
-    },
     sectionsPair: {
       flexDirection: 'row',
       flexWrap: 'wrap',
@@ -287,6 +290,11 @@ function createStyles(
       color: colors.textMuted,
       textTransform: 'uppercase',
       letterSpacing: 0.4,
+    },
+    sectionHint: {
+      fontSize: FontSize.caption,
+      color: colors.textSecondary,
+      lineHeight: FontSize.caption * 1.4,
     },
     chipsRow: {
       flexDirection: 'row',
@@ -431,6 +439,7 @@ function FilterChip({ label, selected, onPress, removable = false, icon }: Filte
 function FilterSection({
   title,
   icon,
+  hint,
   children,
   emptyLabel,
   isEmpty = false,
@@ -438,6 +447,7 @@ function FilterSection({
 }: {
   title: string;
   icon?: keyof typeof Ionicons.glyphMap;
+  hint?: string;
   children?: ReactNode;
   emptyLabel?: string;
   isEmpty?: boolean;
@@ -452,6 +462,7 @@ function FilterSection({
         {icon ? <Ionicons name={icon} size={14} color={colors.textMuted} /> : null}
         <Text style={styles.sectionTitle}>{title}</Text>
       </View>
+      {hint ? <Text style={styles.sectionHint}>{hint}</Text> : null}
       {isEmpty ? (
         <Text style={styles.emptySection}>{emptyLabel}</Text>
       ) : (
@@ -825,6 +836,26 @@ export function WanderersFiltersPanel({
               }
             />
           ) : null}
+          {filters.gameCostFormat ? (
+            <FilterChip
+              key="game-cost"
+              label={formatWanderersGameCostFilter(filters.gameCostFormat)}
+              icon="pricetag-outline"
+              selected
+              removable
+              onPress={() => onChange({ ...filters, gameCostFormat: null })}
+            />
+          ) : null}
+          {filters.playerPaymentFormat ? (
+            <FilterChip
+              key="player-payment"
+              label={formatWanderersPlayerPaymentFilter(filters.playerPaymentFormat)}
+              icon="cash-outline"
+              selected
+              removable
+              onPress={() => onChange({ ...filters, playerPaymentFormat: null })}
+            />
+          ) : null}
         </ScrollView>
       ) : null}
 
@@ -852,10 +883,6 @@ export function WanderersFiltersPanel({
               contentContainerStyle={styles.modalScroll}
               showsVerticalScrollIndicator
               keyboardShouldPersistTaps="handled">
-              <Text style={styles.hint}>
-                Фильтры дополняют друг друга: анкета должна подходить по всем выбранным пунктам.
-              </Text>
-
               <View style={styles.sectionsPair}>
                 <FilterSection title="Роль" icon="person-outline" half>
                   {options.roles.map((role) => (
@@ -881,6 +908,55 @@ export function WanderersFiltersPanel({
                   ))}
                 </FilterSection>
               </View>
+
+              <FilterSection
+                title="Стоимость игр"
+                icon="pricetag-outline"
+                hint="Выберите подходящий формат оплаты мастеру.">
+                {GAME_COST_FORMATS.map((format) => (
+                  <FilterChip
+                    key={format}
+                    label={gameCostFormatLabel(format)}
+                    icon={
+                      format === 'free'
+                        ? 'pricetag-outline'
+                        : format === 'both'
+                          ? 'pricetags-outline'
+                          : 'cash-outline'
+                    }
+                    selected={filters.gameCostFormat === format}
+                    onPress={() =>
+                      onChange({
+                        ...filters,
+                        gameCostFormat: filters.gameCostFormat === format ? null : format,
+                      })
+                    }
+                  />
+                ))}
+              </FilterSection>
+
+              <FilterSection
+                title="Предпочтения по оплате игр"
+                icon="wallet-outline"
+                hint="Готов ли игрок платить за игры.">
+                {PLAYER_PAYMENT_FORMATS.map((format) => (
+                  <FilterChip
+                    key={format}
+                    label={playerPaymentFormatLabel(format)}
+                    icon={
+                      format === 'free_only' ? 'pricetag-outline' : 'pricetags-outline'
+                    }
+                    selected={filters.playerPaymentFormat === format}
+                    onPress={() =>
+                      onChange({
+                        ...filters,
+                        playerPaymentFormat:
+                          filters.playerPaymentFormat === format ? null : format,
+                      })
+                    }
+                  />
+                ))}
+              </FilterSection>
 
               <View style={styles.section}>
                 <View style={styles.sectionHeader}>

@@ -16,6 +16,7 @@ import { useTheme } from '@/hooks/use-theme';
 import { useThemedStyles } from '@/hooks/use-themed-styles';
 import { fetchCities } from '@/services/reference/referenceApi';
 import type { CityReferenceItem } from '@/utils/city-label';
+import { focusWithoutScroll } from '@/utils/scroll-scrollview-to-child';
 
 type CitySelection = {
   id: string;
@@ -25,6 +26,8 @@ type CitySelection = {
 type CitySearchFieldBaseProps = {
   label: string;
   placeholder: string;
+  /** Starts editing and focuses the search input once when true. */
+  autoFocus?: boolean;
 };
 
 type CitySearchFieldSingleProps = CitySearchFieldBaseProps & {
@@ -486,7 +489,7 @@ function groupCitiesByCountry(results: CityReferenceItem[]) {
 }
 
 export function CitySearchField(props: CitySearchFieldProps) {
-  const { label, placeholder } = props;
+  const { label, placeholder, autoFocus = false } = props;
   const isMultiple = props.multiple === true;
   const selectedCities: CitySelection[] = isMultiple
     ? props.values
@@ -505,7 +508,7 @@ export function CitySearchField(props: CitySearchFieldProps) {
   const colors = useTheme();
   const styles = useThemedStyles(createStyles);
   const [query, setQuery] = useState('');
-  const [isEditing, setIsEditing] = useState(selectedCities.length === 0);
+  const [isEditing, setIsEditing] = useState(selectedCities.length === 0 || autoFocus);
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const [results, setResults] = useState<CityReferenceItem[]>([]);
   const [hasFetched, setHasFetched] = useState(false);
@@ -519,6 +522,8 @@ export function CitySearchField(props: CitySearchFieldProps) {
   const anchorRef = useRef<View>(null);
   const rootRef = useRef<View>(null);
   const resultsPortalRef = useRef<View>(null);
+  const inputRef = useRef<TextInput>(null);
+  const autoFocusDoneRef = useRef(false);
   const [webAnchor, setWebAnchor] = useState<DropdownAnchor | null>(null);
 
   const groupedResults = useMemo(() => groupCitiesByCountry(results), [results]);
@@ -595,6 +600,30 @@ export function CitySearchField(props: CitySearchFieldProps) {
       cancelScheduledReset();
     };
   }, []);
+
+  useEffect(() => {
+    if (!autoFocus || autoFocusDoneRef.current) {
+      return;
+    }
+
+    if (isMultiple && !canAddMore) {
+      return;
+    }
+
+    autoFocusDoneRef.current = true;
+    setIsEditing(true);
+    setIsDropdownOpen(true);
+
+    const focusInput = () => {
+      focusWithoutScroll(inputRef.current);
+    };
+
+    const timer = setTimeout(focusInput, Platform.OS === 'web' ? 40 : 80);
+
+    return () => {
+      clearTimeout(timer);
+    };
+  }, [autoFocus, canAddMore, isMultiple]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1093,6 +1122,7 @@ export function CitySearchField(props: CitySearchFieldProps) {
             <View style={styles.inputRow}>
               <View style={[styles.inputWrap, styles.inputField]}>
                 <TextInput
+                  ref={inputRef}
                   value={query}
                   onChangeText={setQuery}
                   onFocus={handleInputFocus}

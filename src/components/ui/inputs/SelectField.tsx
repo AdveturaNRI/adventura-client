@@ -1,5 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   Modal,
   Pressable,
@@ -31,6 +31,8 @@ type SelectFieldProps = {
   onChange: (value: string | null) => void;
   error?: string;
   style?: ViewStyle;
+  /** Opens the picker once when flipped to true (e.g. deep-link focus). */
+  autoOpen?: boolean;
 };
 
 const DESKTOP_SHEET_MAX_WIDTH = 420;
@@ -178,6 +180,7 @@ export function SelectField({
   onChange,
   error,
   style,
+  autoOpen = false,
 }: SelectFieldProps) {
   const colors = useTheme();
   const isDesktopWeb = useIsDesktopWeb();
@@ -186,6 +189,14 @@ export function SelectField({
 
   const selectedLabel = options.find((option) => option.id === value)?.label;
   const close = () => setIsOpen(false);
+
+  useEffect(() => {
+    if (!autoOpen) {
+      return;
+    }
+
+    setIsOpen(true);
+  }, [autoOpen]);
 
   return (
     <View style={[styles.wrapper, style]}>

@@ -134,7 +134,9 @@ export function useQuestionnaireScreenStyles() {
     ? Spacing.lg
     : insets.top + Spacing.sm + MOBILE_HEADER_HEIGHT + Spacing.sm;
   const footerPaddingBottom = Math.max(insets.bottom, Spacing.md) + Spacing.sm;
-  const bottomPadding = Spacing.lg;
+  // Sticky footer: continue + save/exit buttons + gaps (~130px) so Cost/Payment panels can scroll clear.
+  const stickyFooterReserve = 140;
+  const bottomPadding = Spacing.lg + stickyFooterReserve;
 
   return useThemedStyles((colors) =>
     createQuestionnaireScreenStyles(colors, topPadding, bottomPadding, footerPaddingBottom),

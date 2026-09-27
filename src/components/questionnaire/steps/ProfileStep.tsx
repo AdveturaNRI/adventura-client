@@ -1,7 +1,14 @@
 import * as ImagePicker from 'expo-image-picker';
 import { Ionicons } from '@expo/vector-icons';
-import { useState } from 'react';
-import { StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import { useEffect, useRef, useState, type RefObject } from 'react';
+import {
+  StyleSheet,
+  Text,
+  TextInput,
+  useWindowDimensions,
+  View,
+  type ScrollView,
+} from 'react-native';
 
 import { PhotoCropEditor } from '@/components/questionnaire/PhotoCropEditor';
 import { ProfilePhotoField } from '@/components/questionnaire/ProfilePhotoField';
@@ -9,13 +16,16 @@ import { QuestionnaireHint } from '@/components/questionnaire/QuestionnaireHint'
 import { QuestionnaireOption } from '@/components/questionnaire/QuestionnaireOption';
 import { Input, NicknameInput, TextArea, toast } from '@/components/ui';
 import { FontSize, Spacing, type ThemeColors } from '@/constants/theme';
+import { useQuestionnaireFieldFocus } from '@/hooks/use-questionnaire-field-focus';
 import { useTheme } from '@/hooks/use-theme';
 import { useThemedStyles } from '@/hooks/use-themed-styles';
 import { PROFILE_STEP } from '@/screens/questionnaire/questionnaire.config';
 import type { QuestionnaireDraft } from '@/screens/questionnaire/types';
+import { isQuestionnaireAgeValid } from '@/screens/questionnaire/questionnaire-validation';
 import { useQuestionnaireScreenStyles } from '@/screens/questionnaire/questionnaire-screen.styles';
 import { isGifImage } from '@/utils/image-format';
 import { getImageSize } from '@/utils/image-size';
+import { focusWithoutScroll, scheduleScrollAttempts, scrollScrollViewToChild } from '@/utils/scroll-scrollview-to-child';
 
 const STACK_STATUS_AGE_MAX_WIDTH = 420;
 
@@ -33,6 +43,11 @@ type ProfileStepValue = Pick<
 type ProfileStepProps = {
   value: ProfileStepValue;
   onChange: (value: Partial<ProfileStepValue>) => void;
+  showValidationError?: boolean;
+  validationScrollKey?: number;
+  focusField?: 'age' | null;
+  scrollRef?: RefObject<ScrollView | null>;
+  onFocusScrollComplete?: () => void;
 };
 
 function nextProfileCardChange(
@@ -111,6 +126,10 @@ function createStyles(colors: ThemeColors, stackStatusAge: boolean) {
       flexShrink: 0,
       zIndex: 1,
     },
+    ageFieldWithError: {
+      width: stackStatusAge ? '100%' : 148,
+      maxWidth: stackStatusAge ? '100%' : 148,
+    },
     visibilityCard: {
       gap: Spacing.md,
       padding: Spacing.lg,
@@ -177,14 +196,51 @@ function createStyles(colors: ThemeColors, stackStatusAge: boolean) {
   });
 }
 
-export function ProfileStep({ value, onChange }: ProfileStepProps) {
+export function ProfileStep({
+  value,
+  onChange,
+  showValidationError = false,
+  validationScrollKey = 0,
+  focusField = null,
+  scrollRef,
+  onFocusScrollComplete,
+}: ProfileStepProps) {
   const screenStyles = useQuestionnaireScreenStyles();
   const colors = useTheme();
   const { width } = useWindowDimensions();
   const stackStatusAge = width <= STACK_STATUS_AGE_MAX_WIDTH;
   const styles = useThemedStyles((themeColors) => createStyles(themeColors, stackStatusAge));
+  const ageFieldRef = useRef<View>(null);
+  const ageInputRef = useRef<TextInput>(null);
+  const ageMissing = !isQuestionnaireAgeValid(value.age);
+  const showAgeError = showValidationError && ageMissing;
   const [pendingCrop, setPendingCrop] = useState<PendingCrop | null>(null);
   const isPublic = value.isPublic;
+
+  useEffect(() => {
+    if (!showAgeError || validationScrollKey <= 0 || !scrollRef?.current || !ageFieldRef.current) {
+      return;
+    }
+
+    return scheduleScrollAttempts(() =>
+      scrollScrollViewToChild(scrollRef.current, ageFieldRef.current, 20),
+    );
+  }, [showAgeError, scrollRef, validationScrollKey]);
+
+  useQuestionnaireFieldFocus({
+    active: focusField === 'age',
+    scroll: () => {
+      if (!scrollRef?.current || !ageFieldRef.current) {
+        return false;
+      }
+
+      return scrollScrollViewToChild(scrollRef.current, ageFieldRef.current, 20, true);
+    },
+    onReady: () => {
+      focusWithoutScroll(ageInputRef.current);
+    },
+    onComplete: onFocusScrollComplete,
+  });
 
   const pickPhoto = async () => {
     const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -296,14 +352,19 @@ export function ProfileStep({ value, onChange }: ProfileStepProps) {
               />
             </View>
 
-            <View style={styles.ageField}>
+            <View
+              ref={ageFieldRef}
+              collapsable={false}
+              style={[styles.ageField, showAgeError ? styles.ageFieldWithError : null]}>
               <Input
+                ref={ageInputRef}
                 label={PROFILE_STEP.ageLabel}
                 labelHint={PROFILE_STEP.ageLabelHint}
                 value={value.age}
                 onChangeText={(age) => onChange({ age: age.replace(/[^\d]/g, '') })}
                 keyboardType="number-pad"
                 maxLength={3}
+                error={showAgeError ? 'Обязательное поле' : undefined}
               />
             </View>
           </View>

@@ -3,6 +3,7 @@ import { sanitizeBadges, type QuestionnaireAuraId, type RewardBadgeType } from '
 import { formatAvailability } from '@/screens/questionnaire/availability';
 import type { QuestionnaireDraft } from '@/screens/questionnaire/types';
 import { roleChoiceToRoles } from '@/screens/questionnaire/types';
+import { parseSessionPriceValue } from '@/utils/questionnaire-payment';
 import { DEFAULT_TIMEZONE } from '@/utils/timezones';
 import { formatUserCardVisibility } from '@/utils/user-card-format';
 
@@ -51,6 +52,12 @@ export function questionnaireDraftToUserCardProps(
       experience: draft.experienceTypeLabel.trim() || 'Не указано',
       schedule: schedule || 'Не указано',
       timezone: draft.timezone?.trim() || DEFAULT_TIMEZONE,
+      roles,
+      gameCostFormat: draft.gameCostFormat,
+      sessionPriceKind: draft.sessionPriceKind,
+      sessionPriceMin: parseSessionPriceValue(draft.sessionPriceMin),
+      sessionPriceMax: parseSessionPriceValue(draft.sessionPriceMax),
+      playerPaymentFormat: draft.playerPaymentFormat,
     },
     bio,
     visibility: visibility.label,

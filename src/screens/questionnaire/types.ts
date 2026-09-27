@@ -1,5 +1,11 @@
 import type { QuestionnaireAvailability } from '@/screens/questionnaire/availability';
 import { EMPTY_QUESTIONNAIRE_AVAILABILITY } from '@/screens/questionnaire/availability';
+import {
+  EMPTY_QUESTIONNAIRE_PAYMENT,
+  type GameCostFormat,
+  type PlayerPaymentFormat,
+  type SessionPriceKind,
+} from '@/utils/questionnaire-payment';
 import { DEFAULT_TIMEZONE } from '@/utils/timezones';
 
 export type PlayerRoleChoice = 'player' | 'master' | 'both';
@@ -30,6 +36,11 @@ export type QuestionnaireDraft = {
   readyToLearnNew: boolean;
   openToAnySystem: boolean;
   isPublic: boolean;
+  gameCostFormat: GameCostFormat | null;
+  sessionPriceKind: SessionPriceKind | null;
+  sessionPriceMin: string;
+  sessionPriceMax: string;
+  playerPaymentFormat: PlayerPaymentFormat | null;
 };
 
 export function roleChoiceToRoles(choice: PlayerRoleChoice): string[] {
@@ -80,4 +91,5 @@ export const INITIAL_QUESTIONNAIRE_DRAFT: QuestionnaireDraft = {
   readyToLearnNew: false,
   openToAnySystem: false,
   isPublic: true,
+  ...EMPTY_QUESTIONNAIRE_PAYMENT,
 };

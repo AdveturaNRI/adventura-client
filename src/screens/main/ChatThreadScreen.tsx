@@ -121,8 +121,10 @@ import { localizeErrorMessage } from '@/utils/localizeError';
 import { stableAvatarUrl } from '@/utils/stable-avatar-url';
 import {
   appendCachedThreadMessage,
-  getCachedConversation,
   getCachedThread,
+  hydrateChatThread,
+  mergeVisibleThreadMessages,
+  messageFromConversationPreview,
   prefetchChatThread,
   removeCachedConversation,
   setCachedConversations,
@@ -667,13 +669,6 @@ function createStyles(colors: ThemeColors, bottomPad: number, isDark: boolean) {
       justifyContent: 'center',
       flexShrink: 0,
     },
-    headerRefresh: {
-      width: 28,
-      height: 28,
-      alignItems: 'center',
-      justifyContent: 'center',
-      flexShrink: 0,
-    },
     headerCallButton: {
       width: 36,
       height: 36,
@@ -1004,6 +999,8 @@ function createStyles(colors: ThemeColors, bottomPad: number, isDark: boolean) {
         : null),
     },
     listContent: {
+      flexGrow: 1,
+      justifyContent: 'flex-end',
       paddingHorizontal: Spacing.md,
       paddingVertical: Spacing.md,
       gap: 6,
@@ -1375,8 +1372,17 @@ export default function ChatThreadScreen() {
   const hasDesktopSidebar = useIsDesktopSidebarVisible();
   const { user } = useAuth();
   const { requestAfterFirstMessage } = usePushPrompt();
-  const { lastConversationUpdate, lastConversationRead, lastConversationDeleted, lastPresence, subscribeMessages, subscribeCallEvents, publishConversationUpdate } =
-    useRealtime();
+  const {
+    lastMessage,
+    lastConversationUpdate,
+    lastConversationRead,
+    lastConversationDeleted,
+    lastPresence,
+    dataResyncAt,
+    subscribeMessages,
+    subscribeCallEvents,
+    publishConversationUpdate,
+  } = useRealtime();
   const bottomSafe = hasDesktopSidebar ? Spacing.md : Math.max(insets.bottom, Spacing.sm);
   const keyboardInset = useWebKeyboardBottomInset();
   // Клавиатура уже перекрывает home indicator — не суммируем safe-area с inset.
@@ -1394,14 +1400,22 @@ export default function ChatThreadScreen() {
     };
   }, [conversationId]);
 
-  const [conversation, setConversation] = useState<ConversationListItem | null>(null);
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [hydratedId, setHydratedId] = useState(conversationId);
+  const [conversation, setConversation] = useState<ConversationListItem | null>(
+    () => hydrateChatThread(conversationId).conversation,
+  );
+  const [messages, setMessages] = useState<ChatMessage[]>(
+    () => hydrateChatThread(conversationId).messages,
+  );
   const messagesRef = useRef<ChatMessage[]>([]);
   messagesRef.current = messages;
-  const [peerLastReadAt, setPeerLastReadAt] = useState<string | null>(null);
-  const [nextCursor, setNextCursor] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
+  const [peerLastReadAt, setPeerLastReadAt] = useState<string | null>(
+    () => hydrateChatThread(conversationId).peerLastReadAt,
+  );
+  const [nextCursor, setNextCursor] = useState<string | null>(
+    () => hydrateChatThread(conversationId).nextCursor,
+  );
+  const [loading, setLoading] = useState(() => !hydrateChatThread(conversationId).ready);
   const [sending, setSending] = useState(false);
   const {
     activeKey: activeVoiceKey,
@@ -1585,10 +1599,28 @@ export default function ChatThreadScreen() {
   const timelineRef = useRef<ChatTimelineItem[]>([]);
   const highlightTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const stickToBottomRef = useRef(true);
+  const openingPinRef = useRef(true);
   const loadingOlderRef = useRef(false);
   const pinningScrollRef = useRef(false);
   const contentHeightRef = useRef(0);
   const layoutHeightRef = useRef(0);
+  const scrollOffsetRef = useRef(0);
+
+  if (hydratedId !== conversationId) {
+    const next = hydrateChatThread(conversationId);
+    setHydratedId(conversationId);
+    setConversation(next.conversation);
+    setMessages(next.messages);
+    setNextCursor(next.nextCursor);
+    setPeerLastReadAt(next.peerLastReadAt);
+    setLoading(!next.ready);
+    stickToBottomRef.current = true;
+    openingPinRef.current = true;
+    pinningScrollRef.current = false;
+    scrollOffsetRef.current = 0;
+    contentHeightRef.current = 0;
+    layoutHeightRef.current = 0;
+  }
   const dropZoneRef = useRef<View>(null);
   const draftRef = useRef('');
   const pendingAttachmentsRef = useRef<PendingAttachment[]>([]);
@@ -1620,24 +1652,68 @@ export default function ChatThreadScreen() {
   }, []);
 
   const pinToBottom = useCallback(() => {
-    const layoutHeight = layoutHeightRef.current;
-    if (layoutHeight <= 0) {
+    const list = listRef.current as
+      | (FlatList<ChatTimelineItem> & {
+          getScrollableNode?: () => unknown;
+        })
+      | null;
+    if (!list) {
       return;
     }
-    const offset = Math.max(0, contentHeightRef.current - layoutHeight);
+
     pinningScrollRef.current = true;
-    listRef.current?.scrollToOffset({ offset, animated: false });
-    requestAnimationFrame(() => {
+
+    if (Platform.OS === 'web') {
+      const node = list.getScrollableNode?.();
+      if (node && typeof node === 'object' && node !== null && 'scrollHeight' in node) {
+        const el = node as { scrollHeight: number; clientHeight: number; scrollTop: number };
+        el.scrollTop = Math.max(0, el.scrollHeight - el.clientHeight);
+      }
+    }
+
+    const layoutHeight = layoutHeightRef.current;
+    if (layoutHeight > 0) {
+      const offset = Math.max(0, contentHeightRef.current - layoutHeight);
+      list.scrollToOffset({ offset, animated: false });
+    }
+
+    const release = () => {
+      pinningScrollRef.current = false;
+    };
+    if (Platform.OS === 'web') {
+      window.setTimeout(release, 160);
+    } else {
       requestAnimationFrame(() => {
-        pinningScrollRef.current = false;
+        requestAnimationFrame(release);
       });
-    });
+    }
   }, []);
 
   const scrollToBottom = useCallback(() => {
     stickToBottomRef.current = true;
+    openingPinRef.current = true;
     pinToBottom();
   }, [pinToBottom]);
+
+  useEffect(() => {
+    openingPinRef.current = true;
+    stickToBottomRef.current = true;
+    const delays = [0, 16, 48, 120, 240, 480, 800];
+    const timers = delays.map((ms) =>
+      setTimeout(() => {
+        if (openingPinRef.current || stickToBottomRef.current) {
+          pinToBottom();
+        }
+      }, ms),
+    );
+    const stopOpening = setTimeout(() => {
+      openingPinRef.current = false;
+    }, 900);
+    return () => {
+      timers.forEach(clearTimeout);
+      clearTimeout(stopOpening);
+    };
+  }, [conversationId, pinToBottom]);
 
   const appendMessage = useCallback((message: ChatMessage) => {
     if (conversationId && message.conversationId === conversationId) {
@@ -1889,20 +1965,13 @@ export default function ChatThreadScreen() {
       return;
     }
     const merged = await prefetchChatThread(conversationId);
+    const cachedNow = getCachedThread(conversationId)?.messages ?? [];
     setMessages((prev) => {
-      const byId = new Map(merged.messages.map((item) => [item.id, item]));
-      for (const item of prev) {
-        if (!byId.has(item.id) && item.id.startsWith('pending-')) {
-          byId.set(item.id, item);
-        }
-      }
-      // Сообщения в hold для анимации кубов не показываем до onReveal.
-      for (const heldId of heldDiceMessagesRef.current.keys()) {
-        byId.delete(heldId);
-      }
-      return [...byId.values()].sort((left, right) =>
-        left.createdAt.localeCompare(right.createdAt),
-      );
+      const next = mergeVisibleThreadMessages(merged.messages, [
+        ...cachedNow,
+        ...prev,
+      ]);
+      return mergeVisibleThreadMessages(next, [], heldDiceMessagesRef.current.keys());
     });
     setNextCursor(merged.nextCursor);
     setPeerLastReadAt(merged.peerLastReadAt);
@@ -1940,21 +2009,15 @@ export default function ChatThreadScreen() {
 
       setSuppressFavoriteBack(false);
 
+      const snapshot = hydrateChatThread(conversationId);
       const cachedThread = getCachedThread(conversationId);
-      const cachedConversation =
-        cachedThread?.conversation ?? getCachedConversation(conversationId);
+      const cachedConversation = snapshot.conversation;
 
-      if (cachedThread) {
+      if (snapshot.ready) {
         setConversation(cachedConversation);
-        setMessages(cachedThread.messages);
-        setNextCursor(cachedThread.nextCursor);
-        setPeerLastReadAt(cachedThread.peerLastReadAt);
-        setLoading(false);
-      } else if (cachedConversation) {
-        setConversation(cachedConversation);
-        setMessages([]);
-        setNextCursor(null);
-        setPeerLastReadAt(cachedConversation.peerLastReadAt);
+        setMessages(snapshot.messages);
+        setNextCursor(snapshot.nextCursor);
+        setPeerLastReadAt(snapshot.peerLastReadAt);
         setLoading(false);
       } else {
         setConversation(null);
@@ -1964,7 +2027,9 @@ export default function ChatThreadScreen() {
         setLoading(true);
       }
 
-      setRefreshing(true);
+      stickToBottomRef.current = true;
+      openingPinRef.current = true;
+
       try {
         const [list, merged] = await Promise.all([
           listConversations(),
@@ -1991,32 +2056,29 @@ export default function ChatThreadScreen() {
           }),
         );
         setMessages((prev) => {
-          const byId = new Map(merged.messages.map((item) => [item.id, item]));
-          for (const item of prev) {
-            if (!byId.has(item.id) && item.id.startsWith('pending-')) {
-              byId.set(item.id, item);
-            }
-          }
-          for (const heldId of heldDiceMessagesRef.current.keys()) {
-            byId.delete(heldId);
-          }
-          return [...byId.values()].sort((left, right) =>
-            left.createdAt.localeCompare(right.createdAt),
+          const cachedNow = getCachedThread(conversationId)?.messages ?? [];
+          const next = mergeVisibleThreadMessages(merged.messages, [
+            ...cachedNow,
+            ...prev,
+          ]);
+          setCachedThread(conversationId, {
+            conversation: {
+              ...found,
+              blockedByMe: merged.conversation?.blockedByMe ?? found.blockedByMe,
+              blockedMe: merged.conversation?.blockedMe ?? found.blockedMe,
+            },
+            messages: next,
+            nextCursor: merged.nextCursor,
+            peerLastReadAt: merged.peerLastReadAt ?? found.peerLastReadAt,
+          });
+          return mergeVisibleThreadMessages(
+            next,
+            [],
+            heldDiceMessagesRef.current.keys(),
           );
         });
         setNextCursor(merged.nextCursor);
         setPeerLastReadAt(merged.peerLastReadAt ?? found.peerLastReadAt);
-        // Подклеим conversation из списка к уже закэшированной странице сообщений.
-        setCachedThread(conversationId, {
-          conversation: {
-            ...found,
-            blockedByMe: merged.conversation?.blockedByMe ?? found.blockedByMe,
-            blockedMe: merged.conversation?.blockedMe ?? found.blockedMe,
-          },
-          messages: merged.messages,
-          nextCursor: merged.nextCursor,
-          peerLastReadAt: merged.peerLastReadAt ?? found.peerLastReadAt,
-        });
         await markConversationRead(conversationId);
       } catch (error) {
         if (cancelled) {
@@ -2042,7 +2104,6 @@ export default function ChatThreadScreen() {
       } finally {
         if (!cancelled) {
           setLoading(false);
-          setRefreshing(false);
         }
       }
     }
@@ -2115,6 +2176,19 @@ export default function ChatThreadScreen() {
   }, [conversationId, ingestIncomingMessage, myId, scrollToBottom, subscribeMessages]);
 
   useEffect(() => {
+    if (!lastMessage || lastMessage.conversationId !== conversationId) {
+      return;
+    }
+    if (messagesRef.current.some((item) => item.id === lastMessage.id)) {
+      return;
+    }
+    ingestIncomingMessage(lastMessage);
+    if (stickToBottomRef.current || openingPinRef.current) {
+      scrollToBottom();
+    }
+  }, [conversationId, ingestIncomingMessage, lastMessage, scrollToBottom]);
+
+  useEffect(() => {
     if (!lastConversationUpdate || lastConversationUpdate.id !== conversationId) {
       return;
     }
@@ -2152,7 +2226,17 @@ export default function ChatThreadScreen() {
       return next;
     });
     setPeerLastReadAt(lastConversationUpdate.peerLastReadAt);
-  }, [conversationId, lastConversationUpdate]);
+    const preview = lastConversationUpdate.lastMessage;
+    if (preview && !messagesRef.current.some((item) => item.id === preview.id)) {
+      const stub = messageFromConversationPreview(lastConversationUpdate);
+      if (stub) {
+        appendMessage(stub);
+        if (stickToBottomRef.current || openingPinRef.current) {
+          scrollToBottom();
+        }
+      }
+    }
+  }, [appendMessage, conversationId, lastConversationUpdate, scrollToBottom]);
 
   // Shared wallpaper → локальный override (и у себя, и у собеседника по realtime).
   useEffect(() => {
@@ -2187,6 +2271,24 @@ export default function ChatThreadScreen() {
     }
     return () => sub.remove();
   }, [conversationId, loadConversation]);
+
+  // После блокировки iPhone / freeze вкладки сокет пропускает message:new — добираем HTTP.
+  useEffect(() => {
+    if (!dataResyncAt || !conversationId) {
+      return;
+    }
+    void (async () => {
+      await loadMessages();
+      try {
+        await markConversationRead(conversationId);
+      } catch {
+        // Не блокируем UI, если read не прошёл.
+      }
+      if (stickToBottomRef.current || openingPinRef.current) {
+        scrollToBottom();
+      }
+    })();
+  }, [conversationId, dataResyncAt, loadMessages, scrollToBottom]);
 
   useEffect(() => {
     if (!lastConversationDeleted || lastConversationDeleted.conversationId !== conversationId) {
@@ -3462,11 +3564,6 @@ export default function ChatThreadScreen() {
               color={voiceActiveHere || ongoingVoiceCall ? colors.primary : colors.textSubtle}
             />
           </Pressable>
-          {refreshing ? (
-            <View style={styles.headerRefresh} accessibilityLabel="Обновление чата">
-              <ActivityIndicator size="small" color={colors.primary} />
-            </View>
-          ) : null}
           <Pressable
             accessibilityRole="button"
             accessibilityLabel="Ещё"
@@ -3641,27 +3738,40 @@ export default function ChatThreadScreen() {
                 animated: true,
               });
             }}
+            initialNumToRender={Math.max(renderedMessages.length, 16)}
+            maxToRenderPerBatch={32}
+            windowSize={21}
+            removeClippedSubviews={false}
             onLayout={(event) => {
               layoutHeightRef.current = event.nativeEvent.layout.height;
-              if (!loadingOlderRef.current && stickToBottomRef.current) {
+              if (!loadingOlderRef.current && (stickToBottomRef.current || openingPinRef.current)) {
                 pinToBottom();
               }
             }}
             onContentSizeChange={(_width, height) => {
               contentHeightRef.current = height;
-              if (!loadingOlderRef.current && stickToBottomRef.current) {
+              if (!loadingOlderRef.current && (stickToBottomRef.current || openingPinRef.current)) {
                 pinToBottom();
               }
             }}
             onScroll={({ nativeEvent }: NativeSyntheticEvent<NativeScrollEvent>) => {
-              if (pinningScrollRef.current) {
-                return;
-              }
+              scrollOffsetRef.current = nativeEvent.contentOffset.y;
               const distanceFromBottom =
                 nativeEvent.contentSize.height -
                 nativeEvent.contentOffset.y -
                 nativeEvent.layoutMeasurement.height;
-              stickToBottomRef.current = distanceFromBottom < 96;
+              const nearBottom = distanceFromBottom < 96;
+              if (pinningScrollRef.current) {
+                return;
+              }
+              if (openingPinRef.current) {
+                if (nearBottom) {
+                  openingPinRef.current = false;
+                  stickToBottomRef.current = true;
+                }
+                return;
+              }
+              stickToBottomRef.current = nearBottom;
             }}
             scrollEventThrottle={16}
             bounces={false}

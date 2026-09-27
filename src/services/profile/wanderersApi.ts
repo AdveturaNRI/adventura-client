@@ -18,6 +18,11 @@ export type WandererCardItem = {
   location: string | null;
   cities?: string[];
   playsOnline: boolean;
+  gameCostFormat?: 'free' | 'paid' | 'both' | null;
+  sessionPriceKind?: 'fixed' | 'from' | 'range' | null;
+  sessionPriceMin?: number | null;
+  sessionPriceMax?: number | null;
+  playerPaymentFormat?: 'free_only' | 'free_and_paid' | null;
   experienceLabel: string | null;
   profileCard: ImageUrls | null;
   blockedByMe?: boolean;

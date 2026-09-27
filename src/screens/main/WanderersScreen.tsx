@@ -1,9 +1,12 @@
+import { useFocusEffect } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { AppState, Platform } from 'react-native';
 
 import { ScreenTransition } from '@/components/navigation/ScreenTransition';
 import { WanderersFiltersPanel } from '@/components/wanderers/WanderersFiltersPanel';
 import type { SwitcherOption } from '@/components/ui';
 import { useAuth } from '@/context/AuthContext';
+import { useRealtimeOptional } from '@/context/RealtimeContext';
 import { WandererDeck } from '@/screens/main/WandererDeck';
 import { WANDERERS_SCREEN } from '@/screens/main/profile.config';
 import {
@@ -39,9 +42,61 @@ const EMPTY_BUCKET_COUNTS: WandererBucketCounts = {
 
 const NICKNAME_SEARCH_MIN = 1;
 const NICKNAME_SEARCH_DEBOUNCE_MS = 300;
+const FEED_POLL_MS = 45_000;
+
+function isAppForeground() {
+  if (AppState.currentState !== 'active') {
+    return false;
+  }
+  if (Platform.OS === 'web' && typeof document !== 'undefined') {
+    return document.visibilityState === 'visible';
+  }
+  return true;
+}
+
+/** Дописывает новые анкеты в конец — текущая карточка в колоде не прыгает. */
+function mergeWandererFeed(
+  prev: WandererCardItem[],
+  incoming: WandererCardItem[],
+  excludeIds: Iterable<string>,
+): WandererCardItem[] {
+  const excluded = new Set(excludeIds);
+  const incomingById = new Map(incoming.map((item) => [item.id, item]));
+  const seen = new Set<string>();
+  const next = prev.map((item) => {
+    seen.add(item.id);
+    return incomingById.get(item.id) ?? item;
+  });
+
+  let appended = 0;
+  for (const item of incoming) {
+    if (excluded.has(item.id) || seen.has(item.id)) {
+      continue;
+    }
+    next.push(item);
+    seen.add(item.id);
+    appended += 1;
+  }
+
+  if (appended === 0 && next.length === prev.length) {
+    let changed = false;
+    for (let i = 0; i < next.length; i += 1) {
+      if (next[i] !== prev[i]) {
+        changed = true;
+        break;
+      }
+    }
+    if (!changed) {
+      return prev;
+    }
+  }
+
+  return next;
+}
 
 export default function WanderersScreen() {
   const { user } = useAuth();
+  const dataResyncAt = useRealtimeOptional()?.dataResyncAt ?? 0;
   const [isLoading, setIsLoading] = useState(true);
   const [isFiltersReady, setIsFiltersReady] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -58,11 +113,20 @@ export default function WanderersScreen() {
   const [experienceLabels, setExperienceLabels] = useState<string[]>([]);
   const loadGenerationRef = useRef(0);
   const searchGenerationRef = useRef(0);
+  const silentGenerationRef = useRef(0);
   const feedRemovedCardsRef = useRef(new Map<string, WandererCardItem>());
   const browseSkippedCardsRef = useRef(new Map<string, WandererCardItem>());
+  const screenFocusedRef = useRef(true);
+  const hasFocusedOnceRef = useRef(false);
+  const searchActiveRef = useRef(false);
+  const isLoadingRef = useRef(true);
+  const bucketRef = useRef(bucket);
+  bucketRef.current = bucket;
 
   const trimmedNicknameQuery = nicknameQuery.trim();
   const searchActive = trimmedNicknameQuery.length >= NICKNAME_SEARCH_MIN;
+  searchActiveRef.current = searchActive;
+  isLoadingRef.current = isLoading;
 
   const loadBucketCounts = useCallback(async () => {
     try {
@@ -104,9 +168,64 @@ export default function WanderersScreen() {
     }
   }, [loadBucketCounts]);
 
+  const refreshWanderersSilent = useCallback(
+    async (nextBucket: WandererBucket) => {
+      if (searchActiveRef.current || isLoadingRef.current) {
+        return;
+      }
+      const generation = ++silentGenerationRef.current;
+      try {
+        const [nextItems] = await Promise.all([
+          fetchWanderers(nextBucket),
+          loadBucketCounts(),
+        ]);
+        if (generation !== silentGenerationRef.current || bucketRef.current !== nextBucket) {
+          return;
+        }
+        const excludeIds = [
+          ...feedRemovedCardsRef.current.keys(),
+          ...browseSkippedCardsRef.current.keys(),
+        ];
+        setItems((prev) => mergeWandererFeed(prev, nextItems, excludeIds));
+        setErrorMessage(null);
+      } catch {
+        // Тихий опрос — не сбиваем колоду тостом.
+      }
+    },
+    [loadBucketCounts],
+  );
+
   useEffect(() => {
     void loadWanderers(bucket);
   }, [bucket, loadWanderers]);
+
+  useFocusEffect(
+    useCallback(() => {
+      screenFocusedRef.current = true;
+      if (hasFocusedOnceRef.current) {
+        void refreshWanderersSilent(bucketRef.current);
+      } else {
+        hasFocusedOnceRef.current = true;
+      }
+      const timer = setInterval(() => {
+        if (!isAppForeground()) {
+          return;
+        }
+        void refreshWanderersSilent(bucketRef.current);
+      }, FEED_POLL_MS);
+      return () => {
+        screenFocusedRef.current = false;
+        clearInterval(timer);
+      };
+    }, [refreshWanderersSilent]),
+  );
+
+  useEffect(() => {
+    if (!dataResyncAt || !screenFocusedRef.current) {
+      return;
+    }
+    void refreshWanderersSilent(bucketRef.current);
+  }, [dataResyncAt, refreshWanderersSilent]);
 
   useEffect(() => {
     let cancelled = false;

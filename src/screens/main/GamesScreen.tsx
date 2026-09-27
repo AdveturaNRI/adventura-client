@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import {
   ActivityIndicator,
+  AppState,
   Modal,
   type NativeScrollEvent,
   type NativeSyntheticEvent,
@@ -30,6 +31,7 @@ import { toast } from '@/components/ui';
 import { FontSize, Radius, Spacing, type ThemeColors } from '@/constants/theme';
 import { useAuthors } from '@/context/AuthorsContext';
 import { useProfile } from '@/context/ProfileContext';
+import { useRealtimeOptional } from '@/context/RealtimeContext';
 import { useRequireAuth } from '@/hooks/use-require-auth';
 import { useTheme } from '@/hooks/use-theme';
 import { useThemedStyles } from '@/hooks/use-themed-styles';
@@ -62,6 +64,50 @@ import { useMainScreenStyles } from './main-screen.styles';
 const DESKTOP_CONTENT_MAX = 1120;
 const DESKTOP_CARD_WIDTH = 420;
 const DESKTOP_GRID_GAP = Spacing.lg;
+const FEED_POLL_MS = 45_000;
+
+function isAppForeground() {
+  if (AppState.currentState !== 'active') {
+    return false;
+  }
+  if (Platform.OS === 'web' && typeof document !== 'undefined') {
+    return document.visibilityState === 'visible';
+  }
+  return true;
+}
+
+function mergeGamesFeed(prev: GameListItem[], incoming: GameListItem[]): GameListItem[] {
+  const incomingById = new Map(incoming.map((item) => [item.id, item]));
+  const seen = new Set<string>();
+  const kept = prev.map((item) => {
+    seen.add(item.id);
+    return incomingById.get(item.id) ?? item;
+  });
+
+  const fresh: GameListItem[] = [];
+  for (const item of incoming) {
+    if (seen.has(item.id)) {
+      continue;
+    }
+    fresh.push(item);
+    seen.add(item.id);
+  }
+
+  if (fresh.length === 0 && kept.length === prev.length) {
+    let changed = false;
+    for (let i = 0; i < kept.length; i += 1) {
+      if (kept[i] !== prev[i]) {
+        changed = true;
+        break;
+      }
+    }
+    if (!changed) {
+      return prev;
+    }
+  }
+
+  return [...fresh, ...kept];
+}
 
 function createLocalStyles(colors: ThemeColors, isDesktopWeb: boolean) {
   return StyleSheet.create({
@@ -337,6 +383,7 @@ export default function GamesScreen() {
   const { profile } = useProfile();
   const { authors } = useAuthors();
   const requireAuth = useRequireAuth();
+  const dataResyncAt = useRealtimeOptional()?.dataResyncAt ?? 0;
   const viewerTimezone = profile?.timezone?.trim() || DEFAULT_TIMEZONE;
 
   const [items, setItems] = useState<GameListItem[]>([]);
@@ -351,6 +398,12 @@ export default function GamesScreen() {
   const [showScrollTop, setShowScrollTop] = useState(false);
   const lastAppliedParamsSignature = useRef<string>('');
   const scrollRef = useRef<ScrollView>(null);
+  const screenFocusedRef = useRef(true);
+  const hasFocusedOnceRef = useRef(false);
+  const loadingRef = useRef(true);
+  const filtersRef = useRef(filters);
+  loadingRef.current = loading;
+  filtersRef.current = filters;
 
   const searchParamsSignature = useMemo(
     () =>
@@ -420,6 +473,9 @@ export default function GamesScreen() {
     [profile?.cities, profile?.city?.id, viewerTimezone],
   );
 
+  const toQueryRef = useRef(toQuery);
+  toQueryRef.current = toQuery;
+
   const load = useCallback(async () => {
     setLoading(true);
     try {
@@ -433,11 +489,49 @@ export default function GamesScreen() {
     }
   }, [filters, toQuery]);
 
+  const refreshGamesSilent = useCallback(async () => {
+    if (loadingRef.current) {
+      return;
+    }
+    try {
+      const next = await listGamesFeed(toQueryRef.current(filtersRef.current));
+      setItems((prev) => mergeGamesFeed(prev, next));
+    } catch {
+      // Тихий опрос — не сбиваем ленту тостом.
+    }
+  }, []);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
   useFocusEffect(
     useCallback(() => {
-      void load();
-    }, [load]),
+      screenFocusedRef.current = true;
+      if (hasFocusedOnceRef.current) {
+        void refreshGamesSilent();
+      } else {
+        hasFocusedOnceRef.current = true;
+      }
+      const timer = setInterval(() => {
+        if (!isAppForeground()) {
+          return;
+        }
+        void refreshGamesSilent();
+      }, FEED_POLL_MS);
+      return () => {
+        screenFocusedRef.current = false;
+        clearInterval(timer);
+      };
+    }, [refreshGamesSilent]),
   );
+
+  useEffect(() => {
+    if (!dataResyncAt || !screenFocusedRef.current) {
+      return;
+    }
+    void refreshGamesSilent();
+  }, [dataResyncAt, refreshGamesSilent]);
 
   useEffect(() => {
     if (!hasGamesFilterSearchParams(searchParams)) {

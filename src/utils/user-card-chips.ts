@@ -3,6 +3,15 @@ import type { ComponentProps } from 'react';
 import type { Ionicons } from '@expo/vector-icons';
 
 import { isOfficialGameSystemName } from '@/utils/official-game-systems-cache';
+import {
+  formatSessionPriceLabel,
+  playerPaymentFormatChipLabel,
+  shouldShowMasterGameCost,
+  shouldShowPlayerPayment,
+  type GameCostFormat,
+  type PlayerPaymentFormat,
+  type SessionPriceKind,
+} from '@/utils/questionnaire-payment';
 
 type IoniconName = ComponentProps<typeof Ionicons>['name'];
 
@@ -12,7 +21,9 @@ export type UserCardChipTone =
   | 'official'
   | 'learn'
   | 'agreement'
-  | 'muted';
+  | 'muted'
+  | 'success'
+  | 'paid';
 
 export type UserCardChip = {
   key: string;
@@ -33,6 +44,12 @@ export type UserCardPlayInfoInput = {
   schedule: string;
   /** IANA timezone, e.g. Europe/Moscow */
   timezone?: string | null;
+  gameCostFormat?: 'free' | 'paid' | 'both' | null;
+  sessionPriceKind?: 'fixed' | 'from' | 'range' | null;
+  sessionPriceMin?: number | null;
+  sessionPriceMax?: number | null;
+  playerPaymentFormat?: PlayerPaymentFormat | null;
+  roles?: string[];
 };
 
 const READY_TO_LEARN_LABEL = 'Готов пробовать новое';
@@ -205,4 +222,80 @@ export function buildScheduleChips(
   }
 
   return chips;
+}
+
+export function buildGameCostChips(input: {
+  roles?: string[];
+  format?: GameCostFormat | null;
+  kind?: SessionPriceKind | null;
+  min?: number | null;
+  max?: number | null;
+}): UserCardChip[] {
+  if (!shouldShowMasterGameCost(input.roles ?? [], input.format)) {
+    return [];
+  }
+
+  const format = input.format;
+  const price = format === 'free' ? null : formatSessionPriceLabel(input);
+
+  if (format === 'free') {
+    return [
+      {
+        key: 'game-cost-free',
+        label: 'Бесплатно',
+        tone: 'success',
+        icon: 'gift-outline',
+      },
+    ];
+  }
+
+  if (format === 'paid') {
+    return [
+      {
+        key: 'game-cost-paid',
+        label: price ?? 'Платно',
+        tone: 'paid',
+        icon: 'wallet-outline',
+      },
+    ];
+  }
+
+  // both — separate chips so it doesn't read as one long "Бесплатно и платно — от …"
+  const chips: UserCardChip[] = [
+    {
+      key: 'game-cost-free',
+      label: 'Бесплатно',
+      tone: 'success',
+      icon: 'gift-outline',
+    },
+  ];
+
+  chips.push({
+    key: 'game-cost-paid',
+    label: price ?? 'Платно',
+    tone: 'paid',
+    icon: 'wallet-outline',
+  });
+
+  return chips;
+}
+
+export function buildPlayerPaymentChips(input: {
+  roles?: string[];
+  format?: PlayerPaymentFormat | null;
+}): UserCardChip[] {
+  if (!shouldShowPlayerPayment(input.roles ?? [], input.format)) {
+    return [];
+  }
+
+  const format = input.format!;
+
+  return [
+    {
+      key: `player-payment-${format}`,
+      label: playerPaymentFormatChipLabel(format),
+      tone: format === 'free_only' ? 'success' : 'paid',
+      icon: format === 'free_only' ? 'gift-outline' : 'wallet-outline',
+    },
+  ];
 }

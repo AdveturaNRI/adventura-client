@@ -1,5 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   Modal,
   Pressable,
@@ -32,6 +32,8 @@ type TimezoneFieldProps = {
   onChange: (timezone: string) => void;
   error?: string;
   style?: ViewStyle;
+  /** Opens the picker once when flipped to true (e.g. deep-link focus). */
+  autoOpen?: boolean;
 };
 
 const DESKTOP_SHEET_MAX_WIDTH = 460;
@@ -71,6 +73,7 @@ function createStyles(colors: ThemeColors, isDesktopWeb: boolean) {
     },
     triggerError: {
       borderColor: colors.destructive,
+      backgroundColor: 'rgba(255, 59, 48, 0.04)',
     },
     triggerPressed: {
       opacity: 0.9,
@@ -86,8 +89,10 @@ function createStyles(colors: ThemeColors, isDesktopWeb: boolean) {
     },
     error: {
       fontSize: FontSize.caption,
+      fontWeight: '600',
       color: colors.destructive,
       paddingLeft: Spacing.xs,
+      lineHeight: FontSize.caption * 1.35,
     },
     modalBackdrop: {
       flex: 1,
@@ -238,6 +243,7 @@ export function TimezoneField({
   onChange,
   error,
   style,
+  autoOpen = false,
 }: TimezoneFieldProps) {
   const colors = useTheme();
   const isDesktopWeb = useIsDesktopWeb();
@@ -248,6 +254,14 @@ export function TimezoneField({
   const selectedLabel = formatTimezoneLabel(value || DEFAULT_TIMEZONE);
   const results = useMemo(() => searchTimezones(query), [query]);
 
+  useEffect(() => {
+    if (!autoOpen) {
+      return;
+    }
+
+    setIsOpen(true);
+  }, [autoOpen]);
+
   const close = () => {
     setIsOpen(false);
     setQuery('');
@@ -256,8 +270,8 @@ export function TimezoneField({
   return (
     <View style={[styles.wrapper, style]}>
       <View style={styles.labelRow}>
-        <Text style={styles.label}>{label}</Text>
-        {labelHint ? <FieldLabelHint text={labelHint} /> : null}
+        <Text style={[styles.label, error ? { color: colors.destructive } : null]}>{label}</Text>
+        {labelHint && !error ? <FieldLabelHint text={labelHint} /> : null}
       </View>
 
       <Pressable

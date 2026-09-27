@@ -6,6 +6,11 @@ import type { QuestionnaireDraft } from '@/screens/questionnaire/types';
 import { rolesToChoice } from '@/screens/questionnaire/types';
 import { formatCityLabel } from '@/utils/city-label';
 import { getQuestionnaireCompletion } from '@/utils/questionnaire-completion';
+import {
+  isGameCostFormat,
+  isPlayerPaymentFormat,
+  isSessionPriceKind,
+} from '@/utils/questionnaire-payment';
 import { DEFAULT_TIMEZONE } from '@/utils/timezones';
 
 const LAST_IMPLEMENTED_STEP_INDEX = QUESTIONNAIRE_STEPS.length - 1;
@@ -88,6 +93,21 @@ export function profileToQuestionnaireDraft(profile: UserProfile): Questionnaire
     readyToLearnNew: profile.readyToLearnNew,
     openToAnySystem: profile.openToAnySystem ?? false,
     isPublic: profile.isPublic,
+    gameCostFormat: isGameCostFormat(profile.gameCostFormat) ? profile.gameCostFormat : null,
+    sessionPriceKind: isSessionPriceKind(profile.sessionPriceKind)
+      ? profile.sessionPriceKind
+      : null,
+    sessionPriceMin:
+      profile.sessionPriceMin != null && Number.isFinite(profile.sessionPriceMin)
+        ? String(profile.sessionPriceMin)
+        : '',
+    sessionPriceMax:
+      profile.sessionPriceMax != null && Number.isFinite(profile.sessionPriceMax)
+        ? String(profile.sessionPriceMax)
+        : '',
+    playerPaymentFormat: isPlayerPaymentFormat(profile.playerPaymentFormat)
+      ? profile.playerPaymentFormat
+      : null,
   };
 }
 
@@ -114,6 +134,11 @@ export function isQuestionnaireDraftDirty(
     !areStringArraysEqual(draft.systems, saved.systems) ||
     draft.readyToLearnNew !== saved.readyToLearnNew ||
     draft.openToAnySystem !== saved.openToAnySystem ||
-    draft.isPublic !== saved.isPublic
+    draft.isPublic !== saved.isPublic ||
+    draft.gameCostFormat !== saved.gameCostFormat ||
+    draft.sessionPriceKind !== saved.sessionPriceKind ||
+    draft.sessionPriceMin.trim() !== saved.sessionPriceMin.trim() ||
+    draft.sessionPriceMax.trim() !== saved.sessionPriceMax.trim() ||
+    draft.playerPaymentFormat !== saved.playerPaymentFormat
   );
 }

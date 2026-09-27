@@ -1,19 +1,25 @@
 import { Ionicons } from '@expo/vector-icons';
-import { Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import { useEffect, useRef, useState, type RefObject } from 'react';
+import { Pressable, StyleSheet, Text, useWindowDimensions, View, type ScrollView } from 'react-native';
 
 import { CitySearchField } from '@/components/questionnaire/CitySearchField';
 import { QuestionnaireHint } from '@/components/questionnaire/QuestionnaireHint';
+import {
+  QUESTIONNAIRE_PANEL_ERROR_STYLE,
+  QuestionnaireRequiredCallout,
+} from '@/components/questionnaire/QuestionnaireRequiredCallout';
 import { FontSize, Radius, Sizes, Spacing, type ThemeColors } from '@/constants/theme';
+import { useQuestionnaireFieldFocus } from '@/hooks/use-questionnaire-field-focus';
 import { useTheme } from '@/hooks/use-theme';
 import { useThemedStyles } from '@/hooks/use-themed-styles';
 import { LOCATION_STEP } from '@/screens/questionnaire/questionnaire.config';
 import type { QuestionnaireDraft } from '@/screens/questionnaire/types';
 import {
   isLocationStepValid,
-  LOCATION_STEP_VALIDATION_MESSAGE,
   MAX_QUESTIONNAIRE_CITIES,
 } from '@/screens/questionnaire/questionnaire-validation';
 import { useQuestionnaireScreenStyles } from '@/screens/questionnaire/questionnaire-screen.styles';
+import { scheduleScrollAttempts, scrollScrollViewToChild } from '@/utils/scroll-scrollview-to-child';
 
 const STACK_CITY_CONTROLS_MAX_WIDTH = 720;
 
@@ -21,6 +27,10 @@ type LocationStepProps = {
   value: Pick<QuestionnaireDraft, 'cities' | 'playsOnline'>;
   onChange: (value: Pick<QuestionnaireDraft, 'cities' | 'playsOnline'>) => void;
   showValidationError?: boolean;
+  validationScrollKey?: number;
+  focusField?: boolean;
+  scrollRef?: RefObject<ScrollView | null>;
+  onFocusScrollComplete?: () => void;
 };
 
 function createStyles(colors: ThemeColors, stackCityControls: boolean) {
@@ -37,6 +47,9 @@ function createStyles(colors: ThemeColors, stackCityControls: boolean) {
       // Safari сбрасывает nested scroll, если absolute-дропдаун городов
       // оказывается внутри overflow:hidden предка.
       overflow: 'visible',
+    },
+    panelError: {
+      ...QUESTIONNAIRE_PANEL_ERROR_STYLE,
     },
     panelHeader: {
       flexDirection: 'row',
@@ -110,27 +123,18 @@ function createStyles(colors: ThemeColors, stackCityControls: boolean) {
     onlineToggleTextActive: {
       color: colors.onPrimary,
     },
-    onlineToggleRequired: {
-      borderColor: colors.destructive,
-    },
-    onlineToggleHint: {
-      fontSize: FontSize.caption,
-      color: colors.textMuted,
-      lineHeight: FontSize.caption * 1.45,
-    },
-    onlineToggleHintRequired: {
-      color: colors.destructive,
-      fontWeight: '600',
-    },
-    validationError: {
-      fontSize: FontSize.caption,
-      color: colors.destructive,
-      lineHeight: FontSize.caption * 1.45,
-    },
   });
 }
 
-export function LocationStep({ value, onChange, showValidationError = false }: LocationStepProps) {
+export function LocationStep({
+  value,
+  onChange,
+  showValidationError = false,
+  validationScrollKey = 0,
+  focusField = false,
+  scrollRef,
+  onFocusScrollComplete,
+}: LocationStepProps) {
   const screenStyles = useQuestionnaireScreenStyles();
   const colors = useTheme();
   const { width } = useWindowDimensions();
@@ -138,9 +142,35 @@ export function LocationStep({ value, onChange, showValidationError = false }: L
   const styles = useThemedStyles((themeColors) =>
     createStyles(themeColors, stackCityControls),
   );
+  const panelRef = useRef<View>(null);
+  const [focusCity, setFocusCity] = useState(false);
   const isValid = isLocationStepValid(value);
   const showError = showValidationError && !isValid;
-  const isOnlineRequired = value.cities.length === 0;
+
+  useEffect(() => {
+    if (!showError || validationScrollKey <= 0 || !scrollRef?.current || !panelRef.current) {
+      return;
+    }
+
+    return scheduleScrollAttempts(() =>
+      scrollScrollViewToChild(scrollRef.current, panelRef.current, 20),
+    );
+  }, [scrollRef, showError, validationScrollKey]);
+
+  useQuestionnaireFieldFocus({
+    active: focusField,
+    scroll: () => {
+      if (!scrollRef?.current || !panelRef.current) {
+        return false;
+      }
+
+      return scrollScrollViewToChild(scrollRef.current, panelRef.current, 20, true);
+    },
+    onReady: () => {
+      setFocusCity(true);
+    },
+    onComplete: onFocusScrollComplete,
+  });
 
   return (
     <View style={screenStyles.stepBody}>
@@ -151,7 +181,13 @@ export function LocationStep({ value, onChange, showValidationError = false }: L
 
       <QuestionnaireHint>{LOCATION_STEP.hint}</QuestionnaireHint>
 
-      <View style={styles.panel}>
+      <View
+        ref={panelRef}
+        collapsable={false}
+        style={[styles.panel, showError ? styles.panelError : null]}>
+        {showError ? (
+          <QuestionnaireRequiredCallout />
+        ) : null}
         <View style={styles.panelHeader}>
           <View style={styles.panelIconWrap}>
             <Ionicons name="location-outline" size={22} color={colors.primary} />
@@ -174,6 +210,7 @@ export function LocationStep({ value, onChange, showValidationError = false }: L
               maxSelections={MAX_QUESTIONNAIRE_CITIES}
               limitHint={LOCATION_STEP.cityLimitHint}
               addLabel={LOCATION_STEP.addCityLabel}
+              autoFocus={focusCity}
               onChange={(cities) => onChange({ ...value, cities })}
             />
           </View>
@@ -183,7 +220,6 @@ export function LocationStep({ value, onChange, showValidationError = false }: L
             style={({ pressed }) => [
               styles.onlineToggle,
               value.playsOnline ? styles.onlineToggleActive : null,
-              showError ? styles.onlineToggleRequired : null,
               pressed ? styles.onlineTogglePressed : null,
             ]}
             accessibilityRole="checkbox"
@@ -191,13 +227,7 @@ export function LocationStep({ value, onChange, showValidationError = false }: L
             <Ionicons
               name={value.playsOnline ? 'checkbox' : 'square-outline'}
               size={18}
-              color={
-                value.playsOnline
-                  ? colors.onPrimary
-                  : showError
-                    ? colors.destructive
-                    : colors.textMuted
-              }
+              color={value.playsOnline ? colors.onPrimary : colors.textMuted}
             />
             <Text
               style={[
@@ -208,20 +238,6 @@ export function LocationStep({ value, onChange, showValidationError = false }: L
             </Text>
           </Pressable>
         </View>
-
-        {isOnlineRequired ? (
-          <Text
-            style={[
-              styles.onlineToggleHint,
-              showError ? styles.onlineToggleHintRequired : null,
-            ]}>
-            {LOCATION_STEP.playsOnlineRequiredHint}
-          </Text>
-        ) : null}
-
-        {showError ? (
-          <Text style={styles.validationError}>{LOCATION_STEP_VALIDATION_MESSAGE}</Text>
-        ) : null}
       </View>
     </View>
   );

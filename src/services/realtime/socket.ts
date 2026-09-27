@@ -152,12 +152,25 @@ export function updateRealtimeAuthToken(token: string) {
   socket.auth = { token: token.trim() };
 }
 
-/** Re-auth + connect if the socket dropped while the user is still in the app. */
-export function ensureRealtimeConnected(token: string) {
+/**
+ * Re-auth + connect if the socket dropped while the user is still in the app.
+ * `force` — после блокировки iOS Safari часто оставляет connected=true на мёртвом WS.
+ */
+export function ensureRealtimeConnected(
+  token: string,
+  options?: { force?: boolean },
+) {
   if (!token.trim()) {
     return;
   }
   const current = connectRealtime(token.trim());
+  if (options?.force) {
+    if (current.connected) {
+      current.disconnect();
+    }
+    current.connect();
+    return;
+  }
   if (!current.connected) {
     current.connect();
   }

@@ -30,17 +30,19 @@ import {
 } from '@/screens/questionnaire/questionnaire-mapper';
 import { getQuestionnaireStepMap } from '@/screens/questionnaire/questionnaire-step-summary';
 import {
-  EXPERIENCE_STEP_VALIDATION_MESSAGE,
+  formatMissingRequiredFieldsToast,
+  getMissingRequiredLabelsForStep,
+  getRolesStepValidationMessage,
   isExperienceStepValid,
   isLocationStepValid,
   isProfileStepValid,
   isQuestionnaireStepReady,
+  isRolesStepValid,
   isSystemsStepValid,
-  LOCATION_STEP_VALIDATION_MESSAGE,
-  PROFILE_STEP_VALIDATION_MESSAGE,
-  ROLES_STEP_VALIDATION_MESSAGE,
-  SYSTEMS_STEP_VALIDATION_MESSAGE,
 } from '@/screens/questionnaire/questionnaire-validation';
+import {
+  getQuestionnaireStepForFocus,
+} from '@/utils/questionnaire-completion';
 import {
   QUESTIONNAIRE_CONTINUE_LABEL,
   QUESTIONNAIRE_AFTER_FINISH_HREF,
@@ -83,8 +85,10 @@ type PendingNavigationAction = Parameters<
 export default function QuestionnaireScreen() {
   const router = useRouter();
   const navigation = useNavigation();
-  const params = useLocalSearchParams<{ edit?: string }>();
+  const params = useLocalSearchParams<{ edit?: string; focus?: string | string[] }>();
   const startInEditMode = params.edit === '1' || params.edit === 'true';
+  const focusParam = Array.isArray(params.focus) ? params.focus[0] : params.focus;
+  const focusStepIndex = getQuestionnaireStepForFocus(focusParam);
   const { user, clearPostSignUpRedirect } = useAuth();
   const { profile, isLoading: isProfileLoading, applyProfile } = useProfile();
   const [shellWidth, setShellWidth] = useState(0);
@@ -103,6 +107,8 @@ export default function QuestionnaireScreen() {
   const [draft, setDraft] = useState<QuestionnaireDraft>(INITIAL_QUESTIONNAIRE_DRAFT);
   const [isHydrated, setIsHydrated] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [rolesValidationAttempted, setRolesValidationAttempted] = useState(false);
+  const [profileValidationAttempted, setProfileValidationAttempted] = useState(false);
   const [locationValidationAttempted, setLocationValidationAttempted] = useState(false);
   const [experienceValidationAttempted, setExperienceValidationAttempted] = useState(false);
   const [systemsValidationAttempted, setSystemsValidationAttempted] = useState(false);
@@ -114,6 +120,27 @@ export default function QuestionnaireScreen() {
   const pendingNavigationActionRef = useRef<PendingNavigationAction | null>(null);
   const consumedEditParamRef = useRef(false);
   const scrollRef = useRef<ScrollView>(null);
+  const [validationScrollKey, setValidationScrollKey] = useState(0);
+  const [pendingFocus, setPendingFocus] = useState<string | null>(
+    () => (typeof focusParam === 'string' ? focusParam : null),
+  );
+
+  const rolesFocusSection =
+    pendingFocus === 'roles' ||
+    pendingFocus === 'gameCost' ||
+    pendingFocus === 'playerPayment'
+      ? pendingFocus
+      : null;
+  const profileFocusField =
+    pendingFocus === 'profile' || pendingFocus === 'age' ? 'age' : null;
+  const experienceFocusField =
+    pendingFocus === 'experience' ||
+    pendingFocus === 'availability' ||
+    pendingFocus === 'timezone'
+      ? pendingFocus
+      : null;
+  const shouldFocusLocation = pendingFocus === 'location';
+  const shouldFocusSystems = pendingFocus === 'systems';
 
   const savedDraft = useMemo(
     () => (profile ? profileToQuestionnaireDraft(profile) : null),
@@ -144,6 +171,20 @@ export default function QuestionnaireScreen() {
     readyToLearnNew: draft.readyToLearnNew,
     openToAnySystem: draft.openToAnySystem,
   });
+
+  const isRolesStepComplete = isRolesStepValid(draft);
+
+  useEffect(() => {
+    if (isRolesStepComplete) {
+      setRolesValidationAttempted(false);
+    }
+  }, [isRolesStepComplete]);
+
+  useEffect(() => {
+    if (isProfileStepComplete) {
+      setProfileValidationAttempted(false);
+    }
+  }, [isProfileStepComplete]);
 
   useEffect(() => {
     if (isLocationStepComplete) {
@@ -181,9 +222,11 @@ export default function QuestionnaireScreen() {
     hydratedProfileIdRef.current = profile.id;
     setDraft(profileToQuestionnaireDraft(profile));
     setStepIndex(
-      startInEditMode
-        ? QUESTIONNAIRE_STEP_INDEX.roles
-        : resolveQuestionnaireStepIndex(profile),
+      focusStepIndex != null
+        ? focusStepIndex
+        : startInEditMode
+          ? QUESTIONNAIRE_STEP_INDEX.roles
+          : resolveQuestionnaireStepIndex(profile),
     );
 
     if (startInEditMode) {
@@ -191,7 +234,7 @@ export default function QuestionnaireScreen() {
     }
 
     setIsHydrated(true);
-  }, [profile, startInEditMode]);
+  }, [profile, startInEditMode, focusStepIndex]);
 
   useEffect(() => {
     if (!startInEditMode) {
@@ -268,45 +311,33 @@ export default function QuestionnaireScreen() {
   );
 
   const validateCurrentStep = useCallback((): boolean => {
-    if (stepIndex === QUESTIONNAIRE_STEP_INDEX.roles && !draft.role) {
-      toast.error(ROLES_STEP_VALIDATION_MESSAGE);
-      return false;
+    if (isQuestionnaireStepReady(stepIndex, draft)) {
+      return true;
     }
 
-    if (stepIndex === QUESTIONNAIRE_STEP_INDEX.profile && !isProfileStepComplete) {
-      toast.error(PROFILE_STEP_VALIDATION_MESSAGE);
-      return false;
-    }
-
-    if (stepIndex === QUESTIONNAIRE_STEP_INDEX.experience && !isExperienceStepComplete) {
+    if (stepIndex === QUESTIONNAIRE_STEP_INDEX.roles) {
+      setRolesValidationAttempted(true);
+    } else if (stepIndex === QUESTIONNAIRE_STEP_INDEX.profile) {
+      setProfileValidationAttempted(true);
+    } else if (stepIndex === QUESTIONNAIRE_STEP_INDEX.experience) {
       setExperienceValidationAttempted(true);
-      toast.error(EXPERIENCE_STEP_VALIDATION_MESSAGE);
-      return false;
-    }
-
-    if (stepIndex === QUESTIONNAIRE_STEP_INDEX.location && !isLocationStepComplete) {
+    } else if (stepIndex === QUESTIONNAIRE_STEP_INDEX.location) {
       setLocationValidationAttempted(true);
-      toast.error(LOCATION_STEP_VALIDATION_MESSAGE);
-      return false;
-    }
-
-    if (stepIndex === QUESTIONNAIRE_STEP_INDEX.systems && !isSystemsStepComplete) {
+    } else if (stepIndex === QUESTIONNAIRE_STEP_INDEX.systems) {
       setSystemsValidationAttempted(true);
-      toast.error(SYSTEMS_STEP_VALIDATION_MESSAGE);
-      return false;
     }
 
-    return true;
-  }, [
-    draft.role,
-    isExperienceStepComplete,
-    isLocationStepComplete,
-    isProfileStepComplete,
-    isSystemsStepComplete,
-    stepIndex,
-  ]);
+    setValidationScrollKey((current) => current + 1);
 
-  const canSaveCurrentStep = isQuestionnaireStepReady(stepIndex, draft);
+    const missingLabels = getMissingRequiredLabelsForStep(stepIndex, draft);
+    toast.error(
+      missingLabels.length > 0
+        ? formatMissingRequiredFieldsToast(missingLabels)
+        : getRolesStepValidationMessage(draft) || 'Заполните обязательные поля',
+    );
+    return false;
+  }, [draft, stepIndex]);
+
   const handlePersist = useCallback(
     async (
       mode: 'continue' | 'exit',
@@ -494,6 +525,10 @@ export default function QuestionnaireScreen() {
 
   const handleBack = () => {
     if (stepIndex > 0) {
+      if (!validateCurrentStep()) {
+        return;
+      }
+
       setStepIndex(stepIndex - 1);
       return;
     }
@@ -514,6 +549,10 @@ export default function QuestionnaireScreen() {
       }
 
       if (targetStepIndex > LAST_IMPLEMENTED_STEP_INDEX) {
+        return;
+      }
+
+      if (!validateCurrentStep()) {
         return;
       }
 
@@ -549,7 +588,7 @@ export default function QuestionnaireScreen() {
         setIsSaving(false);
       }
     },
-    [applySavedProfile, draft, isSaving, profile, stepIndex, user],
+    [applySavedProfile, draft, isSaving, profile, stepIndex, user, validateCurrentStep],
   );
 
   const stepMap = useMemo(
@@ -566,8 +605,79 @@ export default function QuestionnaireScreen() {
   const showDesktopMap = isDesktopWeb && stepMap.length > 0;
 
   useEffect(() => {
+    if (focusParam) {
+      setPendingFocus(focusParam);
+    }
+  }, [focusParam]);
+
+  /** Deep-link from profile banner: show required-field errors, not only scroll. */
+  useEffect(() => {
+    if (!isHydrated || !pendingFocus) {
+      return;
+    }
+
+    if (
+      pendingFocus === 'roles' ||
+      pendingFocus === 'gameCost' ||
+      pendingFocus === 'playerPayment'
+    ) {
+      if (!isRolesStepValid(draft)) {
+        setRolesValidationAttempted(true);
+        setValidationScrollKey((current) => current + 1);
+      }
+      return;
+    }
+
+    if (pendingFocus === 'age' || pendingFocus === 'profile') {
+      if (!isProfileStepValid(draft)) {
+        setProfileValidationAttempted(true);
+        setValidationScrollKey((current) => current + 1);
+      }
+      return;
+    }
+
+    if (
+      pendingFocus === 'experience' ||
+      pendingFocus === 'availability' ||
+      pendingFocus === 'timezone'
+    ) {
+      if (!isExperienceStepValid(draft)) {
+        setExperienceValidationAttempted(true);
+        setValidationScrollKey((current) => current + 1);
+      }
+      return;
+    }
+
+    if (pendingFocus === 'location') {
+      if (!isLocationStepValid(draft)) {
+        setLocationValidationAttempted(true);
+        setValidationScrollKey((current) => current + 1);
+      }
+      return;
+    }
+
+    if (pendingFocus === 'systems') {
+      if (!isSystemsStepValid(draft)) {
+        setSystemsValidationAttempted(true);
+        setValidationScrollKey((current) => current + 1);
+      }
+    }
+    // Only arm when focus arrives — don't re-bump scroll on every draft edit.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional: draft snapshot at focus time
+  }, [isHydrated, pendingFocus]);
+
+  const handleFocusScrollComplete = useCallback(() => {
+    setPendingFocus(null);
+  }, []);
+
+  useEffect(() => {
     // Remount via key resets most cases; still pin to top after layout —
     // otherwise RN Web can restore the previous step's offset.
+    // Skip when deep-linking to a field — the step scrolls itself.
+    if (pendingFocus) {
+      return;
+    }
+
     const scrollTop = () => {
       scrollRef.current?.scrollTo({ y: 0, animated: false });
     };
@@ -583,6 +693,14 @@ export default function QuestionnaireScreen() {
       clearTimeout(timer);
     };
   }, [stepIndex]);
+
+  useEffect(() => {
+    if (!isHydrated || focusStepIndex == null) {
+      return;
+    }
+
+    setStepIndex(focusStepIndex);
+  }, [focusParam, focusStepIndex, isHydrated]);
 
   if (!user || isProfileLoading || !isHydrated) {
     return null;
@@ -608,7 +726,7 @@ export default function QuestionnaireScreen() {
           horizontal={false}
           showsHorizontalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
-          keyboardDismissMode="on-drag"
+          keyboardDismissMode="none"
           automaticallyAdjustContentInsets={false}
           contentInsetAdjustmentBehavior="never">
           <View style={[styles.page, showDesktopMap ? styles.pageWithMap : null]}>
@@ -637,7 +755,7 @@ export default function QuestionnaireScreen() {
                 saveExitLabel={QUESTIONNAIRE_SAVE_EXIT_LABEL}
                 savingLabel={QUESTIONNAIRE_SAVING_LABEL}
                 isSaving={isSaving || isDeleting}
-                canSave={canSaveCurrentStep}
+                canSave
                 stepMap={stepMap}
                 renderStepMap={!isDesktopWeb}
                 maxNavigableStepIndex={LAST_IMPLEMENTED_STEP_INDEX}
@@ -648,8 +766,20 @@ export default function QuestionnaireScreen() {
                 onSaveExit={handleSaveExit}>
                 {stepIndex === 0 ? (
                   <RolesStep
-                    value={draft.role}
-                    onChange={(role) => setDraft((current) => ({ ...current, role }))}
+                    value={{
+                      role: draft.role,
+                      gameCostFormat: draft.gameCostFormat,
+                      sessionPriceKind: draft.sessionPriceKind,
+                      sessionPriceMin: draft.sessionPriceMin,
+                      sessionPriceMax: draft.sessionPriceMax,
+                      playerPaymentFormat: draft.playerPaymentFormat,
+                    }}
+                    showValidationError={rolesValidationAttempted}
+                    validationScrollKey={validationScrollKey}
+                    focusSection={rolesFocusSection}
+                    scrollRef={scrollRef}
+                    onFocusScrollComplete={handleFocusScrollComplete}
+                    onChange={(roles) => setDraft((current) => ({ ...current, ...roles }))}
                   />
                 ) : stepIndex === 1 ? (
                   <ProfileStep
@@ -662,6 +792,11 @@ export default function QuestionnaireScreen() {
                       age: draft.age,
                       isPublic: draft.isPublic,
                     }}
+                    showValidationError={profileValidationAttempted}
+                    validationScrollKey={validationScrollKey}
+                    focusField={profileFocusField}
+                    scrollRef={scrollRef}
+                    onFocusScrollComplete={handleFocusScrollComplete}
                     onChange={(profile) => setDraft((current) => ({ ...current, ...profile }))}
                   />
                 ) : stepIndex === 2 ? (
@@ -673,6 +808,10 @@ export default function QuestionnaireScreen() {
                       timezone: draft.timezone,
                     }}
                     showValidationError={experienceValidationAttempted}
+                    validationScrollKey={validationScrollKey}
+                    focusField={experienceFocusField}
+                    scrollRef={scrollRef}
+                    onFocusScrollComplete={handleFocusScrollComplete}
                     onChange={(experience) => setDraft((current) => ({ ...current, ...experience }))}
                   />
                 ) : stepIndex === QUESTIONNAIRE_STEP_INDEX.location ? (
@@ -682,6 +821,10 @@ export default function QuestionnaireScreen() {
                       playsOnline: draft.playsOnline,
                     }}
                     showValidationError={locationValidationAttempted}
+                    validationScrollKey={validationScrollKey}
+                    focusField={shouldFocusLocation}
+                    scrollRef={scrollRef}
+                    onFocusScrollComplete={handleFocusScrollComplete}
                     onChange={(location) => setDraft((current) => ({ ...current, ...location }))}
                   />
                 ) : stepIndex === QUESTIONNAIRE_STEP_INDEX.systems ? (
@@ -692,6 +835,10 @@ export default function QuestionnaireScreen() {
                       openToAnySystem: draft.openToAnySystem,
                     }}
                     showValidationError={systemsValidationAttempted}
+                    validationScrollKey={validationScrollKey}
+                    focusField={shouldFocusSystems}
+                    scrollRef={scrollRef}
+                    onFocusScrollComplete={handleFocusScrollComplete}
                     onChange={(systems) => setDraft((current) => ({ ...current, ...systems }))}
                   />
                 ) : (
@@ -718,7 +865,7 @@ export default function QuestionnaireScreen() {
               saveExitLabel={QUESTIONNAIRE_SAVE_EXIT_LABEL}
               savingLabel={QUESTIONNAIRE_SAVING_LABEL}
               isSaving={isSaving || isDeleting}
-              canSave={canSaveCurrentStep}
+              canSave
               onContinue={handleContinue}
               onSaveExit={handleSaveExit}
             />

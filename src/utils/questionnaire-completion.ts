@@ -1,18 +1,27 @@
 import type { UserProfile } from '@/services/api/types';
 import type { QuestionnaireDraft } from '@/screens/questionnaire/types';
+import { rolesToChoice } from '@/screens/questionnaire/types';
 import { formatAvailability } from '@/screens/questionnaire/availability';
 import {
   isQuestionnaireAgeValid,
   QUESTIONNAIRE_AGE_MAX,
   QUESTIONNAIRE_AGE_MIN,
 } from '@/screens/questionnaire/questionnaire-validation';
+import { QUESTIONNAIRE_STEP_INDEX } from '@/screens/questionnaire/questionnaire.config';
+
+export type QuestionnaireMissingField = {
+  key: keyof CompletionChecks;
+  label: string;
+  /** Query param for `/questionnaire?focus=` */
+  focus: string;
+};
 
 export type QuestionnaireCompletion = {
   percent: number;
   isComplete: boolean;
   isPublic: boolean;
   isVisibleInFeed: boolean;
-  missingFields: string[];
+  missingFields: QuestionnaireMissingField[];
   title: string;
   subtitle: string;
   visibilityLabel: string;
@@ -21,7 +30,8 @@ export type QuestionnaireCompletion = {
 
 type CompletionChecks = {
   roles: boolean;
-  about: boolean;
+  gameCost: boolean;
+  playerPayment: boolean;
   age: boolean;
   experience: boolean;
   availability: boolean;
@@ -32,32 +42,41 @@ type CompletionChecks = {
 
 const REQUIRED_FIELD_LABELS: Record<keyof CompletionChecks, string> = {
   roles: 'Роль',
-  about: 'Статус',
+  gameCost: 'Стоимость игр',
+  playerPayment: 'Предпочтения по оплате игр',
   age: 'Возраст',
   experience: 'Опыт игры',
   availability: 'Когда удобно играть',
   timezone: 'Часовой пояс',
-  location: 'Город или онлайн',
-  systems: 'Системы (или «Любая система»)',
+  location: 'Локация',
+  systems: 'Системы',
+};
+
+const REQUIRED_FIELD_FOCUS: Record<keyof CompletionChecks, string> = {
+  roles: 'roles',
+  gameCost: 'gameCost',
+  playerPayment: 'playerPayment',
+  age: 'age',
+  experience: 'experience',
+  availability: 'availability',
+  timezone: 'timezone',
+  location: 'location',
+  systems: 'systems',
 };
 
 const REQUIRED_FIELD_KEYS = Object.keys(REQUIRED_FIELD_LABELS) as (keyof CompletionChecks)[];
 
-const FEED_FIELD_KEYS = REQUIRED_FIELD_KEYS.filter((key) => key !== 'age');
-
-function getMissingFields(checks: CompletionChecks): string[] {
-  return REQUIRED_FIELD_KEYS.filter((key) => !checks[key]).map(
-    (key) => REQUIRED_FIELD_LABELS[key],
-  );
+function getMissingFields(checks: CompletionChecks): QuestionnaireMissingField[] {
+  return REQUIRED_FIELD_KEYS.filter((key) => !checks[key]).map((key) => ({
+    key,
+    label: REQUIRED_FIELD_LABELS[key],
+    focus: REQUIRED_FIELD_FOCUS[key],
+  }));
 }
 
 function calculatePercent(checks: CompletionChecks): number {
   const filledCount = REQUIRED_FIELD_KEYS.filter((key) => checks[key]).length;
   return Math.round((filledCount / REQUIRED_FIELD_KEYS.length) * 100);
-}
-
-function isFeedReady(checks: CompletionChecks): boolean {
-  return FEED_FIELD_KEYS.every((key) => checks[key]);
 }
 
 function buildCompletion(input: {
@@ -69,20 +88,13 @@ function buildCompletion(input: {
   const percent = Math.min(100, Math.max(input.apiPercent ?? 0, fromChecks));
   const isComplete = percent >= 100;
   const missingFields = getMissingFields(input.checks);
-  const feedReady = isFeedReady(input.checks);
-  const isVisibleInFeed = feedReady && input.isPublic;
+  const isVisibleInFeed = input.isPublic;
 
   let subtitle: string;
-  if (!feedReady) {
-    subtitle = `заполнен на ${percent}% · не показывается в Странниках`;
-  } else if (!input.isPublic) {
-    subtitle = isComplete
-      ? 'заполнен · скрыт из ленты (приватная анкета)'
-      : `заполнен на ${percent}% · скрыт из ленты (приватная анкета)`;
-  } else if (!isComplete) {
-    subtitle = 'виден в ленте · укажите возраст, чтобы завершить анкету';
+  if (isComplete) {
+    subtitle = 'заполнена';
   } else {
-    subtitle = 'активен · виден в ленте Странники';
+    subtitle = `заполнена на ${percent}%`;
   }
 
   let visibilityLabel: string;
@@ -92,15 +104,11 @@ function buildCompletion(input: {
     visibilityLabel = 'Показывается в Странниках';
     visibilityHint = isComplete
       ? 'Другие игроки могут найти вашу анкету в ленте.'
-      : 'Анкета уже в ленте. Укажите возраст, чтобы завершить заполнение.';
-  } else if (!feedReady) {
-    visibilityLabel = 'Не показывается в ленте';
-    visibilityHint =
-      'Чтобы анкету увидели, заполните обязательные поля и сделайте её публичной.';
+      : 'Анкета уже в ленте. Можно дозаполнить обязательные поля.';
   } else {
     visibilityLabel = 'Скрыта из ленты';
     visibilityHint =
-      'Анкета заполнена, но стоит режим «Приватная». Включите «Публичная», чтобы появиться в Странниках.';
+      'Стоит режим «Приватная». Включите «Публичная», чтобы появиться в Странниках.';
   }
 
   return {
@@ -116,10 +124,27 @@ function buildCompletion(input: {
   };
 }
 
+function paymentChecksForRole(role: ReturnType<typeof rolesToChoice>): {
+  gameCost: boolean;
+  playerPayment: boolean;
+} {
+  const needsMasterCost = role === 'master' || role === 'both';
+  const needsPlayerPayment = role === 'player' || role === 'both';
+
+  return {
+    gameCost: !needsMasterCost,
+    playerPayment: !needsPlayerPayment,
+  };
+}
+
 function checksFromProfile(profile: UserProfile): CompletionChecks {
+  const role = rolesToChoice(profile.roles);
+  const paymentDefaults = paymentChecksForRole(role);
+
   return {
     roles: profile.roles.length > 0,
-    about: Boolean(profile.about?.trim()),
+    gameCost: paymentDefaults.gameCost || Boolean(profile.gameCostFormat),
+    playerPayment: paymentDefaults.playerPayment || Boolean(profile.playerPaymentFormat),
     age:
       profile.age != null &&
       profile.age >= QUESTIONNAIRE_AGE_MIN &&
@@ -134,9 +159,12 @@ function checksFromProfile(profile: UserProfile): CompletionChecks {
 }
 
 function checksFromDraft(draft: QuestionnaireDraft): CompletionChecks {
+  const paymentDefaults = paymentChecksForRole(draft.role);
+
   return {
     roles: draft.role != null,
-    about: Boolean(draft.status.trim()),
+    gameCost: paymentDefaults.gameCost || Boolean(draft.gameCostFormat),
+    playerPayment: paymentDefaults.playerPayment || Boolean(draft.playerPaymentFormat),
     age: isQuestionnaireAgeValid(draft.age),
     experience: Boolean(draft.experienceTypeId),
     availability: Boolean(formatAvailability(draft.availability)),
@@ -154,7 +182,8 @@ export function getQuestionnaireCompletion(
     return buildCompletion({
       checks: {
         roles: false,
-        about: false,
+        gameCost: true,
+        playerPayment: true,
         age: false,
         experience: false,
         availability: false,
@@ -183,5 +212,31 @@ export function getQuestionnaireCompletionFromDraft(
   });
 }
 
+export function getQuestionnaireStepForFocus(focus: string | undefined | null): number | null {
+  if (!focus) {
+    return null;
+  }
+
+  switch (focus) {
+    case 'roles':
+    case 'gameCost':
+    case 'playerPayment':
+      return QUESTIONNAIRE_STEP_INDEX.roles;
+    case 'profile':
+    case 'age':
+      return QUESTIONNAIRE_STEP_INDEX.profile;
+    case 'experience':
+    case 'availability':
+    case 'timezone':
+      return QUESTIONNAIRE_STEP_INDEX.experience;
+    case 'location':
+      return QUESTIONNAIRE_STEP_INDEX.location;
+    case 'systems':
+      return QUESTIONNAIRE_STEP_INDEX.systems;
+    default:
+      return null;
+  }
+}
+
 export const QUESTIONNAIRE_REQUIRED_FIELDS_HINT =
-  'Обязательно: роль, статус, возраст, опыт, расписание, часовой пояс, локация (город или онлайн) и системы (или «Любая система»). Фото и описание — по желанию.';
+  'Обязательно: роль, стоимость/оплата (по роли), возраст, опыт, расписание, часовой пояс, локация и системы. Статус, фото и описание — по желанию.';

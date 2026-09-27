@@ -2,7 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
-import { Badge, ProgressCircle } from '@/components/ui';
+import { Badge, ProgressCircle, toast } from '@/components/ui';
 import { FontSize, Spacing, type ThemeColors } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { useThemedStyles } from '@/hooks/use-themed-styles';
@@ -10,6 +10,7 @@ import { QUESTIONNAIRE_ENTRY } from '@/screens/questionnaire/questionnaire.confi
 import {
   QUESTIONNAIRE_REQUIRED_FIELDS_HINT,
   type QuestionnaireCompletion,
+  type QuestionnaireMissingField,
 } from '@/utils/questionnaire-completion';
 
 type ProfileCompletionBannerProps = {
@@ -66,12 +67,16 @@ function createStyles(colors: ThemeColors) {
       borderWidth: 1,
     },
     statusChipOk: {
-      borderColor: colors.primaryLight,
-      backgroundColor: colors.surfaceMuted,
+      borderColor: 'rgba(21, 122, 254, 0.35)',
+      backgroundColor: 'rgba(21, 122, 254, 0.08)',
     },
     statusChipWarn: {
-      borderColor: colors.border,
-      backgroundColor: colors.surfaceMuted,
+      borderColor: 'rgba(255, 59, 48, 0.42)',
+      backgroundColor: 'rgba(255, 59, 48, 0.12)',
+    },
+    statusChipIdle: {
+      borderColor: 'rgba(21, 122, 254, 0.22)',
+      backgroundColor: 'rgba(21, 122, 254, 0.04)',
     },
     statusChipText: {
       fontSize: FontSize.caption,
@@ -81,21 +86,47 @@ function createStyles(colors: ThemeColors) {
       color: colors.primary,
     },
     statusChipTextWarn: {
-      color: colors.textSecondary,
+      color: colors.destructive,
+    },
+    statusChipTextIdle: {
+      color: colors.primary,
     },
     hintBox: {
-      gap: Spacing.xs,
-      padding: Spacing.sm,
-      borderRadius: 14,
+      gap: Spacing.sm,
+      padding: Spacing.md,
+      borderRadius: 16,
       backgroundColor: colors.surfaceMuted,
       borderWidth: 1,
       borderColor: colors.borderLight,
     },
+    hintBoxMissing: {
+      backgroundColor: 'rgba(255, 59, 48, 0.07)',
+      borderColor: 'rgba(255, 59, 48, 0.32)',
+    },
+    missingHeader: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: Spacing.sm,
+    },
+    missingIconWrap: {
+      width: 32,
+      height: 32,
+      borderRadius: 10,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: 'rgba(255, 59, 48, 0.12)',
+      flexShrink: 0,
+    },
     hintTitle: {
+      flex: 1,
+      minWidth: 0,
       fontSize: FontSize.caption,
       fontWeight: '700',
       color: colors.text,
       lineHeight: FontSize.caption * 1.4,
+    },
+    hintTitleMissing: {
+      color: colors.destructive,
     },
     hintText: {
       fontSize: FontSize.caption,
@@ -103,12 +134,31 @@ function createStyles(colors: ThemeColors) {
       lineHeight: FontSize.caption * 1.45,
     },
     missingList: {
-      gap: 2,
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: Spacing.xs,
     },
-    missingItem: {
+    missingChip: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 4,
+      paddingVertical: 7,
+      paddingLeft: Spacing.sm,
+      paddingRight: 8,
+      borderRadius: 999,
+      borderWidth: 1,
+      borderColor: 'rgba(255, 59, 48, 0.34)',
+      backgroundColor: colors.surface,
+    },
+    missingChipPressed: {
+      opacity: 0.88,
+      backgroundColor: 'rgba(255, 59, 48, 0.1)',
+    },
+    missingChipText: {
       fontSize: FontSize.caption,
-      color: colors.textSecondary,
-      lineHeight: FontSize.caption * 1.45,
+      fontWeight: '600',
+      color: colors.destructive,
+      lineHeight: FontSize.caption * 1.3,
     },
     pressed: {
       opacity: 0.92,
@@ -120,22 +170,46 @@ export function ProfileCompletionBanner({ completion }: ProfileCompletionBannerP
   const router = useRouter();
   const colors = useTheme();
   const styles = useThemedStyles(createStyles);
+  const hasMissing = completion.missingFields.length > 0;
 
-  const handleEdit = () => {
+  const openQuestionnaire = (focus?: string) => {
+    if (focus) {
+      router.push({
+        pathname: QUESTIONNAIRE_ENTRY,
+        params: { focus },
+      });
+      return;
+    }
+
     if (completion.isComplete) {
       router.push({ pathname: QUESTIONNAIRE_ENTRY, params: { edit: '1' } });
+      return;
+    }
+
+    const firstMissing = completion.missingFields[0];
+    if (firstMissing) {
+      toast.warning(`Сначала заполните: ${firstMissing.label}`);
+      router.push({
+        pathname: QUESTIONNAIRE_ENTRY,
+        params: { focus: firstMissing.focus },
+      });
       return;
     }
 
     router.push(QUESTIONNAIRE_ENTRY);
   };
 
+  const handleFieldPress = (_field: QuestionnaireMissingField) => {
+    // Always start from the earliest missing required field in questionnaire order.
+    openQuestionnaire();
+  };
+
   return (
-    <Pressable
-      accessibilityRole="button"
-      onPress={handleEdit}
-      style={({ pressed }) => [styles.card, pressed && styles.pressed]}>
-      <View style={styles.topRow}>
+    <View style={styles.card}>
+      <Pressable
+        accessibilityRole="button"
+        onPress={() => openQuestionnaire()}
+        style={({ pressed }) => [styles.topRow, pressed && styles.pressed]}>
         <ProgressCircle value={completion.percent} />
 
         <View style={styles.textBlock}>
@@ -146,10 +220,10 @@ export function ProfileCompletionBanner({ completion }: ProfileCompletionBannerP
         <Badge
           label="Изменить"
           variant="outline"
-          onPress={handleEdit}
+          onPress={() => openQuestionnaire()}
           style={styles.editBadge}
         />
-      </View>
+      </Pressable>
 
       <View style={styles.statusRow}>
         <View
@@ -158,9 +232,9 @@ export function ProfileCompletionBanner({ completion }: ProfileCompletionBannerP
             completion.isComplete ? styles.statusChipOk : styles.statusChipWarn,
           ]}>
           <Ionicons
-            name={completion.isComplete ? 'checkmark-circle' : 'alert-circle-outline'}
+            name={completion.isComplete ? 'checkmark-circle' : 'alert-circle'}
             size={14}
-            color={completion.isComplete ? colors.primary : colors.textMuted}
+            color={completion.isComplete ? colors.primary : colors.destructive}
           />
           <Text
             style={[
@@ -174,17 +248,17 @@ export function ProfileCompletionBanner({ completion }: ProfileCompletionBannerP
         <View
           style={[
             styles.statusChip,
-            completion.isVisibleInFeed ? styles.statusChipOk : styles.statusChipWarn,
+            completion.isVisibleInFeed ? styles.statusChipOk : styles.statusChipIdle,
           ]}>
           <Ionicons
             name={completion.isVisibleInFeed ? 'eye-outline' : 'eye-off-outline'}
             size={14}
-            color={completion.isVisibleInFeed ? colors.primary : colors.textMuted}
+            color={colors.primary}
           />
           <Text
             style={[
               styles.statusChipText,
-              completion.isVisibleInFeed ? styles.statusChipTextOk : styles.statusChipTextWarn,
+              completion.isVisibleInFeed ? styles.statusChipTextOk : styles.statusChipTextIdle,
             ]}>
             {completion.isVisibleInFeed ? 'В ленте' : 'Не в ленте'}
           </Text>
@@ -193,42 +267,67 @@ export function ProfileCompletionBanner({ completion }: ProfileCompletionBannerP
         <View
           style={[
             styles.statusChip,
-            completion.isPublic ? styles.statusChipOk : styles.statusChipWarn,
+            completion.isPublic ? styles.statusChipOk : styles.statusChipIdle,
           ]}>
           <Ionicons
             name={completion.isPublic ? 'globe-outline' : 'lock-closed-outline'}
             size={14}
-            color={completion.isPublic ? colors.primary : colors.textMuted}
+            color={colors.primary}
           />
           <Text
             style={[
               styles.statusChipText,
-              completion.isPublic ? styles.statusChipTextOk : styles.statusChipTextWarn,
+              completion.isPublic ? styles.statusChipTextOk : styles.statusChipTextIdle,
             ]}>
             {completion.isPublic ? 'Публичная' : 'Приватная'}
           </Text>
         </View>
       </View>
 
-      <View style={styles.hintBox}>
-        <Text style={styles.hintTitle}>{completion.visibilityLabel}</Text>
-        <Text style={styles.hintText}>{completion.visibilityHint}</Text>
-
-        {completion.missingFields.length > 0 ? (
-          <View style={styles.missingList}>
-            <Text style={styles.hintText}>Осталось заполнить:</Text>
-            {completion.missingFields.map((field) => (
-              <Text key={field} style={styles.missingItem}>
-                · {field}
+      <View style={[styles.hintBox, hasMissing ? styles.hintBoxMissing : null]}>
+        {hasMissing ? (
+          <>
+            <View style={styles.missingHeader}>
+              <View style={styles.missingIconWrap}>
+                <Ionicons name="alert-circle" size={16} color={colors.destructive} />
+              </View>
+              <Text style={[styles.hintTitle, styles.hintTitleMissing]}>
+                Осталось заполнить
               </Text>
-            ))}
-          </View>
-        ) : null}
+            </View>
+            <View style={styles.missingList}>
+              {completion.missingFields.map((field) => (
+                <Pressable
+                  key={field.key}
+                  accessibilityRole="button"
+                  accessibilityLabel={
+                    completion.missingFields[0]
+                      ? `Перейти к полю: ${completion.missingFields[0].label}`
+                      : `Перейти к полю: ${field.label}`
+                  }
+                  hitSlop={4}
+                  onPress={() => handleFieldPress(field)}
+                  style={({ pressed }) => [
+                    styles.missingChip,
+                    pressed && styles.missingChipPressed,
+                  ]}>
+                  <Text style={styles.missingChipText}>{field.label}</Text>
+                  <Ionicons name="chevron-forward" size={14} color={colors.destructive} />
+                </Pressable>
+              ))}
+            </View>
+          </>
+        ) : (
+          <>
+            <Text style={styles.hintTitle}>{completion.visibilityLabel}</Text>
+            <Text style={styles.hintText}>{completion.visibilityHint}</Text>
+          </>
+        )}
 
-        {!completion.isComplete ? (
+        {!completion.isComplete && !hasMissing ? (
           <Text style={styles.hintText}>{QUESTIONNAIRE_REQUIRED_FIELDS_HINT}</Text>
         ) : null}
       </View>
-    </Pressable>
+    </View>
   );
 }

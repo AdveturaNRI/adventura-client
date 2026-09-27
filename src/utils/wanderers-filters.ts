@@ -9,6 +9,14 @@ import {
   type QuestionnaireAvailability,
 } from '@/screens/questionnaire/availability';
 import type { WandererCardItem } from '@/services/profile/wanderersApi';
+import {
+  gameCostFormatLabel,
+  isGameCostFormat,
+  isPlayerPaymentFormat,
+  playerPaymentFormatLabel,
+  type GameCostFormat,
+  type PlayerPaymentFormat,
+} from '@/utils/questionnaire-payment';
 
 export type WanderersPlayMode = 'online' | 'offline';
 
@@ -24,6 +32,10 @@ export type WanderersFilters = {
   availability: QuestionnaireAvailability;
   ageMin: number | null;
   ageMax: number | null;
+  /** null = любая, иначе точное совпадение с анкетой */
+  gameCostFormat: GameCostFormat | null;
+  /** null = любой, иначе точное совпадение с анкетой */
+  playerPaymentFormat: PlayerPaymentFormat | null;
 };
 
 export type WanderersFilterOptions = {
@@ -43,6 +55,8 @@ export const EMPTY_WANDERERS_FILTERS: WanderersFilters = {
   availability: { ...EMPTY_QUESTIONNAIRE_AVAILABILITY, slots: [] },
   ageMin: null,
   ageMax: null,
+  gameCostFormat: null,
+  playerPaymentFormat: null,
 };
 
 const WANDERERS_FILTERS_KEY = '@adventura/wanderers-filters';
@@ -140,7 +154,13 @@ export function isWanderersFilters(value: unknown): value is WanderersFilters {
     isStringArray(candidate.experiences) &&
     isAvailability(candidate.availability) &&
     isNullableInt(candidate.ageMin ?? null) &&
-    isNullableInt(candidate.ageMax ?? null)
+    isNullableInt(candidate.ageMax ?? null) &&
+    (candidate.gameCostFormat === undefined ||
+      candidate.gameCostFormat === null ||
+      isGameCostFormat(candidate.gameCostFormat)) &&
+    (candidate.playerPaymentFormat === undefined ||
+      candidate.playerPaymentFormat === null ||
+      isPlayerPaymentFormat(candidate.playerPaymentFormat))
   );
 }
 
@@ -152,7 +172,9 @@ export function countActiveWanderersFilters(filters: WanderersFilters): number {
     filters.systems.length +
     filters.experiences.length +
     (hasActiveAvailability(filters.availability) ? 1 : 0) +
-    (hasActiveAgeFilter(filters) ? 1 : 0)
+    (hasActiveAgeFilter(filters) ? 1 : 0) +
+    (filters.gameCostFormat ? 1 : 0) +
+    (filters.playerPaymentFormat ? 1 : 0)
   );
 }
 
@@ -359,8 +381,29 @@ export function applyWanderersFilters(
       return false;
     }
 
+    if (filters.gameCostFormat && item.gameCostFormat !== filters.gameCostFormat) {
+      return false;
+    }
+
+    if (
+      filters.playerPaymentFormat &&
+      item.playerPaymentFormat !== filters.playerPaymentFormat
+    ) {
+      return false;
+    }
+
     return true;
   });
+}
+
+export function formatWanderersGameCostFilter(format: GameCostFormat | null): string {
+  return format ? gameCostFormatLabel(format) : '';
+}
+
+export function formatWanderersPlayerPaymentFilter(
+  format: PlayerPaymentFormat | null,
+): string {
+  return format ? playerPaymentFormatLabel(format) : '';
 }
 
 export function formatWanderersAvailabilityFilter(
@@ -388,6 +431,10 @@ export async function loadWanderersFilters(): Promise<WanderersFilters> {
       ...parsed,
       ageMin: typeof parsed.ageMin === 'number' ? parsed.ageMin : null,
       ageMax: typeof parsed.ageMax === 'number' ? parsed.ageMax : null,
+      gameCostFormat: isGameCostFormat(parsed.gameCostFormat) ? parsed.gameCostFormat : null,
+      playerPaymentFormat: isPlayerPaymentFormat(parsed.playerPaymentFormat)
+        ? parsed.playerPaymentFormat
+        : null,
       availability: stripAvailabilityTimes(parsed.availability),
     };
   } catch {

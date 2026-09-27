@@ -1,19 +1,30 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  Pressable,
+  StyleSheet,
+  Text,
+  useWindowDimensions,
+  View,
+  type ScrollView,
+} from 'react-native';
+import type { RefObject } from 'react';
 
 import { GameSystemsPicker, type GameSystemOption } from '@/components/questionnaire/GameSystemsPicker';
+import {
+  QUESTIONNAIRE_PANEL_ERROR_STYLE,
+  QuestionnaireRequiredCallout,
+} from '@/components/questionnaire/QuestionnaireRequiredCallout';
 import { SystemAuthorBadge } from '@/components/questionnaire/SystemAuthorBadge';
-import { QuestionnaireHint } from '@/components/questionnaire/QuestionnaireHint';
 import { useProfile } from '@/context/ProfileContext';
 import { FontSize, Radius, Sizes, Spacing, type ThemeColors } from '@/constants/theme';
+import { useQuestionnaireFieldFocus } from '@/hooks/use-questionnaire-field-focus';
 import { useTheme } from '@/hooks/use-theme';
 import { useThemedStyles } from '@/hooks/use-themed-styles';
 import { SYSTEMS_STEP } from '@/screens/questionnaire/questionnaire.config';
 import type { QuestionnaireDraft } from '@/screens/questionnaire/types';
 import {
   isSystemsStepValid,
-  SYSTEMS_STEP_VALIDATION_MESSAGE,
 } from '@/screens/questionnaire/questionnaire-validation';
 import { useQuestionnaireScreenStyles } from '@/screens/questionnaire/questionnaire-screen.styles';
 import { fetchGameSystems } from '@/services/reference/referenceApi';
@@ -26,6 +37,7 @@ import {
 import type { UserGameSystemItem } from '@/services/api/types';
 import { localizeErrorMessage } from '@/utils/localizeError';
 import { normalizeUserGameSystemItem, normalizeUserGameSystemItems } from '@/utils/user-game-system';
+import { scheduleScrollAttempts, scrollScrollViewToChild } from '@/utils/scroll-scrollview-to-child';
 
 const STACK_ACTIONS_MAX_WIDTH = 1280;
 
@@ -33,6 +45,10 @@ type SystemsStepProps = {
   value: Pick<QuestionnaireDraft, 'systems' | 'readyToLearnNew' | 'openToAnySystem'>;
   onChange: (value: Pick<QuestionnaireDraft, 'systems' | 'readyToLearnNew' | 'openToAnySystem'>) => void;
   showValidationError?: boolean;
+  validationScrollKey?: number;
+  focusField?: boolean;
+  scrollRef?: RefObject<ScrollView | null>;
+  onFocusScrollComplete?: () => void;
 };
 
 function createStyles(colors: ThemeColors, stackActions: boolean) {
@@ -44,6 +60,9 @@ function createStyles(colors: ThemeColors, stackActions: boolean) {
       borderWidth: 1,
       borderColor: colors.borderLight,
       backgroundColor: colors.surface,
+    },
+    panelError: {
+      ...QUESTIONNAIRE_PANEL_ERROR_STYLE,
     },
     panelHeader: {
       flexDirection: 'row',
@@ -179,13 +198,22 @@ function createStyles(colors: ThemeColors, stackActions: boolean) {
   });
 }
 
-export function SystemsStep({ value, onChange, showValidationError = false }: SystemsStepProps) {
+export function SystemsStep({
+  value,
+  onChange,
+  showValidationError = false,
+  validationScrollKey = 0,
+  focusField = false,
+  scrollRef,
+  onFocusScrollComplete,
+}: SystemsStepProps) {
   const screenStyles = useQuestionnaireScreenStyles();
   const colors = useTheme();
   const { profile, avatarUrl } = useProfile();
   const { width } = useWindowDimensions();
   const stackActions = width <= STACK_ACTIONS_MAX_WIDTH;
   const styles = useThemedStyles((themeColors) => createStyles(themeColors, stackActions));
+  const panelRef = useRef<View>(null);
   const [systemOptions, setSystemOptions] = useState<GameSystemOption[]>([]);
   const [userSystems, setUserSystems] = useState<UserGameSystemItem[]>([]);
   const [isUserSystemsLoading, setIsUserSystemsLoading] = useState(false);
@@ -204,7 +232,6 @@ export function SystemsStep({ value, onChange, showValidationError = false }: Sy
   );
   const isValid = isSystemsStepValid(value);
   const showError = showValidationError && !isValid;
-  const needsSelection = value.systems.length === 0;
   const systemsActionLabel =
     value.systems.length > 0 ? SYSTEMS_STEP.changeLabel : SYSTEMS_STEP.addLabel;
   const currentUserAuthor = useMemo(
@@ -275,6 +302,31 @@ export function SystemsStep({ value, onChange, showValidationError = false }: Sy
     void loadUserSystems();
   }, [isPickerOpen, loadUserSystems]);
 
+  useEffect(() => {
+    if (!showError || validationScrollKey <= 0 || !scrollRef?.current || !panelRef.current) {
+      return;
+    }
+
+    return scheduleScrollAttempts(() =>
+      scrollScrollViewToChild(scrollRef.current, panelRef.current, 20),
+    );
+  }, [showError, scrollRef, validationScrollKey]);
+
+  useQuestionnaireFieldFocus({
+    active: focusField,
+    scroll: () => {
+      if (!scrollRef?.current || !panelRef.current) {
+        return false;
+      }
+
+      return scrollScrollViewToChild(scrollRef.current, panelRef.current, 20, true);
+    },
+    onReady: () => {
+      setIsPickerOpen(true);
+    },
+    onComplete: onFocusScrollComplete,
+  });
+
   const handleCreateUserSystem = useCallback(async (name: string) => {
     try {
       const created = normalizeUserGameSystemItem(
@@ -319,9 +371,13 @@ export function SystemsStep({ value, onChange, showValidationError = false }: Sy
         <Text style={screenStyles.subtitle}>{SYSTEMS_STEP.subtitle}</Text>
       </View>
 
-      <QuestionnaireHint>{SYSTEMS_STEP.hint}</QuestionnaireHint>
-
-      <View style={styles.panel}>
+      <View
+        ref={panelRef}
+        collapsable={false}
+        style={[styles.panel, showError ? styles.panelError : null]}>
+        {showError ? (
+          <QuestionnaireRequiredCallout />
+        ) : null}
         <View style={styles.panelHeader}>
           <View style={styles.panelIconWrap}>
             <Ionicons name="dice-outline" size={22} color={colors.primary} />
@@ -384,7 +440,6 @@ export function SystemsStep({ value, onChange, showValidationError = false }: Sy
             style={({ pressed }) => [
               styles.learnToggle,
               value.openToAnySystem ? styles.learnToggleActive : null,
-              showError && needsSelection ? styles.learnToggleError : null,
               pressed ? styles.learnTogglePressed : null,
             ]}
             accessibilityRole="checkbox"
@@ -392,13 +447,7 @@ export function SystemsStep({ value, onChange, showValidationError = false }: Sy
             <Ionicons
               name={value.openToAnySystem ? 'checkbox' : 'square-outline'}
               size={18}
-              color={
-                value.openToAnySystem
-                  ? colors.onPrimary
-                  : showError && needsSelection
-                    ? colors.destructive
-                    : colors.textMuted
-              }
+              color={value.openToAnySystem ? colors.onPrimary : colors.textMuted}
             />
             <Text
               style={[
@@ -408,13 +457,6 @@ export function SystemsStep({ value, onChange, showValidationError = false }: Sy
               {SYSTEMS_STEP.openToAnySystemLabel}
             </Text>
           </Pressable>
-
-          {needsSelection ? (
-            <Text
-              style={[styles.learnToggleHint, showError ? styles.learnToggleHintError : null]}>
-              {SYSTEMS_STEP.openToAnySystemHint}
-            </Text>
-          ) : null}
         </View>
 
         <View style={styles.learnToggleWrap}>
@@ -440,13 +482,7 @@ export function SystemsStep({ value, onChange, showValidationError = false }: Sy
               {SYSTEMS_STEP.readyToLearnNewLabel}
             </Text>
           </Pressable>
-
-          <Text style={styles.learnToggleHint}>{SYSTEMS_STEP.readyToLearnNewHint}</Text>
         </View>
-
-        {showError ? (
-          <Text style={styles.validationError}>{SYSTEMS_STEP_VALIDATION_MESSAGE}</Text>
-        ) : null}
       </View>
 
       <GameSystemsPicker

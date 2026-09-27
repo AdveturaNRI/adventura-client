@@ -11,8 +11,10 @@ import {
 import { NavbarIcon } from '@/components/ui/navigation/NavbarIcon';
 import { FontSize, Spacing, type ThemeColors } from '@/constants/theme';
 import { useAuth } from '@/context/AuthContext';
+import { useProfile } from '@/context/ProfileContext';
 import { useRealtimeOptional } from '@/context/RealtimeContext';
 import { useThemedStyles } from '@/hooks/use-themed-styles';
+import { getQuestionnaireCompletion } from '@/utils/questionnaire-completion';
 import { formatUnreadBadge } from '@/utils/unread-badge';
 
 export const DESKTOP_SIDEBAR_WIDTH = 260;
@@ -53,6 +55,31 @@ function createStyles(colors: ThemeColors) {
     navItemPressed: {
       opacity: 0.85,
     },
+    iconWrap: {
+      position: 'relative',
+      width: 24,
+      height: 24,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    iconAlert: {
+      position: 'absolute',
+      top: -5,
+      right: -6,
+      minWidth: 16,
+      height: 16,
+      borderRadius: 8,
+      paddingHorizontal: 3,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: colors.destructive,
+    },
+    iconAlertText: {
+      color: colors.onPrimary,
+      fontSize: 11,
+      fontWeight: '800',
+      lineHeight: 12,
+    },
     navLabel: {
       flex: 1,
       fontSize: FontSize.button,
@@ -87,7 +114,9 @@ export function MainDesktopSidebar() {
   const styles = useThemedStyles(createStyles);
   const realtime = useRealtimeOptional();
   const { isAuthenticated } = useAuth();
+  const { profile } = useProfile();
   const unreadChats = realtime?.unreadChats ?? 0;
+  const profileIncomplete = !getQuestionnaireCompletion(profile).isComplete;
 
   const activeKey = MAIN_NAVBAR_ITEMS.find((item) =>
     pathname.startsWith(`/${item.key}`),
@@ -104,12 +133,16 @@ export function MainDesktopSidebar() {
           {MAIN_NAVBAR_ITEMS.map((item) => {
             const isActive = item.key === activeKey;
             const showBadge = item.key === 'chats' && unreadChats > 0;
+            const showProfileAlert = item.key === 'profile' && profileIncomplete;
 
             return (
               <Pressable
                 key={item.key}
                 accessibilityRole="tab"
                 accessibilityState={{ selected: isActive }}
+                accessibilityLabel={
+                  showProfileAlert ? `${item.label}, анкета не заполнена` : item.label
+                }
                 onPress={() => {
                   navigateMainTabFromNav(router, item.key, pathname, { isAuthenticated });
                 }}
@@ -118,7 +151,14 @@ export function MainDesktopSidebar() {
                   isActive && styles.navItemActive,
                   pressed && styles.navItemPressed,
                 ]}>
-                <NavbarIcon name={item.icon} size={24} active={isActive} />
+                <View style={styles.iconWrap}>
+                  <NavbarIcon name={item.icon} size={24} active={isActive} />
+                  {showProfileAlert ? (
+                    <View style={styles.iconAlert} accessibilityLabel="Требует внимания">
+                      <Text style={styles.iconAlertText}>!</Text>
+                    </View>
+                  ) : null}
+                </View>
                 <Text style={[styles.navLabel, isActive && styles.navLabelActive]}>
                   {item.label}
                 </Text>

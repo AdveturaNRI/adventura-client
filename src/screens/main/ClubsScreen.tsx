@@ -78,6 +78,8 @@ function createStyles(
       maxHeight: hideMap ? 0 : undefined,
       maxWidth: hideMap ? 0 : undefined,
       opacity: hideMap ? 0 : 1,
+      // Leaflet panes can punch through opacity:0 — hide fully when collapsed.
+      visibility: hideMap ? ('hidden' as const) : ('visible' as const),
       overflow: 'hidden',
     },
     mapFrame: {
@@ -513,6 +515,7 @@ export default function ClubsScreen() {
               <MapSearchControls
                 ref={mapSearchRef}
                 locationDenied={locationDenied && !userLocation}
+                fallbackCenter={{ lat: mapCenter[0], lng: mapCenter[1] }}
                 onCollapseMap={isDesktopWeb ? toggleMapCollapsed : undefined}
                 onSelectCity={(hit, options) => {
                   selectCity(

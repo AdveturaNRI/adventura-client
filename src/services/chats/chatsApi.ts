@@ -316,7 +316,12 @@ export async function setConversationBackground(
     if (Platform.OS === 'web') {
       const response = await fetch(input.fileUri);
       const blob = await response.blob();
-      formData.append('file', blob, fileName);
+      // data: URI → blob часто без type; сервер отклоняет «пустой» mime.
+      const typed =
+        blob.type && blob.type !== 'application/octet-stream'
+          ? blob
+          : new Blob([blob], { type: mimeType });
+      formData.append('file', typed, fileName);
     } else {
       formData.append('file', {
         uri: input.fileUri,
@@ -329,6 +334,7 @@ export async function setConversationBackground(
   return apiMultipart<ConversationListItem>(
     `/chats/${conversationId}/background`,
     formData,
+    { skipLoading: true },
   );
 }
 

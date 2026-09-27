@@ -1,22 +1,21 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useEffect, useState } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { useCallback, useEffect, useRef, useState, type RefObject } from 'react';
+import { StyleSheet, Text, View, type ScrollView } from 'react-native';
 
 import { AvailabilityPicker } from '@/components/questionnaire/AvailabilityPicker';
 import { QuestionnaireHint } from '@/components/questionnaire/QuestionnaireHint';
 import { TimezoneField } from '@/components/questionnaire/TimezoneField';
 import { SelectField } from '@/components/ui';
 import { FontSize, Spacing, type ThemeColors } from '@/constants/theme';
+import { useQuestionnaireFieldFocus } from '@/hooks/use-questionnaire-field-focus';
 import { useTheme } from '@/hooks/use-theme';
 import { useThemedStyles } from '@/hooks/use-themed-styles';
 import { EXPERIENCE_STEP } from '@/screens/questionnaire/questionnaire.config';
 import type { QuestionnaireDraft } from '@/screens/questionnaire/types';
-import {
-  EXPERIENCE_STEP_VALIDATION_MESSAGE,
-  isExperienceStepValid,
-} from '@/screens/questionnaire/questionnaire-validation';
+import { isExperienceStepValid } from '@/screens/questionnaire/questionnaire-validation';
 import { useQuestionnaireScreenStyles } from '@/screens/questionnaire/questionnaire-screen.styles';
 import { fetchExperienceTypes } from '@/services/reference/referenceApi';
+import { scheduleScrollAttempts, scrollScrollViewToChild } from '@/utils/scroll-scrollview-to-child';
 
 type ExperienceStepProps = {
   value: Pick<
@@ -30,6 +29,10 @@ type ExperienceStepProps = {
     >,
   ) => void;
   showValidationError?: boolean;
+  validationScrollKey?: number;
+  focusField?: 'experience' | 'availability' | 'timezone' | null;
+  scrollRef?: RefObject<ScrollView | null>;
+  onFocusScrollComplete?: () => void;
 };
 
 function createStyles(colors: ThemeColors) {
@@ -97,13 +100,39 @@ export function ExperienceStep({
   value,
   onChange,
   showValidationError = false,
+  validationScrollKey = 0,
+  focusField = null,
+  scrollRef,
+  onFocusScrollComplete,
 }: ExperienceStepProps) {
   const screenStyles = useQuestionnaireScreenStyles();
   const colors = useTheme();
   const styles = useThemedStyles(createStyles);
+  const experiencePanelRef = useRef<View>(null);
+  const availabilityPanelRef = useRef<View>(null);
+  const timezoneFieldRef = useRef<View>(null);
+  const pendingAvailabilityScrollRef = useRef(false);
   const [experienceOptions, setExperienceOptions] = useState<{ id: string; label: string }[]>([]);
+  const [openedField, setOpenedField] = useState<'experience' | 'availability' | 'timezone' | null>(
+    null,
+  );
   const isValid = isExperienceStepValid(value);
   const showError = showValidationError && !isValid;
+
+  const scrollToView = useCallback(
+    (target: View | null, animated = true) => {
+      if (!scrollRef?.current || !target) {
+        return false;
+      }
+
+      return scrollScrollViewToChild(scrollRef.current, target, 20, animated);
+    },
+    [scrollRef],
+  );
+
+  const scrollToAvailability = useCallback(() => {
+    return scrollToView(availabilityPanelRef.current);
+  }, [scrollToView]);
 
   useEffect(() => {
     let isMounted = true;
@@ -129,6 +158,53 @@ export function ExperienceStep({
     };
   }, []);
 
+  useEffect(() => {
+    if (!showError || validationScrollKey <= 0) {
+      return;
+    }
+
+    return scheduleScrollAttempts(() => scrollToAvailability());
+  }, [scrollToAvailability, showError, validationScrollKey]);
+
+  useQuestionnaireFieldFocus({
+    active: Boolean(focusField),
+    scroll: () => {
+      const target =
+        focusField === 'experience'
+          ? experiencePanelRef.current
+          : focusField === 'timezone'
+            ? timezoneFieldRef.current ?? availabilityPanelRef.current
+            : availabilityPanelRef.current;
+
+      return scrollToView(target, true);
+    },
+    onReady: () => {
+      if (focusField) {
+        setOpenedField(focusField);
+      }
+    },
+    onComplete: onFocusScrollComplete,
+  });
+
+  useEffect(() => {
+    if (!pendingAvailabilityScrollRef.current) {
+      return;
+    }
+
+    return scheduleScrollAttempts(() => {
+      if (!pendingAvailabilityScrollRef.current) {
+        return true;
+      }
+
+      if (!scrollToAvailability()) {
+        return false;
+      }
+
+      pendingAvailabilityScrollRef.current = false;
+      return true;
+    });
+  }, [scrollToAvailability, value.experienceTypeId]);
+
   return (
     <View style={screenStyles.stepBody}>
       <View>
@@ -139,7 +215,7 @@ export function ExperienceStep({
       <QuestionnaireHint>{EXPERIENCE_STEP.hint}</QuestionnaireHint>
 
       <View style={styles.panels}>
-        <View style={styles.panel}>
+        <View ref={experiencePanelRef} collapsable={false} style={styles.panel}>
           <View style={styles.panelHeader}>
             <View style={styles.panelIconWrap}>
               <Ionicons name="stats-chart-outline" size={22} color={colors.primary} />
@@ -155,16 +231,18 @@ export function ExperienceStep({
             placeholder={EXPERIENCE_STEP.experiencePlaceholder}
             value={value.experienceTypeId}
             options={experienceOptions}
+            autoOpen={openedField === 'experience'}
             onChange={(experienceTypeId) => {
               const experienceTypeLabel =
                 experienceOptions.find((option) => option.id === experienceTypeId)?.label ?? '';
 
+              pendingAvailabilityScrollRef.current = true;
               onChange({ ...value, experienceTypeId, experienceTypeLabel });
             }}
           />
         </View>
 
-        <View style={styles.panel}>
+        <View ref={availabilityPanelRef} collapsable={false} style={styles.panel}>
           <View style={styles.panelHeader}>
             <View style={styles.panelIconWrap}>
               <Ionicons name="calendar-outline" size={22} color={colors.primary} />
@@ -175,14 +253,17 @@ export function ExperienceStep({
             </View>
           </View>
 
-          <TimezoneField
-            label={EXPERIENCE_STEP.timezoneLabel}
-            labelHint={EXPERIENCE_STEP.timezoneLabelHint}
-            placeholder={EXPERIENCE_STEP.timezonePlaceholder}
-            value={value.timezone}
-            onChange={(timezone) => onChange({ ...value, timezone })}
-            error={showError ? EXPERIENCE_STEP_VALIDATION_MESSAGE : undefined}
-          />
+          <View ref={timezoneFieldRef} collapsable={false}>
+            <TimezoneField
+              label={EXPERIENCE_STEP.timezoneLabel}
+              labelHint={EXPERIENCE_STEP.timezoneLabelHint}
+              placeholder={EXPERIENCE_STEP.timezonePlaceholder}
+              value={value.timezone}
+              autoOpen={openedField === 'timezone'}
+              onChange={(timezone) => onChange({ ...value, timezone })}
+              error={showError ? 'Обязательное поле' : undefined}
+            />
+          </View>
           <Text style={styles.timezoneHint}>{EXPERIENCE_STEP.timezoneHint}</Text>
 
           <AvailabilityPicker

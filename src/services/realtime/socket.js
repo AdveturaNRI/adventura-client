@@ -87,11 +87,18 @@ export function updateRealtimeAuthToken(token) {
     socket.auth = { token: token.trim() };
 }
 /** Re-auth + connect if the socket dropped while the user is still in the app. */
-export function ensureRealtimeConnected(token) {
+export function ensureRealtimeConnected(token, options) {
     if (!token.trim()) {
         return;
     }
     const current = connectRealtime(token.trim());
+    if (options?.force) {
+        if (current.connected) {
+            current.disconnect();
+        }
+        current.connect();
+        return;
+    }
     if (!current.connected) {
         current.connect();
     }

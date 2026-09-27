@@ -22,7 +22,9 @@ import { getOfficialGameSystemNames } from '@/utils/official-game-systems-cache'
 import { formatTimezoneLabel } from '@/utils/timezones';
 import {
   buildExperienceChips,
+  buildGameCostChips,
   buildLocationChips,
+  buildPlayerPaymentChips,
   buildScheduleChips,
   buildSystemChips,
   type UserCardChip,
@@ -432,6 +434,23 @@ function createStyles(
       color: colors.textMuted,
       fontWeight: '400',
     },
+    chipSuccess: {
+      borderColor: 'rgba(52, 199, 89, 0.4)',
+      backgroundColor: 'rgba(52, 199, 89, 0.14)',
+    },
+    chipSuccessLabel: {
+      color: colors.success,
+      fontWeight: '700',
+    },
+    chipPaid: {
+      borderColor: colors.primary,
+      backgroundColor: colors.primary,
+    },
+    chipPaidLabel: {
+      color: colors.onPrimary,
+      fontWeight: '700',
+      letterSpacing: 0.2,
+    },
     bio: {
       fontSize: cfg.bioSize,
       color: colors.textMuted,
@@ -464,6 +483,10 @@ function getChipStyles(tone: UserCardChipTone, styles: ReturnType<typeof createS
       return { chip: styles.chipAgreement, label: styles.chipAgreementLabel };
     case 'muted':
       return { chip: styles.chipMuted, label: styles.chipMutedLabel };
+    case 'success':
+      return { chip: styles.chipSuccess, label: styles.chipSuccessLabel };
+    case 'paid':
+      return { chip: styles.chipPaid, label: styles.chipPaidLabel };
     default:
       return { chip: styles.chipDefault, label: styles.chipDefaultLabel };
   }
@@ -542,6 +565,18 @@ export function UserCard({
       ? formatTimezoneLabel(playInfo.timezone)
       : null;
 
+    const costChips = buildGameCostChips({
+      roles: playInfo.roles ?? roles,
+      format: playInfo.gameCostFormat,
+      kind: playInfo.sessionPriceKind,
+      min: playInfo.sessionPriceMin,
+      max: playInfo.sessionPriceMax,
+    });
+    const playerPaymentChips = buildPlayerPaymentChips({
+      roles: playInfo.roles ?? roles,
+      format: playInfo.playerPaymentFormat,
+    });
+
     return [
       {
         icon: 'play',
@@ -551,6 +586,24 @@ export function UserCard({
           playInfo.locations ?? playInfo.location,
         ),
       },
+      ...(playerPaymentChips.length > 0
+        ? [
+            {
+              icon: 'payment' as const,
+              label: 'Готов играть платно',
+              chips: playerPaymentChips,
+            },
+          ]
+        : []),
+      ...(costChips.length > 0
+        ? [
+            {
+              icon: 'cost' as const,
+              label: 'Стоимость сессии',
+              chips: costChips,
+            },
+          ]
+        : []),
       {
         icon: 'systems',
         label: 'Системы',
@@ -572,7 +625,7 @@ export function UserCard({
         chips: buildScheduleChips(playInfo.schedule, timezoneLabel),
       },
     ];
-  }, [officialNames, playInfo]);
+  }, [officialNames, playInfo, roles]);
 
   const bodyContent = (
     <>
