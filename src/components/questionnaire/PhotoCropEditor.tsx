@@ -660,9 +660,7 @@ export function PhotoCropEditor({
         minSide != null &&
         (cropRect.width < minSide || cropRect.height < minSide)
       ) {
-        toast.error(
-          `Фото слишком мелкое для карточки. Нужна сторона от ${minSide} px — возьмите снимок покрупнее.`,
-        );
+        toast.error('Фотография имеет слишком маленький размер'),
         return;
       }
 
