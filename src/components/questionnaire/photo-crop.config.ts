@@ -5,6 +5,8 @@ export type PhotoCropPreset = {
   shape: 'circle' | 'rectangle';
   outputWidth: number;
   outputHeight: number;
+  /** Reject crops whose shorter side in source pixels is below this. */
+  minSourceShortSide?: number;
   title: string;
   hint: string;
 };
@@ -23,6 +25,8 @@ export const PHOTO_CROP_PRESETS: Record<PhotoCropVariant, PhotoCropPreset> = {
     shape: 'rectangle',
     outputWidth: 1200,
     outputHeight: 1600,
+    /** Native crop below this (short side) is rejected — upscaling looks muddy on the deck. */
+    minSourceShortSide: 600,
     title: 'Фото анкеты',
     hint: 'Вертикальное фото для вашей карточки в ленте Странники.',
   },

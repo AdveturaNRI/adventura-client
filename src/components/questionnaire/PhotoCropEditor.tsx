@@ -30,6 +30,7 @@ import {
   resolveCropFrame,
 } from '@/components/questionnaire/photo-crop.utils';
 import { FontSize, Spacing, type ThemeColors } from '@/constants/theme';
+import { toast } from '@/components/ui';
 import { useTheme } from '@/hooks/use-theme';
 import { useThemedStyles } from '@/hooks/use-themed-styles';
 
@@ -653,6 +654,17 @@ export function PhotoCropEditor({
         translateY.value,
         cropFrame,
       );
+
+      const minSide = preset.minSourceShortSide;
+      if (
+        minSide != null &&
+        (cropRect.width < minSide || cropRect.height < minSide)
+      ) {
+        toast.error(
+          `Фото слишком мелкое для карточки. Нужна сторона от ${minSide} px — возьмите снимок покрупнее.`,
+        );
+        return;
+      }
 
       const result = await manipulateAsync(
         imageUri,

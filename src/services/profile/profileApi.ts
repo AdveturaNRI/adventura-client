@@ -145,8 +145,16 @@ export function pickProfileCardUrl(
     return null;
   }
 
+  // Prefer full card / original. cardThumb is only 128×170 — looks pixelated on the deck.
   const baseUrl =
-    profileCard.card ?? profileCard.cardThumb ?? profileCard.large ?? profileCard.original ?? null;
+    profileCard.card ??
+    profileCard.original ??
+    profileCard.large ??
+    profileCard.medium ??
+    profileCard.small ??
+    profileCard.cardThumb ??
+    profileCard.thumb ??
+    null;
 
   if (!baseUrl) {
     return null;

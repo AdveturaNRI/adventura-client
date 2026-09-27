@@ -249,7 +249,8 @@ function matchesPlayFilters(item: WandererCardItem, filters: WanderersFilters): 
     hasLocationFilter && cityNames.some((city) => filters.locations.includes(city));
 
   if (hasPlayModeFilter && hasLocationFilter) {
-    return matchesOnline || matchesOffline || matchesLocation;
+    // Формат и город дополняют друг друга: офлайн + Зеленоград → только с этим городом.
+    return (matchesOnline || matchesOffline) && matchesLocation;
   }
 
   if (hasPlayModeFilter) {
