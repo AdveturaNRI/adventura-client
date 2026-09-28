@@ -60,12 +60,16 @@ function formatAppliedAt(iso: string): string {
 
 function formatBumpReadyAt(iso: string): string {
   try {
-    return new Date(iso).toLocaleString('ru-RU', {
+    const date = new Date(iso);
+    const dayMonth = date.toLocaleDateString('ru-RU', {
       day: 'numeric',
       month: 'short',
+    });
+    const time = date.toLocaleTimeString('ru-RU', {
       hour: '2-digit',
       minute: '2-digit',
     });
+    return `${dayMonth} в ${time}`;
   } catch {
     return iso;
   }
@@ -1318,7 +1322,7 @@ export default function ManageGameScreen() {
               <Text style={styles.bumpTitle}>Поднять в ленте</Text>
               <Text style={styles.bumpHint}>
                 {bumpLockedUntil
-                  ? `Стол уже поднимали. Следующий раз — ${formatBumpReadyAt(bumpLockedUntil)}. Доступно раз в 12 часов.`
+                  ? `Игру уже поднимали. Следующий раз можно будет поднять ${formatBumpReadyAt(bumpLockedUntil)}.\nДоступно один раз в 12 часов.`
                   : 'Поднять игру выше в списке. Доступно раз в 12 часов.'}
               </Text>
               <Pressable
