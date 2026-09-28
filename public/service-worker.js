@@ -16,65 +16,93 @@ function showPushNotification(data) {
     tag,
     renotify: Boolean(data.tag),
     // Keep call toasts visible until dismissed / answered via open.
-    requireInteraction: data.requireInteraction === true || data.requireInteraction === 'true' || isCall,
+    requireInteraction:
+      data.requireInteraction === true ||
+      data.requireInteraction === 'true' ||
+      isCall,
     data: { url: data.url || '/' },
   };
   return self.registration.showNotification(title, options);
 }
+
+function pickPushFields(source) {
+  if (!source || typeof source !== 'object') {
+    return null;
+  }
+  const title = typeof source.title === 'string' ? source.title : null;
+  const body = typeof source.body === 'string' ? source.body : null;
+  if (!title && !body) {
+    return null;
+  }
+  return {
+    title: title || 'Adventura',
+    body: body || '',
+    icon: typeof source.icon === 'string' ? source.icon : '/icons/icon-192.png',
+    tag: typeof source.tag === 'string' ? source.tag : 'adventura',
+    url: typeof source.url === 'string' ? source.url : '/',
+    requireInteraction: source.requireInteraction,
+  };
+}
+
+/** True for FCM envelopes — those are shown once via onBackgroundMessage. */
+function isFcmPushEnvelope(parsed) {
+  if (!parsed || typeof parsed !== 'object') {
+    return false;
+  }
+  return Boolean(
+    parsed.from ||
+      parsed.messageId ||
+      parsed.message_id ||
+      parsed.collapse_key ||
+      (parsed.data && typeof parsed.data === 'object' && !Array.isArray(parsed.data)) ||
+      (parsed.notification && typeof parsed.notification === 'object'),
+  );
+}
+
+let fcmBackgroundHandlerReady = false;
 
 if (self.FIREBASE_CONFIG && self.FIREBASE_CONFIG.apiKey) {
   try {
     firebase.initializeApp(self.FIREBASE_CONFIG);
     const messaging = firebase.messaging();
     messaging.onBackgroundMessage((payload) => {
-      const data = {
-        title:
-          (payload.notification && payload.notification.title) ||
-          (payload.data && payload.data.title) ||
-          'Adventura',
-        body:
-          (payload.notification && payload.notification.body) ||
-          (payload.data && payload.data.body) ||
-          'Новое уведомление',
-        icon:
-          (payload.notification && payload.notification.icon) ||
-          (payload.data && payload.data.icon) ||
-          '/icons/icon-192.png',
-        tag: (payload.data && payload.data.tag) || 'adventura',
-        url: (payload.data && payload.data.url) || '/',
-      };
+      const data =
+        pickPushFields(payload && payload.data) ||
+        pickPushFields(payload && payload.notification) || {
+          title: 'Adventura',
+          body: 'Новое уведомление',
+          icon: '/icons/icon-192.png',
+          tag: 'adventura',
+          url: '/',
+        };
       return showPushNotification(data);
     });
+    fcmBackgroundHandlerReady = true;
   } catch (error) {
     console.warn('[sw] firebase init failed', error);
   }
 }
 
 self.addEventListener('push', (event) => {
-  // FCM notification payloads are often handled by onBackgroundMessage;
-  // keep this for legacy web-push / data-only messages.
-  let data = {
-    title: 'Adventura',
-    body: 'Новое уведомление',
-    icon: '/icons/icon-192.png',
-    tag: 'adventura',
-    url: '/',
-  };
-
+  // Legacy web-push only. When FCM's onBackgroundMessage is active, showing
+  // again here produced a second toast with "Новое уведомление".
+  let parsed = null;
   try {
-    if (event.data) {
-      const parsed = event.data.json();
-      data = { ...data, ...parsed };
-    }
+    parsed = event.data ? event.data.json() : null;
   } catch {
-    try {
-      const text = event.data && event.data.text();
-      if (text) {
-        data.body = text;
-      }
-    } catch {
-      // keep defaults
-    }
+    parsed = null;
+  }
+
+  if (fcmBackgroundHandlerReady && isFcmPushEnvelope(parsed)) {
+    return;
+  }
+
+  const data =
+    pickPushFields(parsed) ||
+    pickPushFields(parsed && parsed.data) ||
+    pickPushFields(parsed && parsed.notification);
+  if (!data) {
+    return;
   }
 
   event.waitUntil(showPushNotification(data));
