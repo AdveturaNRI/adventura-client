@@ -26,6 +26,7 @@ import { useThemedStyles } from '@/hooks/use-themed-styles';
 import { openConversationWith, openGameChat } from '@/services/chats/chatsApi';
 import {
   acceptGameApplication,
+  bumpGame,
   deleteGame,
   getGameManage,
   rejectGameApplication,
@@ -55,6 +56,40 @@ function formatAppliedAt(iso: string): string {
   } catch {
     return iso;
   }
+}
+
+function formatBumpReadyAt(iso: string): string {
+  try {
+    return new Date(iso).toLocaleString('ru-RU', {
+      day: 'numeric',
+      month: 'short',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+  } catch {
+    return iso;
+  }
+}
+
+function formatBumpWaitHint(availableAtIso: string, nowMs: number): string {
+  const readyAt = new Date(availableAtIso).getTime();
+  if (!Number.isFinite(readyAt)) {
+    return 'Повторно — через 12 часов';
+  }
+  const remainMs = readyAt - nowMs;
+  if (remainMs <= 0) {
+    return 'Можно поднять снова';
+  }
+  const totalMinutes = Math.ceil(remainMs / 60_000);
+  if (totalMinutes < 60) {
+    return `Снова через ${totalMinutes} мин`;
+  }
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  if (minutes === 0) {
+    return `Снова через ${hours} ч`;
+  }
+  return `Снова через ${hours} ч ${minutes} мин`;
 }
 
 type PersonAction = {
@@ -448,6 +483,46 @@ function createStyles(colors: ThemeColors, isDesktopWeb: boolean, topPadding: nu
       fontSize: FontSize.label,
       fontWeight: '700',
       textAlign: 'center',
+      color: colors.onPrimary,
+    },
+    bumpCard: {
+      borderRadius: 16,
+      borderWidth: 1,
+      borderColor: 'rgba(21, 122, 254, 0.18)',
+      backgroundColor: 'rgba(21, 122, 254, 0.07)',
+      padding: Spacing.md,
+      gap: Spacing.sm,
+    },
+    bumpCardLocked: {
+      borderColor: 'rgba(255, 149, 0, 0.22)',
+      backgroundColor: 'rgba(255, 149, 0, 0.08)',
+    },
+    bumpTitle: {
+      fontSize: FontSize.button,
+      fontWeight: '700',
+      color: colors.text,
+    },
+    bumpHint: {
+      fontSize: FontSize.caption,
+      lineHeight: FontSize.caption * 1.45,
+      color: colors.textSecondary,
+    },
+    bumpBtn: {
+      minHeight: 48,
+      borderRadius: 14,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 8,
+      paddingHorizontal: Spacing.md,
+      backgroundColor: colors.primary,
+    },
+    bumpBtnLocked: {
+      backgroundColor: 'rgba(255, 149, 0, 0.85)',
+    },
+    bumpBtnLabel: {
+      fontSize: FontSize.label,
+      fontWeight: '700',
       color: colors.onPrimary,
     },
     deleteGameBtn: {
@@ -863,6 +938,28 @@ export default function ManageGameScreen() {
     [applyPayload, busy, gameId],
   );
 
+  const runBump = useCallback(async () => {
+    if (!gameId || busy) {
+      return;
+    }
+    setBusy(true);
+    try {
+      const next = await bumpGame(gameId);
+      applyPayload(next);
+      toast.success('Игра поднята в ленте');
+    } catch (error) {
+      toast.error(localizeErrorMessage(error, 'Не удалось поднять игру'));
+      try {
+        const fresh = await getGameManage(gameId);
+        applyPayload(fresh);
+      } catch {
+        // keep current screen state
+      }
+    } finally {
+      setBusy(false);
+    }
+  }, [applyPayload, busy, gameId]);
+
   const confirmFinish = useCallback(() => {
     const finish = () => void runStatus('FINISHED', 'Игра завершена');
 
@@ -991,6 +1088,8 @@ export default function ManageGameScreen() {
   const isRecruiting = game.status === 'RECRUITING';
   const isCampaign = game.kind === 'CAMPAIGN';
   const status = statusMeta(game.status);
+  const bumpLockedUntil = game.bumpAvailableAt?.trim() || null;
+  const canBump = !isFinished && !bumpLockedUntil;
   const ageLabel =
     game.anyAge || game.minAge == null || game.minAge <= 0 ? 'Любой возраст' : `${game.minAge}+`;
 
@@ -1213,6 +1312,47 @@ export default function ManageGameScreen() {
               </Text>
             </View>
           )}
+
+          {!isFinished ? (
+            <View style={[styles.bumpCard, bumpLockedUntil ? styles.bumpCardLocked : null]}>
+              <Text style={styles.bumpTitle}>Поднять в ленте</Text>
+              <Text style={styles.bumpHint}>
+                {bumpLockedUntil
+                  ? `Стол уже поднимали. Следующий раз — ${formatBumpReadyAt(bumpLockedUntil)}. Доступно раз в 12 часов.`
+                  : 'Поднять игру выше в списке. Доступно раз в 12 часов.'}
+              </Text>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={
+                  canBump
+                    ? 'Поднять игру в ленте'
+                    : bumpLockedUntil
+                      ? formatBumpWaitHint(bumpLockedUntil, Date.now())
+                      : 'Поднять игру недоступно'
+                }
+                disabled={busy || !canBump}
+                onPress={() => void runBump()}
+                style={({ pressed }) => [
+                  styles.bumpBtn,
+                  bumpLockedUntil ? styles.bumpBtnLocked : null,
+                  pressed && canBump && { opacity: 0.88 },
+                  (busy || !canBump) && { opacity: 0.55 },
+                ]}>
+                <Ionicons
+                  name={canBump ? 'arrow-up-circle-outline' : 'time-outline'}
+                  size={18}
+                  color={colors.onPrimary}
+                />
+                <Text style={styles.bumpBtnLabel}>
+                  {canBump
+                    ? 'Поднять игру'
+                    : bumpLockedUntil
+                      ? formatBumpWaitHint(bumpLockedUntil, Date.now())
+                      : 'Недоступно'}
+                </Text>
+              </Pressable>
+            </View>
+          ) : null}
 
           <Button
             label="Редактировать игру"

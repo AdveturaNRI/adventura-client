@@ -37,6 +37,9 @@ export type GameListItem = {
   pendingApplicationsCount: number;
   owner?: GameOwnerSummary | null;
   viewerRelation?: GameViewerRelation;
+  bumpedAt?: string;
+  /** When the owner may raise the listing again; null if available now. */
+  bumpAvailableAt?: string | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -184,6 +187,12 @@ export async function updateGameStatus(
   return apiRequest<GameManagePayload>(`/games/${encodeURIComponent(gameId)}/status`, {
     method: 'PATCH',
     body: { status },
+  });
+}
+
+export async function bumpGame(gameId: string): Promise<GameManagePayload> {
+  return apiRequest<GameManagePayload>(`/games/${encodeURIComponent(gameId)}/bump`, {
+    method: 'POST',
   });
 }
 

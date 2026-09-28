@@ -80,36 +80,37 @@ function isAppForeground() {
 }
 
 function mergeGamesFeed(prev: GameListItem[], incoming: GameListItem[]): GameListItem[] {
-  const incomingById = new Map(incoming.map((item) => [item.id, item]));
-  const seen = new Set<string>();
-  const kept = prev.map((item) => {
-    seen.add(item.id);
-    return incomingById.get(item.id) ?? item;
+  const prevById = new Map(prev.map((item) => [item.id, item]));
+  const next = incoming.map((item) => {
+    const old = prevById.get(item.id);
+    if (
+      old &&
+      old.updatedAt === item.updatedAt &&
+      old.bumpedAt === item.bumpedAt &&
+      old.status === item.status &&
+      old.playersCount === item.playersCount &&
+      old.pendingApplicationsCount === item.pendingApplicationsCount &&
+      old.viewerRelation === item.viewerRelation
+    ) {
+      return old;
+    }
+    return item;
   });
 
-  const fresh: GameListItem[] = [];
-  for (const item of incoming) {
-    if (seen.has(item.id)) {
-      continue;
-    }
-    fresh.push(item);
-    seen.add(item.id);
-  }
-
-  if (fresh.length === 0 && kept.length === prev.length) {
-    let changed = false;
-    for (let i = 0; i < kept.length; i += 1) {
-      if (kept[i] !== prev[i]) {
-        changed = true;
+  if (next.length === prev.length) {
+    let unchanged = true;
+    for (let i = 0; i < next.length; i += 1) {
+      if (next[i] !== prev[i]) {
+        unchanged = false;
         break;
       }
     }
-    if (!changed) {
+    if (unchanged) {
       return prev;
     }
   }
 
-  return [...fresh, ...kept];
+  return next;
 }
 
 function createLocalStyles(colors: ThemeColors, isDesktopWeb: boolean) {
