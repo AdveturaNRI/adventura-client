@@ -62,8 +62,11 @@ import { trackVkEvent, VK_PIXEL_EVENTS } from '@/services/analytics/vk-pixel';
 import { useMainScreenStyles } from './main-screen.styles';
 
 const DESKTOP_CONTENT_MAX = 1120;
-const DESKTOP_CARD_WIDTH = 420;
 const DESKTOP_GRID_GAP = Spacing.lg;
+/** Три колонки: (max − 2×gap) / 3 */
+const DESKTOP_CARD_WIDTH = Math.floor(
+  (DESKTOP_CONTENT_MAX - DESKTOP_GRID_GAP * 2) / 3,
+);
 const FEED_POLL_MS = 45_000;
 
 function isAppForeground() {

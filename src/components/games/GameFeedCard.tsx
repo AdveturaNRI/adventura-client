@@ -835,7 +835,7 @@ export function GameFeedCard({
       </View>
 
       <View style={styles.descriptionRow}>
-        <Text style={styles.description} numberOfLines={isDetail ? undefined : 2}>
+        <Text style={styles.description} numberOfLines={isDetail ? undefined : 3}>
           {description}
         </Text>
         <View style={styles.playersRow}>

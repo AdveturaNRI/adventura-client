@@ -660,7 +660,7 @@ export function PhotoCropEditor({
         minSide != null &&
         (cropRect.width < minSide || cropRect.height < minSide)
       ) {
-        toast.error('Фотография имеет слишком маленький размер'),
+        toast.error('Фотография имеет слишком маленький размер');
         return;
       }
 
