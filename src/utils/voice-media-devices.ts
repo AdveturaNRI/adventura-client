@@ -267,6 +267,41 @@ export function discardPrimedMicrophone(): void {
   primedMicError = null;
 }
 
+type ExpoAudioRecorderLike = {
+  setInput?: (inputUid: string) => void;
+  selectedDeviceId?: string | null;
+};
+
+/**
+ * Pin Settings mic onto expo-audio before prepareToRecordAsync().
+ * Web recorder only reads `selectedDeviceId` at getUserMedia time, and
+ * `setInput()` throws until the first prepare fills its device cache.
+ */
+export async function applyPreferredMicToAudioRecorder(
+  recorder: ExpoAudioRecorderLike,
+): Promise<boolean> {
+  const preferredId = resolvePreferredInputDeviceId();
+  if (!preferredId) {
+    return false;
+  }
+  if (canUseMediaDevices()) {
+    const { inputs } = await listAudioDevices();
+    if (inputs.length > 0 && !inputs.some((device) => device.deviceId === preferredId)) {
+      return false;
+    }
+  }
+  try {
+    recorder.setInput?.(preferredId);
+  } catch {
+    recorder.selectedDeviceId = preferredId;
+  }
+  return true;
+}
+
+export function clearAudioRecorderMicOverride(recorder: ExpoAudioRecorderLike): void {
+  recorder.selectedDeviceId = null;
+}
+
 export async function listAudioDevices(): Promise<{
   inputs: MediaDeviceOption[];
   outputs: MediaDeviceOption[];

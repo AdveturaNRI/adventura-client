@@ -1575,6 +1575,7 @@ export default function CreateGameScreen() {
           onChangeText={(description) => patch({ description })}
           placeholder="Расскажите о атмосфере, правилах стола и чего ждать игрокам"
           maxLength={4000}
+          maxHeight={360}
         />
 
         <Button

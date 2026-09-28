@@ -28,6 +28,11 @@ import { useTheme } from '@/hooks/use-theme';
 import { localizeErrorMessage } from '@/utils/localizeError';
 import { sendChatMessage, type ChatMessage } from '@/services/chats/chatsApi';
 import { peaksFromUris, prepareVoiceUpload } from '@/utils/voice-audio-edit';
+import { loadVoiceDevicePrefs } from '@/utils/voice-device-settings';
+import {
+  applyPreferredMicToAudioRecorder,
+  clearAudioRecorderMicOverride,
+} from '@/utils/voice-media-devices';
 
 type Phase = 'idle' | 'holding' | 'locked' | 'paused';
 type Segment = { uri: string; durationSec: number };
@@ -235,7 +240,17 @@ export function ChatVoiceComposer({ conversationId, disabled, replyToId, showMic
         );
         return;
       }
-      await recorder.prepareToRecordAsync();
+      await loadVoiceDevicePrefs();
+      const pinnedMic = await applyPreferredMicToAudioRecorder(recorder);
+      try {
+        await recorder.prepareToRecordAsync();
+      } catch (error) {
+        if (!pinnedMic) {
+          throw error;
+        }
+        clearAudioRecorderMicOverride(recorder);
+        await recorder.prepareToRecordAsync();
+      }
       if (!pressingRef.current && phaseRef.current !== 'locked') return;
       const at = Date.now();
       startedAtRef.current = at;

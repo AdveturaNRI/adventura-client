@@ -16,6 +16,43 @@ import { useThemedStyles } from '@/hooks/use-themed-styles';
 const DEFAULT_MIN_HEIGHT = 120;
 const VERTICAL_PADDING = Spacing.sm * 2;
 
+type ScrollSnapshot = {
+  node: Window | HTMLElement;
+  top: number;
+  left: number;
+};
+
+function collectScrollSnapshots(from: HTMLElement): ScrollSnapshot[] {
+  if (typeof window === 'undefined') {
+    return [];
+  }
+
+  const snaps: ScrollSnapshot[] = [
+    { node: window, top: window.scrollY, left: window.scrollX },
+  ];
+
+  let node: HTMLElement | null = from.parentElement;
+  while (node) {
+    snaps.push({ node, top: node.scrollTop, left: node.scrollLeft });
+    node = node.parentElement;
+  }
+
+  return snaps;
+}
+
+function restoreScrollSnapshots(snaps: ScrollSnapshot[]): void {
+  for (const snap of snaps) {
+    if (snap.node === window) {
+      window.scrollTo(snap.left, snap.top);
+      continue;
+    }
+
+    const el = snap.node as HTMLElement;
+    el.scrollTop = snap.top;
+    el.scrollLeft = snap.left;
+  }
+}
+
 type TextAreaProps = TextInputProps & {
   label: string;
   error?: string;
@@ -61,7 +98,6 @@ function createStyles(colors: ThemeColors) {
       ...(Platform.OS === 'web'
         ? ({
             resize: 'none',
-            overflow: 'hidden',
           } as object)
         : null),
     },
@@ -117,6 +153,8 @@ export function TextArea({
     [maxHeight, minHeight],
   );
 
+  const syncedValueRef = useRef(typeof value === 'string' ? value : '');
+
   const syncWebHeight = useCallback(() => {
     const element = inputRef.current as unknown as HTMLTextAreaElement | null;
 
@@ -124,10 +162,18 @@ export function TextArea({
       return;
     }
 
-    element.style.height = '0px';
+    // Collapsing height to 0/auto jumps RN Web ScrollView (and the window) to the top.
+    const snaps = collectScrollSnapshots(element);
+    const previousHeight = element.style.height;
+    element.style.height = 'auto';
     const nextHeight = resolveHeight(element.scrollHeight);
+    element.style.height = previousHeight;
+    restoreScrollSnapshots(snaps);
+
     element.style.height = `${nextHeight}px`;
-    setHeight(nextHeight);
+    restoreScrollSnapshots(snaps);
+
+    setHeight((current) => (current === nextHeight ? current : nextHeight));
   }, [resolveHeight]);
 
   useEffect(() => {
@@ -135,6 +181,12 @@ export function TextArea({
       return;
     }
 
+    const nextValue = typeof value === 'string' ? value : '';
+    if (syncedValueRef.current === nextValue) {
+      return;
+    }
+
+    syncedValueRef.current = nextValue;
     syncWebHeight();
   }, [syncWebHeight, value]);
 
@@ -145,6 +197,7 @@ export function TextArea({
   }, [height, minHeight, value]);
 
   const handleChangeText = (text: string) => {
+    syncedValueRef.current = text;
     onChangeText?.(text);
 
     if (Platform.OS === 'web') {
@@ -180,6 +233,9 @@ export function TextArea({
           error ? styles.inputError : null,
           { height, minHeight },
           maxHeight != null ? { maxHeight } : null,
+          Platform.OS === 'web'
+            ? ({ overflow: canScroll ? 'auto' : 'hidden' } as object)
+            : null,
           style,
         ]}
         onContentSizeChange={handleContentSizeChange}
