@@ -918,11 +918,12 @@ export function GameFeedCard({
               <Pressable
                 accessibilityRole="button"
                 accessibilityLabel={`Открыть игру ${item.title}`}
-                onPress={onPress}
-                style={StyleSheet.absoluteFillObject}
-              />
-            ) : null}
-            <View pointerEvents="box-none">{bodyContent}</View>
+                onPress={onPress}>
+                {bodyContent}
+              </Pressable>
+            ) : (
+              bodyContent
+            )}
           </View>
 
           <View style={styles.actionsWrap}>{actions}</View>
