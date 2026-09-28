@@ -116,7 +116,8 @@ export function MainDesktopSidebar() {
   const { isAuthenticated } = useAuth();
   const { profile } = useProfile();
   const unreadChats = realtime?.unreadChats ?? 0;
-  const profileIncomplete = !getQuestionnaireCompletion(profile).isComplete;
+  const profileIncomplete =
+    profile != null && !getQuestionnaireCompletion(profile).isComplete;
 
   const activeKey = MAIN_NAVBAR_ITEMS.find((item) =>
     pathname.startsWith(`/${item.key}`),

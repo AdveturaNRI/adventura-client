@@ -157,7 +157,8 @@ function MobileAppMenuModal({
   const realtime = useRealtimeOptional();
   const unreadChats = realtime?.unreadChats ?? 0;
   const { profile, refreshProfile } = useProfile();
-  const profileIncomplete = !getQuestionnaireCompletion(profile).isComplete;
+  const profileIncomplete =
+    profile != null && !getQuestionnaireCompletion(profile).isComplete;
   const { width: windowWidth } = useWindowDimensions();
   const sheetWidth = Math.min(windowWidth, 420);
   const [renderModal, setRenderModal] = useState(visible);

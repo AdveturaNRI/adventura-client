@@ -12,6 +12,10 @@ import {
 import { useAuth } from '@/context/AuthContext';
 import type { UserProfile } from '@/services/api/types';
 import { getProfile } from '@/services/profile/profileApi';
+import {
+  loadCachedProfile,
+  saveCachedProfile,
+} from '@/utils/profile-cache';
 import { getProfileAvatarUrl } from '@/utils/profile-mapper';
 
 type ProfileContextValue = {
@@ -47,6 +51,7 @@ export function ProfileProvider({ children }: { children: ReactNode }) {
   const applyProfile = useCallback(
     async (nextProfile: UserProfile) => {
       setProfile(nextProfile);
+      void saveCachedProfile(nextProfile.id, nextProfile);
       await syncNickname(nextProfile.nickname);
     },
     [syncNickname],
@@ -63,6 +68,7 @@ export function ProfileProvider({ children }: { children: ReactNode }) {
     try {
       const nextProfile = await getProfile();
       setProfile(nextProfile);
+      void saveCachedProfile(nextProfile.id, nextProfile);
       await syncNickname(nextProfile.nickname);
       return nextProfile;
     } catch {
@@ -93,7 +99,20 @@ export function ProfileProvider({ children }: { children: ReactNode }) {
     }
 
     loadedForUserIdRef.current = user.id;
-    void refreshProfileRef.current();
+    const userId = user.id;
+
+    void (async () => {
+      const cached = await loadCachedProfile(userId);
+      if (loadedForUserIdRef.current !== userId) {
+        return;
+      }
+
+      if (cached) {
+        setProfile(cached);
+      }
+
+      await refreshProfileRef.current();
+    })();
   }, [isAuthenticated, isAuthLoading, user?.id]);
 
   const avatarUrl = useMemo(() => getProfileAvatarUrl(profile), [profile]);
