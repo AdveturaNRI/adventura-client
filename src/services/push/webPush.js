@@ -70,7 +70,42 @@ async function ensureServiceWorker() {
     if (!canUseWebPush()) {
         return null;
     }
-    return navigator.serviceWorker.register(SW_PATH);
+    const registration = await navigator.serviceWorker.register(SW_PATH, {
+        updateViaCache: 'none',
+    });
+    try {
+        await registration.update();
+    }
+    catch {
+        // ignore network failures
+    }
+    if (registration.waiting) {
+        registration.waiting.postMessage({ type: 'SKIP_WAITING' });
+    }
+    registration.addEventListener('updatefound', () => {
+        const worker = registration.installing;
+        if (!worker) {
+            return;
+        }
+        worker.addEventListener('statechange', () => {
+            if (worker.state === 'installed' && registration.waiting) {
+                registration.waiting.postMessage({ type: 'SKIP_WAITING' });
+            }
+        });
+    });
+    return registration;
+}
+/** Soft SW refresh on any web visit — one reload after deploy is enough. */
+export async function refreshPushServiceWorker() {
+    if (!canUseWebPushApis() || !window.isSecureContext) {
+        return;
+    }
+    try {
+        await ensureServiceWorker();
+    }
+    catch {
+        // ignore
+    }
 }
 async function getFirebaseMessaging() {
     if (!canUseWebPush() || !isFirebaseWebConfigured()) {

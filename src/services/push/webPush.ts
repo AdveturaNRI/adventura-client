@@ -143,7 +143,52 @@ async function ensureServiceWorker(): Promise<ServiceWorkerRegistration | null> 
   if (!canUseWebPush()) {
     return null;
   }
-  return navigator.serviceWorker.register(SW_PATH);
+
+  const registration = await navigator.serviceWorker.register(SW_PATH, {
+    // Always revalidate service-worker.js — don't serve a cached SW script.
+    updateViaCache: 'none',
+  });
+
+  // Kick an update check on this visit (browser may otherwise wait up to ~24h).
+  try {
+    await registration.update();
+  } catch {
+    // ignore network failures
+  }
+
+  // Old SW builds without skipWaiting stay "waiting" until told — wake them once.
+  if (registration.waiting) {
+    registration.waiting.postMessage({ type: 'SKIP_WAITING' });
+  }
+
+  registration.addEventListener('updatefound', () => {
+    const worker = registration.installing;
+    if (!worker) {
+      return;
+    }
+    worker.addEventListener('statechange', () => {
+      if (worker.state === 'installed' && registration.waiting) {
+        registration.waiting.postMessage({ type: 'SKIP_WAITING' });
+      }
+    });
+  });
+
+  return registration;
+}
+
+/**
+ * Soft SW refresh on any web visit (even without enabling push again).
+ * One page reload is enough after deploy — new SW skipWaiting + claim.
+ */
+export async function refreshPushServiceWorker(): Promise<void> {
+  if (!canUseWebPushApis() || !window.isSecureContext) {
+    return;
+  }
+  try {
+    await ensureServiceWorker();
+  } catch {
+    // ignore
+  }
 }
 
 async function getFirebaseMessaging(): Promise<

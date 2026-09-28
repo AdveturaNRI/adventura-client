@@ -37,6 +37,7 @@ import {
   enableWebPush,
   getNotificationPermission,
   isWebPushSupported,
+  refreshPushServiceWorker,
   syncWebPushToUser,
   WEB_PUSH_OPT_IN_ENABLED,
 } from '@/services/push/webPush';
@@ -306,6 +307,8 @@ export function PushPromptProvider({ children }: { children: ReactNode }) {
     if (Platform.OS !== 'web' || typeof window === 'undefined' || !('serviceWorker' in navigator)) {
       return;
     }
+
+    void refreshPushServiceWorker();
 
     const onMessage = (event: MessageEvent) => {
       const data = event.data as { type?: string; url?: string } | null;
