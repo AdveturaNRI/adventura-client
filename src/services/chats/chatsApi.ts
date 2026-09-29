@@ -75,7 +75,26 @@ export type ChatMessage = {
     nickname: string;
     messageId: string | null;
   } | null;
+  reactions?: Array<{
+    emoji: string;
+    count: number;
+    reactedByMe: boolean;
+    reactors?: Array<{ userId: string; nickname: string; avatarUrl: string | null }>;
+  }>;
 };
+
+export type ChatReactionEvent = {
+  conversationId: string;
+  messageId: string;
+  actorId: string;
+  emoji: string | null;
+  reactions: NonNullable<ChatMessage['reactions']>;
+};
+
+export const CHAT_REACTION_EMOJIS = [
+  '❤️', '👍', '😂', '😮', '😢', '🔥', '🎉', '🥰', '😍', '😡', '🙏', '💯',
+  '🤔', '👀', '🥳', '👏', '🤝', '✨', '💔', '🤗', '😎', '🙌', '💩',
+];
 
 export type ConversationBackground = {
   kind: 'default' | 'preset' | 'custom';
@@ -93,6 +112,7 @@ export type ConversationListItem = {
   membersPreview?: ChatPeer[];
   myRole?: 'owner' | 'admin' | 'member' | null;
   peerLastReadAt: string | null;
+  myLastReadAt?: string | null;
   lastMessage: {
     id: string;
     body: string | null;
@@ -132,12 +152,7 @@ export function normalizeMessageAttachments(message: ChatMessage): ChatAttachmen
     return [message.attachment];
   }
   if (message.image) {
-    const url =
-      message.image.original ??
-      message.image.large ??
-      message.image.medium ??
-      message.image.thumb ??
-      null;
+    const url = message.image.original ?? message.image.large ?? message.image.medium ?? message.image.thumb ?? null;
     return [
       {
         kind: 'image',
@@ -212,21 +227,11 @@ export function addGroupMembers(conversationId: string, memberIds: string[]) {
 }
 
 export function removeGroupMember(conversationId: string, userId: string) {
-  return apiRequest<ChatMember[]>(
-    `/chats/${conversationId}/members/${encodeURIComponent(userId)}`,
-    { method: 'DELETE' },
-  );
+  return apiRequest<ChatMember[]>(`/chats/${conversationId}/members/${encodeURIComponent(userId)}`, { method: 'DELETE' });
 }
 
-export function setGroupMemberRole(
-  conversationId: string,
-  userId: string,
-  role: 'admin' | 'member',
-) {
-  return apiRequest<ChatMember[]>(
-    `/chats/${conversationId}/members/${encodeURIComponent(userId)}/role`,
-    { method: 'PUT', body: { role } },
-  );
+export function setGroupMemberRole(conversationId: string, userId: string, role: 'admin' | 'member') {
+  return apiRequest<ChatMember[]>(`/chats/${conversationId}/members/${encodeURIComponent(userId)}/role`, { method: 'PUT', body: { role } });
 }
 
 export function transferGroupOwnership(conversationId: string, userId: string) {
@@ -251,6 +256,48 @@ export function leaveGroup(conversationId: string) {
 export function listMessages(conversationId: string, cursor?: string) {
   const query = cursor ? `?cursor=${encodeURIComponent(cursor)}` : '';
   return apiRequest<MessagesPage>(`/chats/${conversationId}/messages${query}`, {
+    skipLoading: true,
+  });
+}
+
+export function setMessageReaction(conversationId: string, messageId: string, emoji: string) {
+  return apiRequest<{
+    messageId: string;
+    reactions: NonNullable<ChatMessage['reactions']>;
+  }>(`/chats/${conversationId}/messages/${messageId}/reaction`, {
+    method: 'PUT',
+    body: { emoji },
+  });
+}
+
+export function removeMessageReaction(conversationId: string, messageId: string) {
+  return apiRequest<{
+    messageId: string;
+    reactions: NonNullable<ChatMessage['reactions']>;
+  }>(`/chats/${conversationId}/messages/${messageId}/reaction`, {
+    method: 'DELETE',
+  });
+}
+
+export function getUnreadMessageReactionCount(conversationId: string) {
+  return apiRequest<{ count: number }>(`/chats/${conversationId}/reactions/unread`);
+}
+
+export function getChatReactionOrder() {
+  return apiRequest<{ reactions: string[] }>('/chats/reactions/order');
+}
+
+export function openNextUnreadMessageReaction(conversationId: string) {
+  return apiRequest<{
+    item: { messageId: string; emoji: string; actorNickname: string; message?: ChatMessage } | null;
+    count: number;
+  }>(`/chats/${conversationId}/reactions/unread/next`, { method: 'POST' });
+}
+
+export function markVisibleMessagesRead(conversationId: string, messageIds: string[]) {
+  return apiRequest<{ ok: true; count: number }>(`/chats/${conversationId}/read-visible`, {
+    method: 'POST',
+    body: { messageIds },
     skipLoading: true,
   });
 }
@@ -317,10 +364,7 @@ export async function setConversationBackground(
       const response = await fetch(input.fileUri);
       const blob = await response.blob();
       // data: URI → blob часто без type; сервер отклоняет «пустой» mime.
-      const typed =
-        blob.type && blob.type !== 'application/octet-stream'
-          ? blob
-          : new Blob([blob], { type: mimeType });
+      const typed = blob.type && blob.type !== 'application/octet-stream' ? blob : new Blob([blob], { type: mimeType });
       formData.append('file', typed, fileName);
     } else {
       formData.append('file', {
@@ -331,11 +375,9 @@ export async function setConversationBackground(
     }
   }
 
-  return apiMultipart<ConversationListItem>(
-    `/chats/${conversationId}/background`,
-    formData,
-    { skipLoading: true },
-  );
+  return apiMultipart<ConversationListItem>(`/chats/${conversationId}/background`, formData, {
+    skipLoading: true,
+  });
 }
 
 export async function sendChatMessage(
@@ -427,19 +469,14 @@ export async function sendChatDiceRoll(
       modifier: options.modifier ?? 0,
       hidden: Boolean(options.hidden),
       ...(options.color ? { color: options.color } : {}),
-      ...(CHAT_DICE_SKINS_ENABLED && options.skin && options.skin !== 'standard'
-        ? { skin: options.skin }
-        : {}),
+      ...(CHAT_DICE_SKINS_ENABLED && options.skin && options.skin !== 'standard' ? { skin: options.skin } : {}),
       ...(options.groups && options.groups.length > 0 ? { groups: options.groups } : {}),
       ...(options.mode && options.mode !== 'normal' ? { mode: options.mode } : {}),
     },
   });
 }
 
-export async function forwardChatMessages(
-  targetConversationId: string,
-  messageIds: string[],
-) {
+export async function forwardChatMessages(targetConversationId: string, messageIds: string[]) {
   return apiRequest<ChatMessage[]>(`/chats/${targetConversationId}/forward`, {
     method: 'POST',
     body: { messageIds },
@@ -494,17 +531,25 @@ export function getActiveChatVoiceCall(conversationId: string) {
 }
 
 export function acceptChatVoiceCall(conversationId: string, callId: string) {
-  return apiRequest<{ callId: string; conversationId: string; byUserId: string }>(
-    `/chats/${conversationId}/voice/accept`,
-    { method: 'POST', body: { callId } },
-  );
+  return apiRequest<{
+    callId: string;
+    conversationId: string;
+    byUserId: string;
+  }>(`/chats/${conversationId}/voice/accept`, {
+    method: 'POST',
+    body: { callId },
+  });
 }
 
 export function joinChatVoiceCall(conversationId: string, callId?: string) {
-  return apiRequest<{ callId: string; conversationId: string; byUserId: string }>(
-    `/chats/${conversationId}/voice/join`,
-    { method: 'POST', body: callId ? { callId } : {} },
-  );
+  return apiRequest<{
+    callId: string;
+    conversationId: string;
+    byUserId: string;
+  }>(`/chats/${conversationId}/voice/join`, {
+    method: 'POST',
+    body: callId ? { callId } : {},
+  });
 }
 
 export function declineChatVoiceCall(conversationId: string, callId: string) {

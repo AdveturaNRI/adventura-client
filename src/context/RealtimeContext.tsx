@@ -1,21 +1,10 @@
-import {
-  createContext,
-  useContext,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  type ReactNode,
-} from 'react';
+import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { AppState, Platform } from 'react-native';
 
 import { useAuth } from '@/context/AuthContext';
-import type { ChatMessage, ConversationListItem } from '@/services/chats/chatsApi';
+import type { ChatMessage, ChatReactionEvent, ConversationListItem } from '@/services/chats/chatsApi';
 import { appendCachedThreadMessage } from '@/utils/chat-thread-cache';
-import {
-  getNotificationsUnreadCount,
-  type PortalNotification,
-} from '@/services/notifications/notificationsApi';
+import { getNotificationsUnreadCount, type PortalNotification } from '@/services/notifications/notificationsApi';
 import {
   bindRealtimeHandlers,
   connectRealtime,
@@ -43,6 +32,8 @@ type RealtimeContextValue = {
   /** Bumps when the app returns to foreground / socket reconnects — catch up via HTTP. */
   dataResyncAt: number;
   lastMessage: ChatMessage | null;
+  lastMessageReaction: ChatReactionEvent | null;
+  lastReactionUnread: { conversationId: string; count: number } | null;
   lastConversationUpdate: ConversationListItem | null;
   lastConversationRead: ConversationReadPayload | null;
   lastConversationDeleted: ConversationDeletedPayload | null;
@@ -52,6 +43,7 @@ type RealtimeContextValue = {
   setUnreadNotifications: (value: number) => void;
   publishConversationUpdate: (conversation: ConversationListItem) => void;
   subscribeMessages: (listener: (message: ChatMessage) => void) => () => void;
+  subscribeMessageReactions: (listener: (event: ChatReactionEvent) => void) => () => void;
   subscribeCallEvents: (listener: (event: CallRealtimeEvent) => void) => () => void;
 };
 
@@ -63,15 +55,18 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
   const [unreadNotifications, setUnreadNotifications] = useState(0);
   const [dataResyncAt, setDataResyncAt] = useState(0);
   const [lastMessage, setLastMessage] = useState<ChatMessage | null>(null);
-  const [lastConversationUpdate, setLastConversationUpdate] =
-    useState<ConversationListItem | null>(null);
-  const [lastConversationRead, setLastConversationRead] =
-    useState<ConversationReadPayload | null>(null);
-  const [lastConversationDeleted, setLastConversationDeleted] =
-    useState<ConversationDeletedPayload | null>(null);
+  const [lastMessageReaction, setLastMessageReaction] = useState<ChatReactionEvent | null>(null);
+  const [lastReactionUnread, setLastReactionUnread] = useState<{
+    conversationId: string;
+    count: number;
+  } | null>(null);
+  const [lastConversationUpdate, setLastConversationUpdate] = useState<ConversationListItem | null>(null);
+  const [lastConversationRead, setLastConversationRead] = useState<ConversationReadPayload | null>(null);
+  const [lastConversationDeleted, setLastConversationDeleted] = useState<ConversationDeletedPayload | null>(null);
   const [lastPresence, setLastPresence] = useState<PresenceUpdatePayload | null>(null);
   const [lastNotification, setLastNotification] = useState<PortalNotification | null>(null);
   const messageListenersRef = useRef(new Set<(message: ChatMessage) => void>());
+  const reactionListenersRef = useRef(new Set<(event: ChatReactionEvent) => void>());
   const callListenersRef = useRef(new Set<(event: CallRealtimeEvent) => void>());
   const userIdRef = useRef(user?.id);
 
@@ -83,6 +78,14 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
       return () => {
         messageListenersRef.current.delete(listener);
       };
+    },
+    [],
+  );
+
+  const subscribeMessageReactions = useMemo(
+    () => (listener: (event: ChatReactionEvent) => void) => {
+      reactionListenersRef.current.add(listener);
+      return () => reactionListenersRef.current.delete(listener);
     },
     [],
   );
@@ -100,9 +103,7 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
   const publishConversationUpdate = useMemo(
     () => (conversation: ConversationListItem) => {
       setLastConversationUpdate(conversation);
-      setLastConversationDeleted((prev) =>
-        prev?.conversationId === conversation.id ? null : prev,
-      );
+      setLastConversationDeleted((prev) => (prev?.conversationId === conversation.id ? null : prev));
     },
     [],
   );
@@ -118,6 +119,8 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
       setUnreadChats(0);
       setUnreadNotifications(0);
       setLastMessage(null);
+      setLastMessageReaction(null);
+      setLastReactionUnread(null);
       setLastConversationUpdate(null);
       setLastConversationRead(null);
       setLastConversationDeleted(null);
@@ -137,9 +140,7 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
         // Пока сокет жив — кладём сообщение в кэш треда (даже если чат не открыт).
         appendCachedThreadMessage(message.conversationId, message);
         setLastMessage(message);
-        setLastConversationDeleted((prev) =>
-          prev?.conversationId === message.conversationId ? null : prev,
-        );
+        setLastConversationDeleted((prev) => (prev?.conversationId === message.conversationId ? null : prev));
         messageListenersRef.current.forEach((listener) => listener(message));
         if (
           message.senderId !== userIdRef.current &&
@@ -151,18 +152,22 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
           notifyIncomingChatMessage(message.conversationId);
         }
       },
+      onMessageReaction: (event) => {
+        setLastMessageReaction(event);
+        reactionListenersRef.current.forEach((listener) => listener(event));
+        if (event.actorId !== userIdRef.current) {
+          notifyIncomingChatMessage(event.conversationId);
+        }
+      },
+      onReactionUnreadSync: setLastReactionUnread,
       onConversationUpdated: (conversation) => {
         setLastConversationUpdate(conversation);
-        setLastConversationDeleted((prev) =>
-          prev?.conversationId === conversation.id ? null : prev,
-        );
+        setLastConversationDeleted((prev) => (prev?.conversationId === conversation.id ? null : prev));
       },
       onConversationRead: setLastConversationRead,
       onConversationDeleted: (payload) => {
         setLastConversationDeleted(payload);
-        setLastConversationUpdate((prev) =>
-          prev?.id === payload.conversationId ? null : prev,
-        );
+        setLastConversationUpdate((prev) => (prev?.id === payload.conversationId ? null : prev));
       },
       onPresenceUpdate: setLastPresence,
       onNotificationNew: (notification) => {
@@ -376,6 +381,8 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
       unreadNotifications,
       dataResyncAt,
       lastMessage,
+      lastMessageReaction,
+      lastReactionUnread,
       lastConversationUpdate,
       lastConversationRead,
       lastConversationDeleted,
@@ -385,6 +392,7 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
       setUnreadNotifications,
       publishConversationUpdate,
       subscribeMessages,
+      subscribeMessageReactions,
       subscribeCallEvents,
     }),
     [
@@ -392,6 +400,8 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
       unreadNotifications,
       dataResyncAt,
       lastMessage,
+      lastMessageReaction,
+      lastReactionUnread,
       lastConversationUpdate,
       lastConversationRead,
       lastConversationDeleted,
@@ -399,6 +409,7 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
       lastNotification,
       publishConversationUpdate,
       subscribeMessages,
+      subscribeMessageReactions,
       subscribeCallEvents,
     ],
   );

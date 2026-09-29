@@ -1,24 +1,14 @@
 import { type ReactNode, useCallback, useMemo, useRef } from 'react';
-import {
-  Platform,
-  Pressable,
-  type GestureResponderEvent,
-  type StyleProp,
-  type ViewStyle,
-} from 'react-native';
+import { Platform, Pressable, type GestureResponderEvent, type StyleProp, type ViewStyle } from 'react-native';
 import { Gesture, GestureDetector, MouseButton } from 'react-native-gesture-handler';
-import Animated, {
-  runOnJS,
-  useAnimatedStyle,
-  useSharedValue,
-  withSpring,
-} from 'react-native-reanimated';
+import Animated, { runOnJS, useAnimatedStyle, useSharedValue, withSpring } from 'react-native-reanimated';
 
 type ChatMessagePressableProps = {
   children: ReactNode;
   style?: StyleProp<ViewStyle>;
   selectionMode: boolean;
   onOpenActions: () => void;
+  onDoubleTap?: () => void;
 };
 
 const LONG_PRESS_MS = 350;
@@ -66,18 +56,14 @@ type WebSwipeState = {
  * Long press / ПКМ / горизонтальный свайп через Pressable + touch (touchAction: pan-y).
  * Native: Pan + LongPress из RNGH, как SwipeBlock.
  */
-export function ChatMessagePressable({
-  children,
-  style,
-  selectionMode,
-  onOpenActions,
-}: ChatMessagePressableProps) {
+export function ChatMessagePressable({ children, style, selectionMode, onOpenActions, onDoubleTap }: ChatMessagePressableProps) {
   const translateX = useSharedValue(0);
   const touchStartX = useSharedValue(0);
   const touchStartY = useSharedValue(0);
   const isPanActivated = useSharedValue(false);
   const webSwipeRef = useRef<WebSwipeState | null>(null);
   const webLongPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastWebTapAtRef = useRef(0);
 
   const openActions = useCallback(() => {
     clearDocumentSelection();
@@ -179,8 +165,19 @@ export function ChatMessagePressable({
     translateX.value = withSpring(0, SPRING);
     if (state?.axis === 'horizontal' && Math.abs(dragged) >= OPEN_DRAG_DISTANCE) {
       openActions();
+      lastWebTapAtRef.current = 0;
+      return;
     }
-  }, [clearWebLongPress, openActions, translateX]);
+    if (state?.axis !== 'vertical' && state?.axis !== 'horizontal') {
+      const now = Date.now();
+      if (now - lastWebTapAtRef.current < 320) {
+        lastWebTapAtRef.current = 0;
+        onDoubleTap?.();
+      } else {
+        lastWebTapAtRef.current = now;
+      }
+    }
+  }, [clearWebLongPress, onDoubleTap, openActions, translateX]);
 
   const longPress = useMemo(
     () =>
@@ -192,6 +189,18 @@ export function ChatMessagePressable({
           runOnJS(openActions)();
         }),
     [openActions],
+  );
+
+  const doubleTap = useMemo(
+    () =>
+      Gesture.Tap()
+        .numberOfTaps(2)
+        .maxDuration(260)
+        .onEnd((_event, success) => {
+          'worklet';
+          if (success && onDoubleTap) runOnJS(onDoubleTap)();
+        }),
+    [onDoubleTap],
   );
 
   const pan = useMemo(
@@ -258,7 +267,7 @@ export function ChatMessagePressable({
     [isPanActivated, openActions, touchStartX, touchStartY, translateX],
   );
 
-  const nativeComposed = useMemo(() => Gesture.Race(longPress, pan), [longPress, pan]);
+  const nativeComposed = useMemo(() => Gesture.Race(longPress, pan, doubleTap), [doubleTap, longPress, pan]);
 
   const animatedStyle = useAnimatedStyle(() => ({
     transform: [{ translateX: translateX.value }],
@@ -281,8 +290,16 @@ export function ChatMessagePressable({
         onTouchMove={onWebTouchMove}
         onTouchEnd={onWebTouchEnd}
         onTouchCancel={resetWebSwipe}
+        // @ts-expect-error RN Web exposes the DOM double-click event.
+        onDoubleClick={(event: { preventDefault: () => void; stopPropagation: () => void }) => {
+          event.preventDefault();
+          event.stopPropagation();
+          lastWebTapAtRef.current = 0;
+          onDoubleTap?.();
+        }}
         // @ts-expect-error RN Web: native context menu
-        onContextMenu={handleContextMenu}>
+        onContextMenu={handleContextMenu}
+      >
         {children}
       </Animated.View>
     );

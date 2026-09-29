@@ -17,11 +17,7 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import type {
-  NativeScrollEvent,
-  NativeSyntheticEvent,
-  TextInputKeyPressEventData,
-} from 'react-native';
+import type { NativeScrollEvent, NativeSyntheticEvent, TextInputKeyPressEventData, ViewToken } from 'react-native';
 import Svg, { Path } from 'react-native-svg';
 import { FlatList } from 'react-native-gesture-handler';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -39,11 +35,7 @@ import { ChatBackgroundLayer } from '@/components/chats/ChatBackgroundLayer';
 import { ChatBackgroundPickerSheet } from '@/components/chats/ChatBackgroundPickerSheet';
 import { applySharedConversationBackground } from '@/utils/chat-background-settings';
 import { ChatDiceBubble } from '@/components/chats/ChatDiceBubble';
-import {
-  ChatDiceOverlay,
-  type ChatDiceLocalRollRequest,
-  type ChatDiceOverlayRequest,
-} from '@/components/chats/ChatDiceOverlay';
+import { ChatDiceOverlay, type ChatDiceLocalRollRequest, type ChatDiceOverlayRequest } from '@/components/chats/ChatDiceOverlay';
 import type { DiceRollOutcome } from '@/components/dice/dice-stage.types';
 import { ChatDicePopover } from '@/components/chats/ChatDicePopover';
 import { ChatEmojiPanel } from '@/components/chats/ChatEmojiPanel';
@@ -85,7 +77,7 @@ import {
   setGroupMemberRole,
   transferGroupOwnership,
   deleteGroupChat,
-  markConversationRead,
+  markVisibleMessagesRead,
   sendChatMessage,
   sendChatDiceRoll,
   forwardChatMessages,
@@ -95,6 +87,12 @@ import {
   MAX_CHAT_ATTACHMENTS,
   normalizeMessageAttachments,
   getActiveChatVoiceCall,
+  setMessageReaction,
+  removeMessageReaction,
+  getUnreadMessageReactionCount,
+  openNextUnreadMessageReaction,
+  getChatReactionOrder,
+  CHAT_REACTION_EMOJIS,
 } from '@/services/chats/chatsApi';
 import type {
   ActiveChatVoiceCall,
@@ -106,16 +104,8 @@ import type {
 } from '@/services/chats/chatsApi';
 import { ApiError } from '@/services/api/api-error';
 import { upsertWandererReaction, clearWandererReaction } from '@/services/profile/wanderersApi';
-import {
-  diceRollPreviewText,
-  parseDiceRollPayload,
-  type DiceRollMode,
-} from '@/utils/chat-dice-roll';
-import {
-  getDiceAnimationSpeedSync,
-  loadDiceAnimationSpeed,
-  subscribeDiceAnimationSpeed,
-} from '@/utils/dice-animations-storage';
+import { diceRollPreviewText, parseDiceRollPayload, type DiceRollMode } from '@/utils/chat-dice-roll';
+import { getDiceAnimationSpeedSync, loadDiceAnimationSpeed, subscribeDiceAnimationSpeed } from '@/utils/dice-animations-storage';
 import { setFocusedChatConversation } from '@/utils/chat-alerts';
 import { localizeErrorMessage } from '@/utils/localizeError';
 import { stableAvatarUrl } from '@/utils/stable-avatar-url';
@@ -133,10 +123,7 @@ import {
 } from '@/utils/chat-thread-cache';
 import { shouldSendChatOnEnter } from '@/utils/chat-enter-key';
 import { beginMicrophonePrimeFromGesture } from '@/utils/voice-media-devices';
-import {
-  getCachedFileTooLargeMessage,
-  getCachedUploadLimits,
-} from '@/utils/upload-limits';
+import { getCachedFileTooLargeMessage, getCachedUploadLimits } from '@/utils/upload-limits';
 
 function isGroupConversation(item: ConversationListItem | null | undefined) {
   return item?.type === 'group';
@@ -217,11 +204,7 @@ function extensionForImageMime(mimeType: string) {
 
 function normalizeClipboardImageFile(file: File) {
   const mimeType = file.type || 'image/png';
-  const hasRealName =
-    Boolean(file.name?.trim()) &&
-    file.name !== 'image.png' &&
-    file.name !== 'blob' &&
-    file.name !== 'untitled';
+  const hasRealName = Boolean(file.name?.trim()) && file.name !== 'image.png' && file.name !== 'blob' && file.name !== 'untitled';
 
   if (hasRealName) {
     return file;
@@ -282,13 +265,7 @@ function getClipboardImageFiles(clipboardData: DataTransfer | null): File[] {
 }
 
 function fullUrlForAttachment(attachment: ChatAttachment): string | null {
-  return (
-    attachment.image?.original ??
-    attachment.image?.large ??
-    attachment.image?.medium ??
-    attachment.image?.thumb ??
-    attachment.url
-  );
+  return attachment.image?.original ?? attachment.image?.large ?? attachment.image?.medium ?? attachment.image?.thumb ?? attachment.url;
 }
 
 function getWebHostNode(ref: View | null): HTMLElement | null {
@@ -315,10 +292,8 @@ function BubbleTail({ color, side }: { color: string; side: 'left' | 'right' }) 
       width={11}
       height={16}
       viewBox="0 0 11 16"
-      style={[
-        { position: 'absolute', bottom: 0 },
-        side === 'left' ? { left: -5 } : { right: -5 },
-      ]}>
+      style={[{ position: 'absolute', bottom: 0 }, side === 'left' ? { left: -5 } : { right: -5 }]}
+    >
       {side === 'left' ? (
         <Path d="M11 0C11 8.5 7.5 13.5 0 16H11V0Z" fill={color} />
       ) : (
@@ -396,7 +371,13 @@ function formatMessageFullDateTime(iso: string) {
 
 type ChatTimelineItem =
   | { type: 'date'; id: string; label: string }
-  | { type: 'message'; id: string; message: ChatMessage; showAuthorMeta: boolean };
+  | { type: 'unread'; id: string; label: string }
+  | {
+      type: 'message';
+      id: string;
+      message: ChatMessage;
+      showAuthorMeta: boolean;
+    };
 
 function isSystemChatMessage(message: ChatMessage) {
   const kind = message.kind;
@@ -412,10 +393,12 @@ function isSystemChatMessage(message: ChatMessage) {
 
 function buildChatTimeline(
   messages: ChatMessage[],
-  options: { isGroup: boolean; myId?: string },
+  options: { isGroup: boolean; myId?: string; myLastReadAt?: string | null },
 ): ChatTimelineItem[] {
   const items: ChatTimelineItem[] = [];
   let previousDayStart: number | null = null;
+  let unreadDividerAdded = false;
+  const readAt = options.myLastReadAt ? new Date(options.myLastReadAt).getTime() : 0;
 
   for (let index = 0; index < messages.length; index += 1) {
     const message = messages[index];
@@ -434,20 +417,24 @@ function buildChatTimeline(
       previousDayStart = dayStart;
     }
 
+    const isUnreadIncoming =
+      !unreadDividerAdded &&
+      !isSystemChatMessage(message) &&
+      message.senderId !== options.myId &&
+      (Number.isNaN(date.getTime()) || date.getTime() > readAt);
+    if (isUnreadIncoming) {
+      items.push({ type: 'unread', id: 'unread-boundary', label: 'Непрочитанные сообщения' });
+      unreadDividerAdded = true;
+    }
+
     const mine = Boolean(options.myId && message.senderId === options.myId);
     const previous = index > 0 ? messages[index - 1] : null;
     let showAuthorMeta = false;
 
     if (options.isGroup && !mine && !isSystemChatMessage(message)) {
       const previousDay =
-        previous && !Number.isNaN(new Date(previous.createdAt).getTime())
-          ? startOfLocalDay(new Date(previous.createdAt))
-          : null;
-      const breaksSeries =
-        !previous ||
-        isSystemChatMessage(previous) ||
-        previous.senderId !== message.senderId ||
-        previousDay !== dayStart;
+        previous && !Number.isNaN(new Date(previous.createdAt).getTime()) ? startOfLocalDay(new Date(previous.createdAt)) : null;
+      const breaksSeries = !previous || isSystemChatMessage(previous) || previous.senderId !== message.senderId || previousDay !== dayStart;
       showAuthorMeta = breaksSeries;
     }
 
@@ -463,10 +450,7 @@ function buildChatTimeline(
 }
 
 /** Не дёргаем peer.avatarUrl на каждый refetch — только если сменился объект. */
-function withStablePeerAvatar(
-  prev: ConversationListItem | null | undefined,
-  next: ConversationListItem,
-): ConversationListItem {
+function withStablePeerAvatar(prev: ConversationListItem | null | undefined, next: ConversationListItem): ConversationListItem {
   if (!next.peer || !prev?.peer || prev.peer.id !== next.peer.id) {
     return next;
   }
@@ -875,6 +859,24 @@ function createStyles(colors: ThemeColors, bottomPad: number, isDark: boolean) {
       fontWeight: '600',
       color: colors.textMuted,
     },
+    unreadDividerRow: {
+      width: '100%',
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: Spacing.sm,
+      paddingHorizontal: Spacing.md,
+      paddingVertical: Spacing.sm,
+    },
+    unreadDividerLine: {
+      flex: 1,
+      height: StyleSheet.hairlineWidth,
+      backgroundColor: colors.primary + '70',
+    },
+    unreadDividerText: {
+      color: colors.primary,
+      fontSize: FontSize.caption,
+      fontWeight: '700',
+    },
     favoriteNotice: {
       maxWidth: '100%',
       flexDirection: 'row',
@@ -1009,9 +1011,7 @@ function createStyles(colors: ThemeColors, bottomPad: number, isDark: boolean) {
       flexDirection: 'row',
       alignItems: 'flex-end',
       paddingHorizontal: 4,
-      ...(Platform.OS === 'web'
-        ? ({ userSelect: 'none', WebkitUserSelect: 'none' } as object)
-        : null),
+      ...(Platform.OS === 'web' ? ({ userSelect: 'none', WebkitUserSelect: 'none' } as object) : null),
     },
     bubbleRowMine: {
       justifyContent: 'flex-end',
@@ -1374,12 +1374,14 @@ export default function ChatThreadScreen() {
   const { requestAfterFirstMessage } = usePushPrompt();
   const {
     lastMessage,
+    lastReactionUnread,
     lastConversationUpdate,
     lastConversationRead,
     lastConversationDeleted,
     lastPresence,
     dataResyncAt,
     subscribeMessages,
+    subscribeMessageReactions,
     subscribeCallEvents,
     publishConversationUpdate,
   } = useRealtime();
@@ -1401,20 +1403,15 @@ export default function ChatThreadScreen() {
   }, [conversationId]);
 
   const [hydratedId, setHydratedId] = useState(conversationId);
-  const [conversation, setConversation] = useState<ConversationListItem | null>(
-    () => hydrateChatThread(conversationId).conversation,
-  );
-  const [messages, setMessages] = useState<ChatMessage[]>(
-    () => hydrateChatThread(conversationId).messages,
-  );
+  const [conversation, setConversation] = useState<ConversationListItem | null>(() => hydrateChatThread(conversationId).conversation);
+  const [messages, setMessages] = useState<ChatMessage[]>(() => hydrateChatThread(conversationId).messages);
   const messagesRef = useRef<ChatMessage[]>([]);
   messagesRef.current = messages;
-  const [peerLastReadAt, setPeerLastReadAt] = useState<string | null>(
-    () => hydrateChatThread(conversationId).peerLastReadAt,
+  const [unreadBoundaryAt, setUnreadBoundaryAt] = useState<string | null>(
+    () => hydrateChatThread(conversationId).conversation?.myLastReadAt ?? null,
   );
-  const [nextCursor, setNextCursor] = useState<string | null>(
-    () => hydrateChatThread(conversationId).nextCursor,
-  );
+  const [peerLastReadAt, setPeerLastReadAt] = useState<string | null>(() => hydrateChatThread(conversationId).peerLastReadAt);
+  const [nextCursor, setNextCursor] = useState<string | null>(() => hydrateChatThread(conversationId).nextCursor);
   const [loading, setLoading] = useState(() => !hydrateChatThread(conversationId).ready);
   const [sending, setSending] = useState(false);
   const {
@@ -1434,10 +1431,7 @@ export default function ChatThreadScreen() {
     minimized: voiceMinimized,
   } = useVoiceCall();
   const voiceActiveHere =
-    Boolean(conversationId) &&
-    voiceConversationId === conversationId &&
-    voicePhase !== 'idle' &&
-    voicePhase !== 'incoming';
+    Boolean(conversationId) && voiceConversationId === conversationId && voicePhase !== 'idle' && voicePhase !== 'incoming';
   const [ongoingVoiceCall, setOngoingVoiceCall] = useState<ActiveChatVoiceCall | null>(null);
   const [joiningOngoingVoice, setJoiningOngoingVoice] = useState(false);
 
@@ -1527,7 +1521,10 @@ export default function ChatThreadScreen() {
   }, [conversationId, subscribeCallEvents, voiceActiveHere]);
   const [draft, setDraft] = useState('');
   const [pendingAttachments, setPendingAttachments] = useState<PendingAttachment[]>([]);
-  const [lightbox, setLightbox] = useState<{ uris: string[]; index: number } | null>(null);
+  const [lightbox, setLightbox] = useState<{
+    uris: string[];
+    index: number;
+  } | null>(null);
   const [isDraggingFile, setIsDraggingFile] = useState(false);
   const [emojiPanelOpen, setEmojiPanelOpen] = useState(false);
   const emojiPanelOpenRef = useRef(false);
@@ -1551,31 +1548,29 @@ export default function ChatThreadScreen() {
     stableSenderAvatarsRef.current.clear();
   }, [conversationId]);
 
-  const resolveStableSenderAvatar = useCallback(
-    (senderId: string | undefined, nextUrl?: string | null) => {
-      if (!senderId) {
-        return nextUrl?.trim() || null;
-      }
-      const incoming = nextUrl?.trim() || null;
-      if (!incoming) {
-        return stableSenderAvatarsRef.current.get(senderId) ?? null;
-      }
-      const prev = stableSenderAvatarsRef.current.get(senderId) ?? null;
-      const stable = stableAvatarUrl(prev, incoming) ?? incoming;
-      stableSenderAvatarsRef.current.set(senderId, stable);
-      return stable;
-    },
-    [],
-  );
+  const resolveStableSenderAvatar = useCallback((senderId: string | undefined, nextUrl?: string | null) => {
+    if (!senderId) {
+      return nextUrl?.trim() || null;
+    }
+    const incoming = nextUrl?.trim() || null;
+    if (!incoming) {
+      return stableSenderAvatarsRef.current.get(senderId) ?? null;
+    }
+    const prev = stableSenderAvatarsRef.current.get(senderId) ?? null;
+    const stable = stableAvatarUrl(prev, incoming) ?? incoming;
+    stableSenderAvatarsRef.current.set(senderId, stable);
+    return stable;
+  }, []);
 
   const [renameOpen, setRenameOpen] = useState(false);
   const [addMembersOpen, setAddMembersOpen] = useState(false);
-  const [addMemberContacts, setAddMemberContacts] = useState<
-    { id: string; nickname: string; avatarUrl: string | null }[]
-  >([]);
+  const [addMemberContacts, setAddMemberContacts] = useState<{ id: string; nickname: string; avatarUrl: string | null }[]>([]);
   const [pendingDeleteGroup, setPendingDeleteGroup] = useState(false);
   const [replyTo, setReplyTo] = useState<ChatReplyPreviewData | null>(null);
   const [actionMessage, setActionMessage] = useState<ChatMessage | null>(null);
+  const [unreadReactionCount, setUnreadReactionCount] = useState(0);
+  const [reactionOrder, setReactionOrder] = useState<string[]>(CHAT_REACTION_EMOJIS);
+  const [voiceRecording, setVoiceRecording] = useState(false);
   const [selectionMode, setSelectionMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [forwardOpen, setForwardOpen] = useState(false);
@@ -1584,19 +1579,22 @@ export default function ChatThreadScreen() {
   const [dicePopoverOpen, setDicePopoverOpen] = useState(false);
   const [diceRollBusy, setDiceRollBusy] = useState(false);
   const diceRollBusyRef = useRef(false);
-  const [diceOverlayRequest, setDiceOverlayRequest] = useState<ChatDiceOverlayRequest | null>(
-    null,
-  );
+  const [diceOverlayRequest, setDiceOverlayRequest] = useState<ChatDiceOverlayRequest | null>(null);
   const [localDiceRoll, setLocalDiceRoll] = useState<ChatDiceLocalRollRequest | null>(null);
   const localDiceRollTokenRef = useRef(0);
-  const localDiceRollResolveRef = useRef<((outcome: DiceRollOutcome | null) => void) | null>(
-    null,
-  );
+  const localDiceRollResolveRef = useRef<((outcome: DiceRollOutcome | null) => void) | null>(null);
   const skipDiceAnimIdsRef = useRef(new Set<string>());
   /** Пока свой бросок в полёте — сокет часто приходит раньше HTTP и иначе крутит вторую анимацию. */
   const suppressOwnDiceAnimRef = useRef(false);
   const listRef = useRef<FlatList<ChatTimelineItem>>(null);
   const timelineRef = useRef<ChatTimelineItem[]>([]);
+  const visibleMessageIdsRef = useRef(new Set<string>());
+  const readMessageIdsRef = useRef(new Set<string>());
+  const pendingVisibleMessageIdsRef = useRef(new Set<string>());
+  const visibleReadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const openingUnreadReactionRef = useRef(false);
+  const initialUnreadScrollPendingRef = useRef(true);
+  const initialUnreadMessageIdRef = useRef<string | null>(null);
   const highlightTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const stickToBottomRef = useRef(true);
   const openingPinRef = useRef(true);
@@ -1611,11 +1609,13 @@ export default function ChatThreadScreen() {
     setHydratedId(conversationId);
     setConversation(next.conversation);
     setMessages(next.messages);
+    setUnreadBoundaryAt(next.conversation?.myLastReadAt ?? null);
     setNextCursor(next.nextCursor);
     setPeerLastReadAt(next.peerLastReadAt);
     setLoading(!next.ready);
     stickToBottomRef.current = true;
     openingPinRef.current = true;
+    initialUnreadScrollPendingRef.current = true;
     pinningScrollRef.current = false;
     scrollOffsetRef.current = 0;
     contentHeightRef.current = 0;
@@ -1636,6 +1636,104 @@ export default function ChatThreadScreen() {
   const diceAnimQueueRef = useRef<ChatDiceOverlayRequest[]>([]);
   const diceAnimationsEnabledRef = useRef(getDiceAnimationSpeedSync() !== 'off');
   const myId = user?.id;
+
+  const applyMessageReactions = useCallback(
+    (messageId: string, reactions: NonNullable<ChatMessage['reactions']>) => {
+      setMessages((prev) => {
+        const next = prev.map((message) => (message.id === messageId ? { ...message, reactions } : message));
+        if (conversationId)
+          setCachedThread(conversationId, {
+            messages: next,
+            nextCursor,
+            peerLastReadAt,
+          });
+        return next;
+      });
+      setActionMessage((prev) => (prev?.id === messageId ? { ...prev, reactions } : prev));
+    },
+    [conversationId, nextCursor, peerLastReadAt],
+  );
+
+  const handleReact = useCallback(
+    async (message: ChatMessage, emoji: string) => {
+      if (!conversationId || message.id.startsWith('pending-')) return;
+      setActionMessage(null);
+      try {
+        const ownReaction = message.reactions?.find((reaction) => reaction.emoji === emoji && reaction.reactedByMe);
+        const result = ownReaction
+          ? await removeMessageReaction(conversationId, message.id)
+          : await setMessageReaction(conversationId, message.id, emoji);
+        applyMessageReactions(message.id, result.reactions);
+        if (!ownReaction) {
+          try {
+            const savedOrder = await getChatReactionOrder();
+            setReactionOrder(savedOrder.reactions);
+          } catch {
+            setReactionOrder((prev) => [emoji, ...prev.filter((item) => item !== emoji)]);
+          }
+        }
+      } catch {
+        toast.error('Не удалось поставить реакцию');
+      }
+    },
+    [applyMessageReactions, conversationId],
+  );
+
+  const flushVisibleMessagesRead = useCallback(async () => {
+    const messageIds = [...pendingVisibleMessageIdsRef.current];
+    pendingVisibleMessageIdsRef.current.clear();
+    if (!conversationId || messageIds.length === 0) return;
+    try {
+      const result = await markVisibleMessagesRead(conversationId, messageIds);
+      if (conversationId) setUnreadReactionCount(result.count);
+      messageIds.forEach((messageId) => readMessageIdsRef.current.add(messageId));
+    } catch {
+      // Leave IDs unacknowledged so the next viewability update can retry.
+    }
+  }, [conversationId]);
+
+  const scheduleVisibleMessagesRead = useCallback(
+    (messageIds: string[], force = false) => {
+      for (const messageId of messageIds) {
+        if (force || !readMessageIdsRef.current.has(messageId)) {
+          pendingVisibleMessageIdsRef.current.add(messageId);
+        }
+      }
+      if (pendingVisibleMessageIdsRef.current.size === 0) return;
+      if (visibleReadTimerRef.current) clearTimeout(visibleReadTimerRef.current);
+      visibleReadTimerRef.current = setTimeout(() => {
+        visibleReadTimerRef.current = null;
+        void flushVisibleMessagesRead();
+      }, 140);
+    },
+    [flushVisibleMessagesRead],
+  );
+
+  const scheduleVisibleMessagesReadRef = useRef(scheduleVisibleMessagesRead);
+  scheduleVisibleMessagesReadRef.current = scheduleVisibleMessagesRead;
+  const onViewableItemsChanged = useRef(
+    ({ viewableItems }: { viewableItems: ViewToken<ChatTimelineItem>[] }) => {
+      const visibleIds = viewableItems.flatMap((token) =>
+        token.isViewable && token.item?.type === 'message' ? [token.item.id] : [],
+      );
+      visibleMessageIdsRef.current = new Set(visibleIds);
+      scheduleVisibleMessagesReadRef.current(visibleIds);
+    },
+  ).current;
+  const viewabilityConfig = useRef({ itemVisiblePercentThreshold: 12, minimumViewTime: 180 }).current;
+
+  useEffect(() => {
+    if (visibleReadTimerRef.current) clearTimeout(visibleReadTimerRef.current);
+    visibleReadTimerRef.current = null;
+    visibleMessageIdsRef.current.clear();
+    readMessageIdsRef.current.clear();
+    pendingVisibleMessageIdsRef.current.clear();
+    openingUnreadReactionRef.current = false;
+    return () => {
+      if (visibleReadTimerRef.current) clearTimeout(visibleReadTimerRef.current);
+      visibleReadTimerRef.current = null;
+    };
+  }, [conversationId]);
 
   draftRef.current = draft;
   pendingAttachmentsRef.current = pendingAttachments;
@@ -1666,7 +1764,11 @@ export default function ChatThreadScreen() {
     if (Platform.OS === 'web') {
       const node = list.getScrollableNode?.();
       if (node && typeof node === 'object' && node !== null && 'scrollHeight' in node) {
-        const el = node as { scrollHeight: number; clientHeight: number; scrollTop: number };
+        const el = node as {
+          scrollHeight: number;
+          clientHeight: number;
+          scrollTop: number;
+        };
         el.scrollTop = Math.max(0, el.scrollHeight - el.clientHeight);
       }
     }
@@ -1695,6 +1797,22 @@ export default function ChatThreadScreen() {
     pinToBottom();
   }, [pinToBottom]);
 
+  const scrollToInitialUnread = useCallback(() => {
+    if (!initialUnreadScrollPendingRef.current) return false;
+    const messageId = initialUnreadMessageIdRef.current;
+    if (!messageId) return false;
+    const list = listRef.current;
+    if (!list) return false;
+    const index = timelineRef.current.findIndex((item) => item.type === 'message' && item.id === messageId);
+    if (index < 0) return false;
+
+    initialUnreadScrollPendingRef.current = false;
+    openingPinRef.current = false;
+    stickToBottomRef.current = false;
+    list.scrollToIndex({ index, animated: false, viewPosition: 0.38 });
+    return true;
+  }, []);
+
   useEffect(() => {
     openingPinRef.current = true;
     stickToBottomRef.current = true;
@@ -1702,52 +1820,56 @@ export default function ChatThreadScreen() {
     const timers = delays.map((ms) =>
       setTimeout(() => {
         if (openingPinRef.current || stickToBottomRef.current) {
-          pinToBottom();
+          if (!scrollToInitialUnread()) pinToBottom();
         }
       }, ms),
     );
     const stopOpening = setTimeout(() => {
       openingPinRef.current = false;
+      initialUnreadScrollPendingRef.current = false;
     }, 900);
     return () => {
       timers.forEach(clearTimeout);
       clearTimeout(stopOpening);
     };
-  }, [conversationId, pinToBottom]);
+  }, [conversationId, pinToBottom, scrollToInitialUnread]);
 
-  const appendMessage = useCallback((message: ChatMessage) => {
-    if (conversationId && message.conversationId === conversationId) {
-      appendCachedThreadMessage(conversationId, message);
-    }
-    setMessages((prev) => {
-      if (prev.some((item) => item.id === message.id)) {
-        return prev;
+  const appendMessage = useCallback(
+    (message: ChatMessage) => {
+      if (conversationId && message.conversationId === conversationId) {
+        appendCachedThreadMessage(conversationId, message);
       }
-      // Убираем optimistic pending того же отправителя — иначе прыжок pending→real.
-      const withoutPending =
-        myId && message.senderId === myId
-          ? prev.filter((item) => !item.id.startsWith('pending-'))
-          : prev;
-      return [...withoutPending, message];
-    });
-  }, [conversationId, myId]);
+      setMessages((prev) => {
+        if (prev.some((item) => item.id === message.id)) {
+          return prev;
+        }
+        // Убираем optimistic pending того же отправителя — иначе прыжок pending→real.
+        const withoutPending = myId && message.senderId === myId ? prev.filter((item) => !item.id.startsWith('pending-')) : prev;
+        return [...withoutPending, message];
+      });
+    },
+    [conversationId, myId],
+  );
 
   const startNextDiceAnimation = useCallback(() => {
     const next = diceAnimQueueRef.current.shift() ?? null;
     setDiceOverlayRequest(next);
   }, []);
 
-  const revealHeldDiceMessage = useCallback((messageId: string) => {
-    const held = heldDiceMessagesRef.current.get(messageId);
-    if (held) {
-      heldDiceMessagesRef.current.delete(messageId);
+  const revealHeldDiceMessage = useCallback(
+    (messageId: string) => {
+      const held = heldDiceMessagesRef.current.get(messageId);
+      if (held) {
+        heldDiceMessagesRef.current.delete(messageId);
+        setHeldDiceIds((prev) => prev.filter((id) => id !== messageId));
+        appendMessage(held);
+        scrollToBottom();
+        return;
+      }
       setHeldDiceIds((prev) => prev.filter((id) => id !== messageId));
-      appendMessage(held);
-      scrollToBottom();
-      return;
-    }
-    setHeldDiceIds((prev) => prev.filter((id) => id !== messageId));
-  }, [appendMessage, scrollToBottom]);
+    },
+    [appendMessage, scrollToBottom],
+  );
 
   const advanceDiceAnimationQueue = useCallback(() => {
     startNextDiceAnimation();
@@ -1768,9 +1890,7 @@ export default function ChatThreadScreen() {
 
       const skipAnim =
         skipDiceAnimIdsRef.current.has(message.id) ||
-        (Boolean(myId) &&
-          message.senderId === myId &&
-          (suppressOwnDiceAnimRef.current || diceRollBusyRef.current));
+        (Boolean(myId) && message.senderId === myId && (suppressOwnDiceAnimRef.current || diceRollBusyRef.current));
 
       if (skipAnim) {
         // Не удаляем id: HTTP-ответ и socket могут прийти дважды — иначе второй
@@ -1785,8 +1905,7 @@ export default function ChatThreadScreen() {
         payload &&
         !payload.redacted &&
         payload.sum != null &&
-        (Platform.OS !== 'web' ||
-          (typeof document !== 'undefined' && document.visibilityState === 'visible'));
+        (Platform.OS !== 'web' || (typeof document !== 'undefined' && document.visibilityState === 'visible'));
 
       if (!canAnimate || !payload) {
         appendMessage(message);
@@ -1807,10 +1926,7 @@ export default function ChatThreadScreen() {
 
       setDiceOverlayRequest((current) => {
         if (current) {
-          if (
-            current.messageId !== request.messageId &&
-            !diceAnimQueueRef.current.some((item) => item.messageId === request.messageId)
-          ) {
+          if (current.messageId !== request.messageId && !diceAnimQueueRef.current.some((item) => item.messageId === request.messageId)) {
             diceAnimQueueRef.current.push(request);
           }
           return current;
@@ -1967,10 +2083,7 @@ export default function ChatThreadScreen() {
     const merged = await prefetchChatThread(conversationId);
     const cachedNow = getCachedThread(conversationId)?.messages ?? [];
     setMessages((prev) => {
-      const next = mergeVisibleThreadMessages(merged.messages, [
-        ...cachedNow,
-        ...prev,
-      ]);
+      const next = mergeVisibleThreadMessages(merged.messages, [...cachedNow, ...prev]);
       return mergeVisibleThreadMessages(next, [], heldDiceMessagesRef.current.keys());
     });
     setNextCursor(merged.nextCursor);
@@ -2016,12 +2129,14 @@ export default function ChatThreadScreen() {
       if (snapshot.ready) {
         setConversation(cachedConversation);
         setMessages(snapshot.messages);
+        setUnreadBoundaryAt(cachedConversation?.myLastReadAt ?? null);
         setNextCursor(snapshot.nextCursor);
         setPeerLastReadAt(snapshot.peerLastReadAt);
         setLoading(false);
       } else {
         setConversation(null);
         setMessages([]);
+        setUnreadBoundaryAt(null);
         setNextCursor(null);
         setPeerLastReadAt(null);
         setLoading(true);
@@ -2029,12 +2144,10 @@ export default function ChatThreadScreen() {
 
       stickToBottomRef.current = true;
       openingPinRef.current = true;
+      initialUnreadScrollPendingRef.current = true;
 
       try {
-        const [list, merged] = await Promise.all([
-          listConversations(),
-          prefetchChatThread(conversationId),
-        ]);
+        const [list, merged] = await Promise.all([listConversations(), prefetchChatThread(conversationId)]);
         if (cancelled) {
           return;
         }
@@ -2048,6 +2161,7 @@ export default function ChatThreadScreen() {
         }
 
         upsertCachedConversation(found);
+        setUnreadBoundaryAt(found.myLastReadAt ?? null);
         setConversation((prev) =>
           withStablePeerAvatar(prev, {
             ...found,
@@ -2057,10 +2171,7 @@ export default function ChatThreadScreen() {
         );
         setMessages((prev) => {
           const cachedNow = getCachedThread(conversationId)?.messages ?? [];
-          const next = mergeVisibleThreadMessages(merged.messages, [
-            ...cachedNow,
-            ...prev,
-          ]);
+          const next = mergeVisibleThreadMessages(merged.messages, [...cachedNow, ...prev]);
           setCachedThread(conversationId, {
             conversation: {
               ...found,
@@ -2071,31 +2182,21 @@ export default function ChatThreadScreen() {
             nextCursor: merged.nextCursor,
             peerLastReadAt: merged.peerLastReadAt ?? found.peerLastReadAt,
           });
-          return mergeVisibleThreadMessages(
-            next,
-            [],
-            heldDiceMessagesRef.current.keys(),
-          );
+          return mergeVisibleThreadMessages(next, [], heldDiceMessagesRef.current.keys());
         });
         setNextCursor(merged.nextCursor);
         setPeerLastReadAt(merged.peerLastReadAt ?? found.peerLastReadAt);
-        await markConversationRead(conversationId);
       } catch (error) {
         if (cancelled) {
           return;
         }
-        const missing =
-          error instanceof ApiError && (error.status === 404 || error.status === 403);
+        const missing = error instanceof ApiError && (error.status === 404 || error.status === 403);
         if (missing) {
           removeCachedConversation(conversationId);
         }
         // Keep cached UI if we already showed something; only bounce on cold miss.
         if (!cachedThread && !cachedConversation) {
-          leaveToChats(
-            missing
-              ? 'Чат не найден'
-              : localizeErrorMessage(error, 'Не удалось открыть чат'),
-          );
+          leaveToChats(missing ? 'Чат не найден' : localizeErrorMessage(error, 'Не удалось открыть чат'));
         } else if (missing) {
           leaveToChats('Чат не найден');
         } else {
@@ -2130,9 +2231,7 @@ export default function ChatThreadScreen() {
       }
       const alreadyHad = messagesRef.current.some((item) => item.id === message.id);
       const hadOwnPending =
-        Boolean(myId) &&
-        message.senderId === myId &&
-        messagesRef.current.some((item) => item.id.startsWith('pending-'));
+        Boolean(myId) && message.senderId === myId && messagesRef.current.some((item) => item.id.startsWith('pending-'));
       ingestIncomingMessage(message);
       if (message.kind === 'favorite_received') {
         if (message.senderId !== myId) {
@@ -2171,9 +2270,59 @@ export default function ChatThreadScreen() {
       ) {
         scrollToBottom();
       }
-      void markConversationRead(conversationId);
+      if (visibleMessageIdsRef.current.has(message.id)) {
+        scheduleVisibleMessagesRead([message.id], true);
+      }
     });
-  }, [conversationId, ingestIncomingMessage, myId, scrollToBottom, subscribeMessages]);
+  }, [conversationId, ingestIncomingMessage, myId, scheduleVisibleMessagesRead, scrollToBottom, subscribeMessages]);
+
+  useEffect(() => {
+    if (!conversationId) {
+      setUnreadReactionCount(0);
+      setReactionOrder(CHAT_REACTION_EMOJIS);
+      return;
+    }
+    let active = true;
+    void getUnreadMessageReactionCount(conversationId)
+      .then(({ count }) => {
+        if (!active) return;
+        setUnreadReactionCount(count);
+        const visibleIds = [...visibleMessageIdsRef.current];
+        if (visibleIds.length > 0) scheduleVisibleMessagesRead(visibleIds, true);
+      })
+      .catch(() => {
+        if (active) setUnreadReactionCount(0);
+      });
+    void getChatReactionOrder()
+      .then(({ reactions }) => {
+        if (active) setReactionOrder(reactions);
+      })
+      .catch(() => undefined);
+    return () => {
+      active = false;
+    };
+  }, [conversationId, scheduleVisibleMessagesRead]);
+
+  useEffect(() => {
+    return subscribeMessageReactions((event) => {
+      if (event.conversationId !== conversationId) return;
+      applyMessageReactions(event.messageId, event.reactions);
+      if (event.actorId !== myId) {
+        void getUnreadMessageReactionCount(conversationId)
+          .then(({ count }) => setUnreadReactionCount(count))
+          .catch(() => undefined);
+        if (visibleMessageIdsRef.current.has(event.messageId)) {
+          scheduleVisibleMessagesRead([event.messageId], true);
+        }
+      }
+    });
+  }, [applyMessageReactions, conversationId, myId, scheduleVisibleMessagesRead, subscribeMessageReactions]);
+
+  useEffect(() => {
+    if (lastReactionUnread && lastReactionUnread.conversationId === conversationId) {
+      setUnreadReactionCount(lastReactionUnread.count);
+    }
+  }, [conversationId, lastReactionUnread]);
 
   useEffect(() => {
     if (!lastMessage || lastMessage.conversationId !== conversationId) {
@@ -2211,8 +2360,7 @@ export default function ChatThreadScreen() {
             }
           : nextPeer;
       const prevActivity = prev.lastMessage?.createdAt ?? prev.updatedAt;
-      const incomingActivity =
-        lastConversationUpdate.lastMessage?.createdAt ?? lastConversationUpdate.updatedAt;
+      const incomingActivity = lastConversationUpdate.lastMessage?.createdAt ?? lastConversationUpdate.updatedAt;
       const keepPrevActivity = prevActivity > incomingActivity;
       const next = {
         ...lastConversationUpdate,
@@ -2279,11 +2427,6 @@ export default function ChatThreadScreen() {
     }
     void (async () => {
       await loadMessages();
-      try {
-        await markConversationRead(conversationId);
-      } catch {
-        // Не блокируем UI, если read не прошёл.
-      }
       if (stickToBottomRef.current || openingPinRef.current) {
         scrollToBottom();
       }
@@ -2330,10 +2473,7 @@ export default function ChatThreadScreen() {
         if (member.id !== lastPresence.userId) {
           return member;
         }
-        if (
-          member.online === lastPresence.online &&
-          member.lastSeenAt === lastPresence.lastSeenAt
-        ) {
+        if (member.online === lastPresence.online && member.lastSeenAt === lastPresence.lastSeenAt) {
           return member;
         }
         changed = true;
@@ -2356,9 +2496,7 @@ export default function ChatThreadScreen() {
   }, []);
 
   const isGroup = isGroupConversation(conversation);
-  const title = isGroup
-    ? conversation?.title?.trim() || 'Группа'
-    : conversation?.peer?.nickname ?? 'Чат';
+  const title = isGroup ? conversation?.title?.trim() || 'Группа' : (conversation?.peer?.nickname ?? 'Чат');
   const statusLabel = isGroup
     ? `${conversation?.memberCount ?? members.length} участников`
     : conversation?.peer
@@ -2366,10 +2504,7 @@ export default function ChatThreadScreen() {
       : '';
 
   const hasMessageText = Boolean(draft.trim());
-  const canSend =
-    Boolean(hasMessageText || pendingAttachments.length > 0) &&
-    !sending &&
-    !conversation?.blockedMe;
+  const canSend = Boolean(hasMessageText || pendingAttachments.length > 0) && !sending && !conversation?.blockedMe;
 
   const acceptDroppedFiles = useCallback(
     (inputFiles: File[]) => {
@@ -2377,8 +2512,7 @@ export default function ChatThreadScreen() {
         return;
       }
 
-      const maxBytes =
-        getCachedUploadLimits()?.maxUploadBytes ?? MAX_UPLOAD_SIZE_MB * 1024 * 1024;
+      const maxBytes = getCachedUploadLimits()?.maxUploadBytes ?? MAX_UPLOAD_SIZE_MB * 1024 * 1024;
       const next: PendingAttachment[] = [];
 
       for (const file of inputFiles) {
@@ -2576,7 +2710,12 @@ export default function ChatThreadScreen() {
         url: item.uri,
         image:
           item.kind === 'image'
-            ? { original: item.uri, large: item.uri, medium: item.uri, thumb: item.uri }
+            ? {
+                original: item.uri,
+                large: item.uri,
+                medium: item.uri,
+                thumb: item.uri,
+              }
             : null,
       })),
       replyTo: replyTo
@@ -2634,15 +2773,7 @@ export default function ChatThreadScreen() {
       setSending(false);
       sendingRef.current = false;
     }
-  }, [
-    clearPendingAttachments,
-    conversationId,
-    myId,
-    replyTo,
-    requestAfterFirstMessage,
-    scrollToBottom,
-    user?.nickname,
-  ]);
+  }, [clearPendingAttachments, conversationId, myId, replyTo, requestAfterFirstMessage, scrollToBottom, user?.nickname]);
 
   const handleLocalDiceRollComplete = useCallback((outcome: DiceRollOutcome | null) => {
     const resolve = localDiceRollResolveRef.current;
@@ -2746,8 +2877,7 @@ export default function ChatThreadScreen() {
 
   const toReplyPreview = useCallback((message: ChatMessage): ChatReplyPreviewData => {
     const attachments = normalizeMessageAttachments(message);
-    const dicePayload =
-      message.kind === 'dice_roll' ? parseDiceRollPayload(message.body) : null;
+    const dicePayload = message.kind === 'dice_roll' ? parseDiceRollPayload(message.body) : null;
     return {
       id: message.id,
       senderNickname: message.sender?.nickname ?? 'Игрок',
@@ -2761,23 +2891,22 @@ export default function ChatThreadScreen() {
     setSelectedIds([]);
   }, []);
 
-  const openMessageActions = useCallback((message: ChatMessage) => {
-    if (isSystemChatMessage(message)) {
-      return;
-    }
-    if (message.id.startsWith('pending-')) {
-      return;
-    }
-    if (selectionMode) {
-      setSelectedIds((prev) =>
-        prev.includes(message.id)
-          ? prev.filter((id) => id !== message.id)
-          : [...prev, message.id],
-      );
-      return;
-    }
-    setActionMessage(message);
-  }, [selectionMode]);
+  const openMessageActions = useCallback(
+    (message: ChatMessage) => {
+      if (isSystemChatMessage(message)) {
+        return;
+      }
+      if (message.id.startsWith('pending-')) {
+        return;
+      }
+      if (selectionMode) {
+        setSelectedIds((prev) => (prev.includes(message.id) ? prev.filter((id) => id !== message.id) : [...prev, message.id]));
+        return;
+      }
+      setActionMessage(message);
+    },
+    [selectionMode],
+  );
 
   const handleStartReply = useCallback(
     (message: ChatMessage) => {
@@ -2807,29 +2936,30 @@ export default function ChatThreadScreen() {
   const getMessageCopyText = useCallback((message: ChatMessage) => {
     if (message.kind === 'dice_roll') {
       const payload = parseDiceRollPayload(message.body);
-      return payload ? diceRollPreviewText(payload) : (message.body?.trim() || '');
+      return payload ? diceRollPreviewText(payload) : message.body?.trim() || '';
     }
     return message.body?.trim() || '';
   }, []);
 
-  const handleCopyMessage = useCallback(async (message: ChatMessage) => {
-    const text = getMessageCopyText(message);
-    if (!text) {
-      return;
-    }
-    setActionMessage(null);
-    try {
-      await copyTextToClipboard(text);
-      toast.success('Скопировано');
-    } catch {
-      toast.error('Не удалось скопировать');
-    }
-  }, [getMessageCopyText]);
+  const handleCopyMessage = useCallback(
+    async (message: ChatMessage) => {
+      const text = getMessageCopyText(message);
+      if (!text) {
+        return;
+      }
+      setActionMessage(null);
+      try {
+        await copyTextToClipboard(text);
+        toast.success('Скопировано');
+      } catch {
+        toast.error('Не удалось скопировать');
+      }
+    },
+    [getMessageCopyText],
+  );
 
   const scrollToMessage = useCallback((messageId: string) => {
-    const index = timelineRef.current.findIndex(
-      (item) => item.type === 'message' && item.id === messageId,
-    );
+    const index = timelineRef.current.findIndex((item) => item.type === 'message' && item.id === messageId);
     if (index < 0) {
       toast.error('Исходное сообщение недоступно');
       return;
@@ -2850,6 +2980,50 @@ export default function ChatThreadScreen() {
     }, 1600);
   }, []);
 
+  const goToNextUnreadReaction = useCallback(async () => {
+    if (!conversationId || unreadReactionCount < 1 || openingUnreadReactionRef.current) return;
+    openingUnreadReactionRef.current = true;
+    try {
+      const result = await openNextUnreadMessageReaction(conversationId);
+      setUnreadReactionCount(result.count);
+      const targetId = result.item?.messageId;
+      if (!targetId) return;
+
+      const targetMessage = result.item?.message;
+      if (targetMessage && !messagesRef.current.some((item) => item.id === targetId)) {
+        setMessages((current) => {
+          if (current.some((item) => item.id === targetId)) return current;
+          return [...current, targetMessage].sort((left, right) =>
+            left.createdAt.localeCompare(right.createdAt),
+          );
+        });
+        // Let the virtualized list commit the target row before asking it to scroll.
+        requestAnimationFrame(() => requestAnimationFrame(() => scrollToMessage(targetId)));
+        return;
+      }
+
+      let cursor = nextCursor;
+      for (let pageIndex = 0; pageIndex < 100 && cursor && !messagesRef.current.some((item) => item.id === targetId); pageIndex += 1) {
+        const page = await listMessages(conversationId, cursor);
+        const ids = new Set(messagesRef.current.map((item) => item.id));
+        const older = page.items.filter((item) => !ids.has(item.id));
+        if (older.length) setMessages((prev) => [...older, ...prev]);
+        cursor = page.nextCursor;
+        setNextCursor(cursor);
+        if (page.items.some((item) => item.id === targetId)) break;
+      }
+      if (visibleMessageIdsRef.current.has(targetId)) {
+        scheduleVisibleMessagesRead([targetId], true);
+      } else {
+        requestAnimationFrame(() => scrollToMessage(targetId));
+      }
+    } catch {
+      toast.error('Не удалось открыть реакцию');
+    } finally {
+      openingUnreadReactionRef.current = false;
+    }
+  }, [conversationId, nextCursor, scheduleVisibleMessagesRead, scrollToMessage, unreadReactionCount]);
+
   const handleForwardToChat = useCallback(
     async (targetConversationId: string) => {
       if (selectedIds.length === 0 || forwardBusy) {
@@ -2867,9 +3041,7 @@ export default function ChatThreadScreen() {
           });
           scrollToBottom();
         }
-        toast.success(
-          created.length === 1 ? 'Сообщение переслано' : `Переслано: ${created.length}`,
-        );
+        toast.success(created.length === 1 ? 'Сообщение переслано' : `Переслано: ${created.length}`);
       } catch (error) {
         toast.error(localizeErrorMessage(error, 'Не удалось переслать'));
       } finally {
@@ -3005,14 +3177,8 @@ export default function ChatThreadScreen() {
     }
   }, [conversation, conversationId]);
 
-  const myGroupRole =
-    conversation?.myRole ??
-    members.find((member) => member.id === myId)?.role ??
-    null;
-  const canManageGroup =
-    isGroup &&
-    !conversation?.gameId &&
-    (myGroupRole === 'owner' || myGroupRole === 'admin');
+  const myGroupRole = conversation?.myRole ?? members.find((member) => member.id === myId)?.role ?? null;
+  const canManageGroup = isGroup && !conversation?.gameId && (myGroupRole === 'owner' || myGroupRole === 'admin');
   const isGroupOwner = isGroup && !conversation?.gameId && myGroupRole === 'owner';
 
   const handleRenameGroup = useCallback(
@@ -3144,9 +3310,7 @@ export default function ChatThreadScreen() {
       try {
         const next = await removeGroupMember(conversationId, userId);
         setMembers(next);
-        setConversation((prev) =>
-          prev ? { ...prev, memberCount: next.length } : prev,
-        );
+        setConversation((prev) => (prev ? { ...prev, memberCount: next.length } : prev));
         toast.success('Участник исключён');
       } catch (error) {
         toast.error(localizeErrorMessage(error, 'Не удалось исключить'));
@@ -3213,9 +3377,7 @@ export default function ChatThreadScreen() {
 
     const attach = () => {
       const wrap = getWebHostNode(composerFieldWrapRef.current);
-      field =
-        wrap?.querySelector('textarea, input, [contenteditable="true"]') ??
-        document.getElementById('chat-composer-input');
+      field = wrap?.querySelector('textarea, input, [contenteditable="true"]') ?? document.getElementById('chat-composer-input');
       if (!field) {
         frame = requestAnimationFrame(attach);
         return;
@@ -3240,7 +3402,11 @@ export default function ChatThreadScreen() {
       }
       const key = event.nativeEvent.key;
       const shiftKey = Boolean(
-        (event.nativeEvent as TextInputKeyPressEventData & { shiftKey?: boolean }).shiftKey,
+        (
+          event.nativeEvent as TextInputKeyPressEventData & {
+            shiftKey?: boolean;
+          }
+        ).shiftKey,
       );
       if (key === 'Enter' && !shiftKey) {
         event.preventDefault?.();
@@ -3289,26 +3455,44 @@ export default function ChatThreadScreen() {
       : voicePlayerVisible
         ? Spacing.sm
         : insets.top + Spacing.sm;
-  const peerReadMs =
-    !isGroup && peerLastReadAt ? new Date(peerLastReadAt).getTime() : 0;
+  const peerReadMs = !isGroup && peerLastReadAt ? new Date(peerLastReadAt).getTime() : 0;
+  const myReadMs = unreadBoundaryAt ? new Date(unreadBoundaryAt).getTime() : 0;
   const renderedMessages = useMemo(() => {
-    const visible =
-      heldDiceIds.length === 0
-        ? messages
-        : messages.filter((message) => !heldDiceIds.includes(message.id));
-    return buildChatTimeline(visible, { isGroup, myId: myId ?? undefined });
-  }, [heldDiceIds, isGroup, messages, myId]);
+    const visible = heldDiceIds.length === 0 ? messages : messages.filter((message) => !heldDiceIds.includes(message.id));
+    return buildChatTimeline(visible, { isGroup, myId: myId ?? undefined, myLastReadAt: unreadBoundaryAt });
+  }, [heldDiceIds, isGroup, messages, myId, unreadBoundaryAt]);
+  const firstUnreadMessageId = useMemo(() => {
+    const visible = heldDiceIds.length === 0 ? messages : messages.filter((message) => !heldDiceIds.includes(message.id));
+    return visible.find((message) => {
+      const createdAt = new Date(message.createdAt).getTime();
+      return (
+        message.senderId !== myId &&
+        !isSystemChatMessage(message) &&
+        Number.isFinite(createdAt) &&
+        createdAt > myReadMs
+      );
+    })?.id ?? null;
+  }, [heldDiceIds, messages, myId, myReadMs]);
+  initialUnreadMessageIdRef.current = firstUnreadMessageId;
   timelineRef.current = renderedMessages;
+
+  useEffect(() => {
+    if (initialUnreadScrollPendingRef.current) scrollToInitialUnread();
+  }, [firstUnreadMessageId, renderedMessages, scrollToInitialUnread]);
   // Keep exactly the visual order of messages in the chat. Starting any voice
   // therefore continues with the following voice below it and stops at the
   // final one, instead of jumping between timestamps.
-  const voiceQueue = useMemo<ChatVoiceQueueItem[]>(() =>
-    messages.flatMap((message) =>
+  const voiceQueue = useMemo<ChatVoiceQueueItem[]>(
+    () =>
+      messages.flatMap((message) =>
         normalizeMessageAttachments(message)
           .filter((attachment) => attachment.kind === 'audio')
           .map((attachment, index) => ({
             key: `${message.id}-audio-${index}`,
-            attachment: { ...attachment, url: fullUrlForAttachment(attachment) },
+            attachment: {
+              ...attachment,
+              url: fullUrlForAttachment(attachment),
+            },
           })),
       ),
     [messages],
@@ -3360,161 +3544,143 @@ export default function ChatThreadScreen() {
   }, [messages, myIdForBanner, peerId]);
   const showFavoriteBack = Boolean(
     conversation &&
-      !isGroup &&
-      conversation.peerFavoritedMe &&
-      !conversation.isFavorite &&
-      !suppressFavoriteBack &&
-      !iRemovedAfterTheirFavorite &&
-      !conversation.blockedByMe &&
-      !conversation.blockedMe,
+    !isGroup &&
+    conversation.peerFavoritedMe &&
+    !conversation.isFavorite &&
+    !suppressFavoriteBack &&
+    !iRemovedAfterTheirFavorite &&
+    !conversation.blockedByMe &&
+    !conversation.blockedMe,
   );
   const showRemoveBack = Boolean(
     conversation &&
-      !isGroup &&
-      conversation.isFavorite &&
-      !conversation.peerFavoritedMe &&
-      peerRemovedMe &&
-      !conversation.blockedByMe &&
-      !conversation.blockedMe,
+    !isGroup &&
+    conversation.isFavorite &&
+    !conversation.peerFavoritedMe &&
+    peerRemovedMe &&
+    !conversation.blockedByMe &&
+    !conversation.blockedMe,
   );
   // One-sided favorite you started — cancel until peer returns or removes.
   const showFavoriteMine = Boolean(
     conversation &&
-      !isGroup &&
-      conversation.isFavorite &&
-      !conversation.peerFavoritedMe &&
-      !peerRemovedMe &&
-      !conversation.blockedByMe &&
-      !conversation.blockedMe,
+    !isGroup &&
+    conversation.isFavorite &&
+    !conversation.peerFavoritedMe &&
+    !peerRemovedMe &&
+    !conversation.blockedByMe &&
+    !conversation.blockedMe,
   );
 
   return (
     <ScreenTransition animateOnFocus>
-      <KeyboardAvoidingView
-        style={styles.root}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        keyboardVerticalOffset={0}>
+      <KeyboardAvoidingView style={styles.root} behavior={Platform.OS === 'ios' ? 'padding' : undefined} keyboardVerticalOffset={0}>
         <View ref={dropZoneRef} style={styles.dropZone} collapsable={false}>
-        <ChatBackgroundLayer
-          isDark={isDark}
-          conversationId={conversationId}
-          onCustomImageError={() => {
-            const now = Date.now();
-            if (now - backgroundRefreshAtRef.current < 15_000) return;
-            backgroundRefreshAtRef.current = now;
-            void loadConversation();
-          }}
-        />
-        {Platform.OS === 'web' && isDraggingFile ? (
-          <View style={styles.dropOverlay} pointerEvents="none">
-            <View style={styles.dropOverlayCard}>
-              <Ionicons name="cloud-upload-outline" size={28} color={colors.primary} />
-              <Text style={styles.dropOverlayTitle}>Отпустите файл</Text>
-              <Text style={styles.dropOverlayHint}>Фото, аудио или документ</Text>
+          <ChatBackgroundLayer
+            isDark={isDark}
+            conversationId={conversationId}
+            onCustomImageError={() => {
+              const now = Date.now();
+              if (now - backgroundRefreshAtRef.current < 15_000) return;
+              backgroundRefreshAtRef.current = now;
+              void loadConversation();
+            }}
+          />
+          {Platform.OS === 'web' && isDraggingFile ? (
+            <View style={styles.dropOverlay} pointerEvents="none">
+              <View style={styles.dropOverlayCard}>
+                <Ionicons name="cloud-upload-outline" size={28} color={colors.primary} />
+                <Text style={styles.dropOverlayTitle}>Отпустите файл</Text>
+                <Text style={styles.dropOverlayHint}>Фото, аудио или документ</Text>
+              </View>
             </View>
-          </View>
-        ) : null}
-        <View style={[styles.header, { paddingTop: headerPadTop }]}>
-          {!hasDesktopSidebar || backHref ? (
-            <MobileBackButton backHref={backHref} />
           ) : null}
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={isGroup ? `Участники ${title}` : `Анкета ${title}`}
-            disabled={!isGroup && !peerId}
-            onPress={() => {
-              if (isGroup) {
-                void handleOpenMembers();
-                return;
-              }
-              if (peerId) {
-                router.push(`/users/${peerId}`);
-              }
-            }}
-            style={({ pressed }) => [
-              styles.headerPeer,
-              pressed && styles.headerPeerPressed,
-            ]}>
-            <View style={styles.headerAvatarWrap}>
-              {isGroup ? (
-                <View style={styles.headerAvatar}>
-                  <View style={styles.headerAvatarFill}>
-                    <Ionicons name="people" size={18} color={colors.onPrimary} />
+          <View style={[styles.header, { paddingTop: headerPadTop }]}>
+            {!hasDesktopSidebar || backHref ? <MobileBackButton backHref={backHref} /> : null}
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={isGroup ? `Участники ${title}` : `Анкета ${title}`}
+              disabled={!isGroup && !peerId}
+              onPress={() => {
+                if (isGroup) {
+                  void handleOpenMembers();
+                  return;
+                }
+                if (peerId) {
+                  router.push(`/users/${peerId}`);
+                }
+              }}
+              style={({ pressed }) => [styles.headerPeer, pressed && styles.headerPeerPressed]}
+            >
+              <View style={styles.headerAvatarWrap}>
+                {isGroup ? (
+                  <View style={styles.headerAvatar}>
+                    <View style={styles.headerAvatarFill}>
+                      <Ionicons name="people" size={18} color={colors.onPrimary} />
+                    </View>
                   </View>
-                </View>
-              ) : (
-                <UserAvatar
-                  nickname={conversation?.peer?.nickname ?? title}
-                  avatarUrl={conversation?.peer?.avatarUrl}
-                  size={36}
-                  badges={conversation?.peer?.badges}
-                  frameId={conversation?.peer?.avatarFrameId}
-                />
-              )}
-            </View>
-            <View style={styles.headerText}>
-              <Text style={styles.headerTitle} numberOfLines={1}>
-                {title}
-              </Text>
-              {statusLabel ? (
-                <Text
-                  style={[
-                    styles.headerStatus,
-                    !isGroup &&
-                      conversation?.peer?.online &&
-                      styles.headerStatusOnline,
-                  ]}
-                  numberOfLines={1}>
-                  {statusLabel}
+                ) : (
+                  <UserAvatar
+                    nickname={conversation?.peer?.nickname ?? title}
+                    avatarUrl={conversation?.peer?.avatarUrl}
+                    size={36}
+                    badges={conversation?.peer?.badges}
+                    frameId={conversation?.peer?.avatarFrameId}
+                  />
+                )}
+              </View>
+              <View style={styles.headerText}>
+                <Text style={styles.headerTitle} numberOfLines={1}>
+                  {title}
                 </Text>
-              ) : null}
-            </View>
-          </Pressable>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={
-              voiceActiveHere
-                ? 'Покинуть голосовой чат'
-                : ongoingVoiceCall
-                  ? 'Присоединиться к голосовому чату'
-                  : 'Позвонить'
-            }
-            hitSlop={8}
-            onPressIn={() => {
-              if (Platform.OS === 'web' && !voiceActiveHere) {
-                beginMicrophonePrimeFromGesture();
+                {statusLabel ? (
+                  <Text
+                    style={[styles.headerStatus, !isGroup && conversation?.peer?.online && styles.headerStatusOnline]}
+                    numberOfLines={1}
+                  >
+                    {statusLabel}
+                  </Text>
+                ) : null}
+              </View>
+            </Pressable>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={
+                voiceActiveHere ? 'Покинуть голосовой чат' : ongoingVoiceCall ? 'Присоединиться к голосовому чату' : 'Позвонить'
               }
-            }}
-            onPress={() => {
-              if (!conversationId) {
-                return;
-              }
-              if (voiceActiveHere) {
-                void hangupLiveVoice();
-                return;
-              }
-              // Active lobby in this chat — join it (do not start a second invite).
-              // 1:1 hangup ends the call for both on the server, so this path is mostly groups.
-              if (ongoingVoiceCall) {
-                setJoiningOngoingVoice(true);
-                void joinOngoingCall(
-                  conversationId,
-                  ongoingVoiceCall.callId,
-                  ongoingVoiceCall.isGroup
-                    ? ongoingVoiceCall.conversationTitle || title
-                    : ongoingVoiceCall.fromNickname,
-                  ongoingVoiceCall.fromAvatarUrl,
-                  {
-                    isGroup: ongoingVoiceCall.isGroup,
-                    myRole: ongoingVoiceCall.isGroup ? myGroupRole : null,
-                  },
-                ).finally(() => setJoiningOngoingVoice(false));
-                return;
-              }
-              void (async () => {
-                // Mic prime already started in onPressIn — do not await network before takePrimedMicrophone inside startCall.
-                let ringingPeers =
-                  isGroup
+              hitSlop={8}
+              onPressIn={() => {
+                if (Platform.OS === 'web' && !voiceActiveHere) {
+                  beginMicrophonePrimeFromGesture();
+                }
+              }}
+              onPress={() => {
+                if (!conversationId) {
+                  return;
+                }
+                if (voiceActiveHere) {
+                  void hangupLiveVoice();
+                  return;
+                }
+                // Active lobby in this chat — join it (do not start a second invite).
+                // 1:1 hangup ends the call for both on the server, so this path is mostly groups.
+                if (ongoingVoiceCall) {
+                  setJoiningOngoingVoice(true);
+                  void joinOngoingCall(
+                    conversationId,
+                    ongoingVoiceCall.callId,
+                    ongoingVoiceCall.isGroup ? ongoingVoiceCall.conversationTitle || title : ongoingVoiceCall.fromNickname,
+                    ongoingVoiceCall.fromAvatarUrl,
+                    {
+                      isGroup: ongoingVoiceCall.isGroup,
+                      myRole: ongoingVoiceCall.isGroup ? myGroupRole : null,
+                    },
+                  ).finally(() => setJoiningOngoingVoice(false));
+                  return;
+                }
+                void (async () => {
+                  // Mic prime already started in onPressIn — do not await network before takePrimedMicrophone inside startCall.
+                  let ringingPeers = isGroup
                     ? members
                         .filter((member) => member.id !== user?.id)
                         .map((member) => ({
@@ -3531,1160 +3697,1138 @@ export default function ChatThreadScreen() {
                           },
                         ]
                       : [];
-                // Kick off the call immediately; fill ringing peers if we already have them.
-                // Loading members must not block the mic gesture — startCall takes primed mic first.
-                const callPromise = startCall(
-                  conversationId,
-                  title,
-                  conversation?.peer?.avatarUrl ?? null,
-                  {
+                  // Kick off the call immediately; fill ringing peers if we already have them.
+                  // Loading members must not block the mic gesture — startCall takes primed mic first.
+                  const callPromise = startCall(conversationId, title, conversation?.peer?.avatarUrl ?? null, {
                     isGroup,
                     ringingPeers,
                     myRole: isGroup ? myGroupRole : null,
-                  },
-                );
-                if (isGroup && ringingPeers.length === 0) {
-                  try {
-                    const loaded = await listChatMembers(conversationId);
-                    setMembers(loaded);
-                  } catch {
-                    // invite response still carries ringing peers
+                  });
+                  if (isGroup && ringingPeers.length === 0) {
+                    try {
+                      const loaded = await listChatMembers(conversationId);
+                      setMembers(loaded);
+                    } catch {
+                      // invite response still carries ringing peers
+                    }
                   }
-                }
-                await callPromise;
-              })();
-            }}
-            style={[
-              styles.headerCallButton,
-              voiceActiveHere || ongoingVoiceCall ? styles.headerCallButtonActive : null,
-            ]}>
+                  await callPromise;
+                })();
+              }}
+              style={[styles.headerCallButton, voiceActiveHere || ongoingVoiceCall ? styles.headerCallButtonActive : null]}
+            >
               <Ionicons
-              name={voiceActiveHere || ongoingVoiceCall ? 'call' : 'call-outline'}
-              size={18}
-              color={voiceActiveHere || ongoingVoiceCall ? colors.primary : colors.textSubtle}
-            />
-          </Pressable>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Ещё"
-            hitSlop={8}
-            onPress={handleOpenMenu}
-            style={styles.headerMenuButton}>
-            <Ionicons name="ellipsis-vertical" size={18} color={colors.textSubtle} />
-          </Pressable>
-        </View>
-
-        {ongoingVoiceCall && !voiceActiveHere ? (
-          <View style={styles.voiceJoinBanner}>
-            <View style={styles.voiceJoinIcon}>
-              <Ionicons name="headset" size={18} color={colors.primary} />
-            </View>
-            <View style={styles.voiceJoinCopy}>
-              <Text style={styles.voiceJoinTitle} numberOfLines={1}>
-                {ongoingVoiceCall.isGroup
-                  ? ongoingVoiceCall.conversationTitle?.trim() || title || 'Голосовой чат'
-                  : ongoingVoiceCall.fromNickname?.trim() || 'Голосовой чат'}
-              </Text>
-              <Text style={styles.voiceJoinHint} numberOfLines={1}>
-                {ongoingVoiceCall.joinedCount > 1
-                  ? `${ongoingVoiceCall.joinedCount} в эфире`
-                  : 'В эфире'}
-              </Text>
-            </View>
+                name={voiceActiveHere || ongoingVoiceCall ? 'call' : 'call-outline'}
+                size={18}
+                color={voiceActiveHere || ongoingVoiceCall ? colors.primary : colors.textSubtle}
+              />
+            </Pressable>
             <Pressable
               accessibilityRole="button"
-              accessibilityLabel={
-                ongoingVoiceCall.isJoined ? 'Вернуться в голосовой чат' : 'Присоединиться к голосовому чату'
-              }
-              disabled={joiningOngoingVoice}
-              onPressIn={() => {
-                if (Platform.OS === 'web') {
-                  beginMicrophonePrimeFromGesture();
+              accessibilityLabel="Ещё"
+              hitSlop={8}
+              onPress={handleOpenMenu}
+              style={styles.headerMenuButton}
+            >
+              <Ionicons name="ellipsis-vertical" size={18} color={colors.textSubtle} />
+            </Pressable>
+          </View>
+
+          {ongoingVoiceCall && !voiceActiveHere ? (
+            <View style={styles.voiceJoinBanner}>
+              <View style={styles.voiceJoinIcon}>
+                <Ionicons name="headset" size={18} color={colors.primary} />
+              </View>
+              <View style={styles.voiceJoinCopy}>
+                <Text style={styles.voiceJoinTitle} numberOfLines={1}>
+                  {ongoingVoiceCall.isGroup
+                    ? ongoingVoiceCall.conversationTitle?.trim() || title || 'Голосовой чат'
+                    : ongoingVoiceCall.fromNickname?.trim() || 'Голосовой чат'}
+                </Text>
+                <Text style={styles.voiceJoinHint} numberOfLines={1}>
+                  {ongoingVoiceCall.joinedCount > 1 ? `${ongoingVoiceCall.joinedCount} в эфире` : 'В эфире'}
+                </Text>
+              </View>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={ongoingVoiceCall.isJoined ? 'Вернуться в голосовой чат' : 'Присоединиться к голосовому чату'}
+                disabled={joiningOngoingVoice}
+                onPressIn={() => {
+                  if (Platform.OS === 'web') {
+                    beginMicrophonePrimeFromGesture();
+                  }
+                }}
+                onPress={() => {
+                  if (!conversationId || !ongoingVoiceCall) {
+                    return;
+                  }
+                  setJoiningOngoingVoice(true);
+                  void joinOngoingCall(
+                    conversationId,
+                    ongoingVoiceCall.callId,
+                    ongoingVoiceCall.isGroup ? ongoingVoiceCall.conversationTitle || title : ongoingVoiceCall.fromNickname,
+                    ongoingVoiceCall.fromAvatarUrl,
+                    {
+                      isGroup: ongoingVoiceCall.isGroup,
+                      myRole: ongoingVoiceCall.isGroup ? myGroupRole : null,
+                    },
+                  ).finally(() => setJoiningOngoingVoice(false));
+                }}
+                style={({ pressed }) => [styles.voiceJoinButton, pressed && styles.voiceJoinButtonPressed]}
+              >
+                {joiningOngoingVoice ? (
+                  <ActivityIndicator size="small" color="#FFFFFF" />
+                ) : (
+                  <Text style={styles.voiceJoinButtonLabel}>{ongoingVoiceCall.isJoined ? 'Вернуться' : 'Присоединиться'}</Text>
+                )}
+              </Pressable>
+            </View>
+          ) : null}
+
+          {showFavoriteBack || showFavoriteMine || showRemoveBack ? (
+            <View style={[styles.favoriteInvite, showRemoveBack && styles.favoriteInviteRemoved]}>
+              <View style={[styles.favoriteInviteIcon, showRemoveBack && styles.favoriteInviteIconRemoved]}>
+                {showRemoveBack ? (
+                  <CrownOffIcon size={18} color={isDark ? '#E8B87A' : '#9A6B2F'} haloColor={isDark ? '#3A2818' : undefined} />
+                ) : (
+                  <MaterialCommunityIcons name="crown" size={18} color={isDark ? '#FFE9A8' : '#C9A227'} />
+                )}
+              </View>
+              <View style={styles.favoriteInviteCopy}>
+                <Text style={[styles.favoriteInviteTitle, showRemoveBack && styles.favoriteInviteTitleRemoved]} numberOfLines={1}>
+                  {showRemoveBack ? 'Убрал вас из избранных' : showFavoriteMine ? 'Вы добавили в избранные' : 'Добавил вас в избранные'}
+                </Text>
+                <Text style={styles.favoriteInviteHint} numberOfLines={2}>
+                  {showRemoveBack
+                    ? 'Можете убрать в ответ, если хотите'
+                    : showFavoriteMine
+                      ? 'Можно отменить, если передумали'
+                      : 'Ответьте взаимностью, чтобы объединиться'}
+                </Text>
+              </View>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={
+                  showRemoveBack ? 'Удалить из избранных в ответ' : showFavoriteMine ? 'Отменить избранное' : 'Добавить в избранные в ответ'
+                }
+                disabled={addingBack}
+                onPress={() => void (showFavoriteBack ? handleAddBack() : handleCancelFavorite())}
+                style={({ pressed }) => [
+                  styles.favoriteInviteButton,
+                  (showFavoriteMine || showRemoveBack) && styles.favoriteInviteButtonCancel,
+                  showRemoveBack && styles.favoriteInviteButtonRemove,
+                  pressed && styles.favoriteInviteButtonPressed,
+                ]}
+              >
+                {showFavoriteBack ? <MaterialCommunityIcons name="crown" size={13} color="#FFFFFF" /> : null}
+                <Text
+                  style={[
+                    styles.favoriteInviteButtonLabel,
+                    (showFavoriteMine || showRemoveBack) && styles.favoriteInviteButtonLabelCancel,
+                    showRemoveBack && styles.favoriteInviteButtonLabelRemove,
+                  ]}
+                >
+                  {addingBack ? '…' : showRemoveBack ? 'Удалить в ответ' : showFavoriteMine ? 'Отмена' : 'В ответ'}
+                </Text>
+              </Pressable>
+            </View>
+          ) : null}
+
+          {loading && !conversation ? (
+            <View
+              style={{
+                flex: 1,
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}
+            >
+              <ActivityIndicator color={colors.primary} />
+            </View>
+          ) : (
+            <FlatList
+              ref={listRef}
+              style={styles.list}
+              contentContainerStyle={styles.listContent}
+              data={renderedMessages}
+              keyExtractor={(item) => item.id}
+              onScrollToIndexFailed={({ index }) => {
+                listRef.current?.scrollToOffset({
+                  offset: Math.max(0, index * 72),
+                  animated: true,
+                });
+              }}
+              initialNumToRender={Math.max(renderedMessages.length, 16)}
+              maxToRenderPerBatch={32}
+              windowSize={21}
+              removeClippedSubviews={false}
+              viewabilityConfig={viewabilityConfig}
+              onViewableItemsChanged={onViewableItemsChanged}
+              onLayout={(event) => {
+                layoutHeightRef.current = event.nativeEvent.layout.height;
+                if (!loadingOlderRef.current && (stickToBottomRef.current || openingPinRef.current)) {
+                  if (!scrollToInitialUnread()) pinToBottom();
                 }
               }}
-              onPress={() => {
-                if (!conversationId || !ongoingVoiceCall) {
+              onContentSizeChange={(_width, height) => {
+                contentHeightRef.current = height;
+                if (!loadingOlderRef.current && (stickToBottomRef.current || openingPinRef.current)) {
+                  if (!scrollToInitialUnread()) pinToBottom();
+                }
+              }}
+              onScroll={({ nativeEvent }: NativeSyntheticEvent<NativeScrollEvent>) => {
+                scrollOffsetRef.current = nativeEvent.contentOffset.y;
+                const distanceFromBottom =
+                  nativeEvent.contentSize.height - nativeEvent.contentOffset.y - nativeEvent.layoutMeasurement.height;
+                const nearBottom = distanceFromBottom < 96;
+                if (pinningScrollRef.current) {
                   return;
                 }
-                setJoiningOngoingVoice(true);
-                void joinOngoingCall(
-                  conversationId,
-                  ongoingVoiceCall.callId,
-                  ongoingVoiceCall.isGroup
-                    ? ongoingVoiceCall.conversationTitle || title
-                    : ongoingVoiceCall.fromNickname,
-                  ongoingVoiceCall.fromAvatarUrl,
-                  {
-                    isGroup: ongoingVoiceCall.isGroup,
-                    myRole: ongoingVoiceCall.isGroup ? myGroupRole : null,
-                  },
-                ).finally(() => setJoiningOngoingVoice(false));
-              }}
-              style={({ pressed }) => [
-                styles.voiceJoinButton,
-                pressed && styles.voiceJoinButtonPressed,
-              ]}>
-              {joiningOngoingVoice ? (
-                <ActivityIndicator size="small" color="#FFFFFF" />
-              ) : (
-                <Text style={styles.voiceJoinButtonLabel}>
-                  {ongoingVoiceCall.isJoined ? 'Вернуться' : 'Присоединиться'}
-                </Text>
-              )}
-            </Pressable>
-          </View>
-        ) : null}
-
-        {showFavoriteBack || showFavoriteMine || showRemoveBack ? (
-          <View
-            style={[
-              styles.favoriteInvite,
-              showRemoveBack && styles.favoriteInviteRemoved,
-            ]}>
-            <View
-              style={[
-                styles.favoriteInviteIcon,
-                showRemoveBack && styles.favoriteInviteIconRemoved,
-              ]}>
-              {showRemoveBack ? (
-                <CrownOffIcon
-                  size={18}
-                  color={isDark ? '#E8B87A' : '#9A6B2F'}
-                  haloColor={isDark ? '#3A2818' : undefined}
-                />
-              ) : (
-                <MaterialCommunityIcons
-                  name="crown"
-                  size={18}
-                  color={isDark ? '#FFE9A8' : '#C9A227'}
-                />
-              )}
-            </View>
-            <View style={styles.favoriteInviteCopy}>
-              <Text
-                style={[
-                  styles.favoriteInviteTitle,
-                  showRemoveBack && styles.favoriteInviteTitleRemoved,
-                ]}
-                numberOfLines={1}>
-                {showRemoveBack
-                  ? 'Убрал вас из избранных'
-                  : showFavoriteMine
-                    ? 'Вы добавили в избранные'
-                    : 'Добавил вас в избранные'}
-              </Text>
-              <Text style={styles.favoriteInviteHint} numberOfLines={2}>
-                {showRemoveBack
-                  ? 'Можете убрать в ответ, если хотите'
-                  : showFavoriteMine
-                    ? 'Можно отменить, если передумали'
-                    : 'Ответьте взаимностью, чтобы объединиться'}
-              </Text>
-            </View>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={
-                showRemoveBack
-                  ? 'Удалить из избранных в ответ'
-                  : showFavoriteMine
-                    ? 'Отменить избранное'
-                    : 'Добавить в избранные в ответ'
-              }
-              disabled={addingBack}
-              onPress={() =>
-                void (showFavoriteBack ? handleAddBack() : handleCancelFavorite())
-              }
-              style={({ pressed }) => [
-                styles.favoriteInviteButton,
-                (showFavoriteMine || showRemoveBack) && styles.favoriteInviteButtonCancel,
-                showRemoveBack && styles.favoriteInviteButtonRemove,
-                pressed && styles.favoriteInviteButtonPressed,
-              ]}>
-              {showFavoriteBack ? (
-                <MaterialCommunityIcons name="crown" size={13} color="#FFFFFF" />
-              ) : null}
-              <Text
-                style={[
-                  styles.favoriteInviteButtonLabel,
-                  (showFavoriteMine || showRemoveBack) && styles.favoriteInviteButtonLabelCancel,
-                  showRemoveBack && styles.favoriteInviteButtonLabelRemove,
-                ]}>
-                {addingBack
-                  ? '…'
-                  : showRemoveBack
-                    ? 'Удалить в ответ'
-                    : showFavoriteMine
-                      ? 'Отмена'
-                      : 'В ответ'}
-              </Text>
-            </Pressable>
-          </View>
-        ) : null}
-
-        {loading && !conversation ? (
-          <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
-            <ActivityIndicator color={colors.primary} />
-          </View>
-        ) : (
-          <FlatList
-            ref={listRef}
-            style={styles.list}
-            contentContainerStyle={styles.listContent}
-            data={renderedMessages}
-            keyExtractor={(item) => item.id}
-            onScrollToIndexFailed={({ index }) => {
-              listRef.current?.scrollToOffset({
-                offset: Math.max(0, index * 72),
-                animated: true,
-              });
-            }}
-            initialNumToRender={Math.max(renderedMessages.length, 16)}
-            maxToRenderPerBatch={32}
-            windowSize={21}
-            removeClippedSubviews={false}
-            onLayout={(event) => {
-              layoutHeightRef.current = event.nativeEvent.layout.height;
-              if (!loadingOlderRef.current && (stickToBottomRef.current || openingPinRef.current)) {
-                pinToBottom();
-              }
-            }}
-            onContentSizeChange={(_width, height) => {
-              contentHeightRef.current = height;
-              if (!loadingOlderRef.current && (stickToBottomRef.current || openingPinRef.current)) {
-                pinToBottom();
-              }
-            }}
-            onScroll={({ nativeEvent }: NativeSyntheticEvent<NativeScrollEvent>) => {
-              scrollOffsetRef.current = nativeEvent.contentOffset.y;
-              const distanceFromBottom =
-                nativeEvent.contentSize.height -
-                nativeEvent.contentOffset.y -
-                nativeEvent.layoutMeasurement.height;
-              const nearBottom = distanceFromBottom < 96;
-              if (pinningScrollRef.current) {
-                return;
-              }
-              if (openingPinRef.current) {
-                if (nearBottom) {
-                  openingPinRef.current = false;
-                  stickToBottomRef.current = true;
+                if (openingPinRef.current) {
+                  if (nearBottom) {
+                    openingPinRef.current = false;
+                    stickToBottomRef.current = true;
+                  }
+                  return;
                 }
-                return;
+                stickToBottomRef.current = nearBottom;
+              }}
+              scrollEventThrottle={16}
+              bounces={false}
+              overScrollMode="never"
+              onEndReachedThreshold={0.2}
+              ListHeaderComponent={
+                nextCursor ? (
+                  <Pressable onPress={() => void loadOlder()} style={{ paddingVertical: Spacing.sm }}>
+                    <Text style={{ color: colors.primary, textAlign: 'center' }}>Загрузить ещё</Text>
+                  </Pressable>
+                ) : null
               }
-              stickToBottomRef.current = nearBottom;
-            }}
-            scrollEventThrottle={16}
-            bounces={false}
-            overScrollMode="never"
-            onEndReachedThreshold={0.2}
-            ListHeaderComponent={
-              nextCursor ? (
-                <Pressable onPress={() => void loadOlder()} style={{ paddingVertical: Spacing.sm }}>
-                  <Text style={{ color: colors.primary, textAlign: 'center' }}>Загрузить ещё</Text>
-                </Pressable>
-              ) : null
-            }
-            renderItem={({ item: timelineItem }) => {
-              if (timelineItem.type === 'date') {
-                return (
-                  <View style={styles.dateDividerRow}>
-                    <View style={styles.dateDividerChip}>
-                      <Text style={styles.dateDividerText}>{timelineItem.label}</Text>
+              renderItem={({ item: timelineItem }) => {
+                if (timelineItem.type === 'unread') {
+                  return (
+                    <View style={styles.unreadDividerRow}>
+                      <View style={styles.unreadDividerLine} />
+                      <Text style={styles.unreadDividerText}>{timelineItem.label}</Text>
+                      <View style={styles.unreadDividerLine} />
                     </View>
-                  </View>
-                );
-              }
+                  );
+                }
+                if (timelineItem.type === 'date') {
+                  return (
+                    <View style={styles.dateDividerRow}>
+                      <View style={styles.dateDividerChip}>
+                        <Text style={styles.dateDividerText}>{timelineItem.label}</Text>
+                      </View>
+                    </View>
+                  );
+                }
 
-              const item = timelineItem.message;
-              const mine = item.senderId === myId;
-              const isPending = item.id.startsWith('pending-');
-              const isFavoriteNotice = item.kind === 'favorite_received';
-              const isFavoriteRemovedNotice = item.kind === 'favorite_removed';
-              const isBlockNotice = item.kind === 'user_blocked';
-              const isUnblockNotice = item.kind === 'user_unblocked';
-              const isMissedCallNotice = item.kind === 'missed_voice_call';
-              const noticeText = isFavoriteNotice
-                ? mine
-                  ? 'Вы добавили этого пользователя в избранные'
-                  : 'добавил вас в избранные.'
-                : isFavoriteRemovedNotice
+                const item = timelineItem.message;
+                const mine = item.senderId === myId;
+                const isPending = item.id.startsWith('pending-');
+                const isFavoriteNotice = item.kind === 'favorite_received';
+                const isFavoriteRemovedNotice = item.kind === 'favorite_removed';
+                const isBlockNotice = item.kind === 'user_blocked';
+                const isUnblockNotice = item.kind === 'user_unblocked';
+                const isMissedCallNotice = item.kind === 'missed_voice_call';
+                const noticeText = isFavoriteNotice
                   ? mine
-                    ? 'Вы убрали этого пользователя из избранных'
-                    : 'убрал вас из избранных.'
-                  : isBlockNotice
+                    ? 'Вы добавили этого пользователя в избранные'
+                    : 'добавил вас в избранные.'
+                  : isFavoriteRemovedNotice
                     ? mine
-                      ? 'Вы заблокировали этого пользователя'
-                      : 'Вас заблокировали'
-                    : isUnblockNotice
+                      ? 'Вы убрали этого пользователя из избранных'
+                      : 'убрал вас из избранных.'
+                    : isBlockNotice
                       ? mine
-                        ? 'Вы разблокировали этого пользователя'
-                        : 'разблокировал вас.'
-                      : isMissedCallNotice
+                        ? 'Вы заблокировали этого пользователя'
+                        : 'Вас заблокировали'
+                      : isUnblockNotice
                         ? mine
-                          ? 'Пропущенный звонок'
-                          : 'Пропущенный звонок'
-                        : null;
-              const bodyText = noticeText ?? item.body;
-              const attachments = normalizeMessageAttachments(item);
-              const imageAttachments = attachments.filter((entry) => entry.kind === 'image');
-              const audioAttachments = attachments.filter((entry) => entry.kind === 'audio');
-              const fileAttachments = attachments.filter(
-                (entry) => entry.kind !== 'image' && entry.kind !== 'audio',
-              );
-              const lightboxUris = imageAttachments
-                .map((entry) => fullUrlForAttachment(entry))
-                .filter((value): value is string => Boolean(value));
-              const isRead =
-                mine && peerReadMs > 0 && new Date(item.createdAt).getTime() <= peerReadMs;
-              const bubbleColor = mine ? colors.primary : isDark ? '#2C2C2E' : colors.surfaceMuted;
-              const timeLabel = formatMessageTime(item.createdAt);
-              const fullDateTimeLabel = formatMessageFullDateTime(item.createdAt);
-              const timeAccessibilityProps = fullDateTimeLabel
-                ? ({
-                    accessibilityLabel: fullDateTimeLabel,
-                    ...(Platform.OS === 'web' ? ({ title: fullDateTimeLabel } as object) : null),
-                  } as object)
-                : null;
+                          ? 'Вы разблокировали этого пользователя'
+                          : 'разблокировал вас.'
+                        : isMissedCallNotice
+                          ? mine
+                            ? 'Пропущенный звонок'
+                            : 'Пропущенный звонок'
+                          : null;
+                const bodyText = noticeText ?? item.body;
+                const attachments = normalizeMessageAttachments(item);
+                const imageAttachments = attachments.filter((entry) => entry.kind === 'image');
+                const audioAttachments = attachments.filter((entry) => entry.kind === 'audio');
+                const fileAttachments = attachments.filter((entry) => entry.kind !== 'image' && entry.kind !== 'audio');
+                const lightboxUris = imageAttachments
+                  .map((entry) => fullUrlForAttachment(entry))
+                  .filter((value): value is string => Boolean(value));
+                const isRead = mine && peerReadMs > 0 && new Date(item.createdAt).getTime() <= peerReadMs;
+                const bubbleColor = mine ? colors.primary : isDark ? '#2C2C2E' : colors.surfaceMuted;
+                const timeLabel = formatMessageTime(item.createdAt);
+                const fullDateTimeLabel = formatMessageFullDateTime(item.createdAt);
+                const timeAccessibilityProps = fullDateTimeLabel
+                  ? ({
+                      accessibilityLabel: fullDateTimeLabel,
+                      ...(Platform.OS === 'web' ? ({ title: fullDateTimeLabel } as object) : null),
+                    } as object)
+                  : null;
 
-              if (isMissedCallNotice) {
-                return (
-                  <View style={styles.systemNoticeRow}>
-                    <View style={styles.missedCallNotice}>
-                      <View style={styles.missedCallIconWrap}>
-                        <Ionicons name="call" size={14} color={colors.primary} style={styles.missedCallIcon} />
-                      </View>
-                      <Text style={[styles.missedCallText, { color: colors.primary }]}>
-                        {mine ? 'Звонок без ответа' : 'Пропущенный звонок'}
-                      </Text>
-                      {timeLabel ? (
-                        <Text style={[styles.missedCallTime, { color: colors.primary }]} {...timeAccessibilityProps}>
-                          {timeLabel}
+                if (isMissedCallNotice) {
+                  return (
+                    <View style={styles.systemNoticeRow}>
+                      <View style={styles.missedCallNotice}>
+                        <View style={styles.missedCallIconWrap}>
+                          <Ionicons name="call" size={14} color={colors.primary} style={styles.missedCallIcon} />
+                        </View>
+                        <Text style={[styles.missedCallText, { color: colors.primary }]}>
+                          {mine ? 'Звонок без ответа' : 'Пропущенный звонок'}
                         </Text>
-                      ) : null}
-                    </View>
-                  </View>
-                );
-              }
-
-              if (isFavoriteNotice || isFavoriteRemovedNotice) {
-                const peerName = conversation?.peer?.nickname ?? 'пользователя';
-
-                return (
-                  <View style={styles.systemNoticeRow}>
-                    <View
-                      style={[
-                        styles.favoriteNotice,
-                        isFavoriteRemovedNotice && styles.favoriteNoticeRemoved,
-                      ]}>
-                      <View
-                        style={[
-                          styles.favoriteNoticeIconWrap,
-                          isFavoriteRemovedNotice && styles.favoriteNoticeIconWrapRemoved,
-                        ]}>
-                        {isFavoriteRemovedNotice ? (
-                          <CrownOffIcon
-                            size={15}
-                            color={isDark ? '#E8B87A' : '#9A6B2F'}
-                            haloColor={isDark ? '#3A2818' : undefined}
-                          />
-                        ) : (
-                          <MaterialCommunityIcons
-                            name="crown"
-                            size={15}
-                            color={isDark ? '#FFE9A8' : '#C9A227'}
-                          />
-                        )}
+                        {timeLabel ? (
+                          <Text style={[styles.missedCallTime, { color: colors.primary }]} {...timeAccessibilityProps}>
+                            {timeLabel}
+                          </Text>
+                        ) : null}
                       </View>
-                      <View style={styles.favoriteNoticeBody}>
-                        <Text style={styles.favoriteNoticeText}>
+                    </View>
+                  );
+                }
+
+                if (isFavoriteNotice || isFavoriteRemovedNotice) {
+                  const peerName = conversation?.peer?.nickname ?? 'пользователя';
+
+                  return (
+                    <View style={styles.systemNoticeRow}>
+                      <View style={[styles.favoriteNotice, isFavoriteRemovedNotice && styles.favoriteNoticeRemoved]}>
+                        <View style={[styles.favoriteNoticeIconWrap, isFavoriteRemovedNotice && styles.favoriteNoticeIconWrapRemoved]}>
                           {isFavoriteRemovedNotice ? (
-                            mine ? (
+                            <CrownOffIcon size={15} color={isDark ? '#E8B87A' : '#9A6B2F'} haloColor={isDark ? '#3A2818' : undefined} />
+                          ) : (
+                            <MaterialCommunityIcons name="crown" size={15} color={isDark ? '#FFE9A8' : '#C9A227'} />
+                          )}
+                        </View>
+                        <View style={styles.favoriteNoticeBody}>
+                          <Text style={styles.favoriteNoticeText}>
+                            {isFavoriteRemovedNotice ? (
+                              mine ? (
+                                <>
+                                  Вы убрали <Text style={styles.favoriteNoticeName}>{peerName}</Text> из избранных
+                                </>
+                              ) : (
+                                <>
+                                  <Text style={styles.favoriteNoticeName}>{peerName}</Text> убрал вас из избранных
+                                </>
+                              )
+                            ) : mine ? (
                               <>
-                                Вы убрали{' '}
-                                <Text style={styles.favoriteNoticeName}>{peerName}</Text> из
-                                избранных
+                                Вы добавили <Text style={styles.favoriteNoticeName}>{peerName}</Text> в избранные
                               </>
                             ) : (
                               <>
-                                <Text style={styles.favoriteNoticeName}>{peerName}</Text> убрал
-                                вас из избранных
+                                <Text style={styles.favoriteNoticeName}>{peerName}</Text> добавил вас в избранные
                               </>
-                            )
-                          ) : mine ? (
-                            <>
-                              Вы добавили{' '}
-                              <Text style={styles.favoriteNoticeName}>{peerName}</Text> в
-                              избранные
-                            </>
-                          ) : (
-                            <>
-                              <Text style={styles.favoriteNoticeName}>{peerName}</Text> добавил
-                              вас в избранные
-                            </>
-                          )}
-                        </Text>
-                        {timeLabel ? (
-                          <View style={styles.favoriteNoticeMeta}>
-                            <View style={styles.favoriteNoticeDot} />
-                            <Text style={styles.favoriteNoticeTime} {...timeAccessibilityProps}>
-                              {timeLabel}
-                            </Text>
-                          </View>
-                        ) : null}
-                      </View>
-                    </View>
-                  </View>
-                );
-              }
-
-              return (
-                <ChatMessagePressable
-                  selectionMode={selectionMode}
-                  onOpenActions={() => openMessageActions(item)}
-                  style={[styles.bubbleRow, mine && styles.bubbleRowMine]}>
-                  {selectionMode ? (
-                    <View style={styles.selectMark}>
-                      <Ionicons
-                        name={selectedIds.includes(item.id) ? 'checkbox' : 'square-outline'}
-                        size={20}
-                        color={
-                          selectedIds.includes(item.id) ? colors.primary : colors.textMuted
-                        }
-                      />
-                    </View>
-                  ) : null}
-                  {isGroup && !mine ? (
-                    <View style={styles.authorAvatarCol}>
-                      {timelineItem.showAuthorMeta ? (
-                        <Pressable
-                          accessibilityRole="button"
-                          accessibilityLabel={`Профиль ${item.sender?.nickname ?? 'участника'}`}
-                          onPress={() => {
-                            if (item.senderId) {
-                              router.push(`/users/${item.senderId}`);
-                            }
-                          }}
-                          style={styles.authorAvatarButton}>
-                          <UserAvatar
-                            nickname={item.sender?.nickname ?? 'Игрок'}
-                            avatarUrl={resolveStableSenderAvatar(
-                              item.senderId,
-                              item.sender?.avatarUrl ??
-                                members.find((member) => member.id === item.senderId)?.avatarUrl ??
-                                null,
                             )}
-                            size={30}
-                            badges={
-                              item.sender?.badges ??
-                              members.find((member) => member.id === item.senderId)?.badges
-                            }
-                            frameId={
-                              item.sender?.avatarFrameId ??
-                              members.find((member) => member.id === item.senderId)?.avatarFrameId
-                            }
-                          />
-                        </Pressable>
-                      ) : (
-                        <View style={styles.authorAvatarSpacer} />
-                      )}
-                    </View>
-                  ) : null}
-                  <View style={[styles.bubbleShell, mine && styles.bubbleShellMine]}>
-                    {isGroup && !mine && timelineItem.showAuthorMeta ? (
-                      <NameWithBadges
-                        name={item.sender?.nickname ?? 'Игрок'}
-                        badges={
-                          item.sender?.badges ??
-                          members.find((member) => member.id === item.senderId)?.badges
-                        }
-                        textStyle={styles.senderName}
-                        badgeSize={11}
-                      />
-                    ) : null}
-                    <View
-                      style={[
-                        styles.bubble,
-                        mine && styles.bubbleMine,
-                        highlightedMessageId === item.id && styles.bubbleHighlighted,
-                      ]}>
-                      {item.forwardedFrom ? (
-                        <Text
-                          selectable={false}
-                          style={[styles.forwardLabel, mine && styles.forwardLabelMine]}
-                          numberOfLines={1}>
-                          Переслано от: {item.forwardedFrom.nickname}
-                        </Text>
-                      ) : null}
-                      {item.replyTo ? (
-                        <View style={styles.replyInBubble}>
-                          <ChatReplyQuote
-                            preview={{
-                              id: item.replyTo.id,
-                              senderNickname: item.replyTo.senderNickname,
-                              body: item.replyTo.body,
-                              hasMedia: item.replyTo.hasMedia,
-                            }}
-                            mine={mine}
-                            compact
-                            onPress={() => scrollToMessage(item.replyTo!.id)}
-                          />
-                        </View>
-                      ) : null}
-                      {imageAttachments.length > 0 ? (
-                        <ChatAlbumGrid
-                          images={imageAttachments}
-                          onOpen={(index) =>
-                            setLightbox({
-                              uris: lightboxUris,
-                              index,
-                            })
-                          }
-                        />
-                      ) : null}
-                      {audioAttachments.map((audioAttachment, audioIndex) => {
-                        const voiceKey = `${item.id}-audio-${audioIndex}`;
-                        return (
-                          <ChatAudioPlayer
-                            key={voiceKey}
-                            playbackKey={voiceKey}
-                            attachment={{
-                              ...audioAttachment,
-                              url: fullUrlForAttachment(audioAttachment),
-                            }}
-                            mine={mine}
-                            active={activeVoiceKey === voiceKey}
-                            playing={playingVoiceKey === voiceKey}
-                            onPress={() => {
-                              if (activeVoiceKey === voiceKey) {
-                                toggleVoice(voiceKey);
-                              } else {
-                                playVoice(voiceKey, voiceQueue);
-                              }
-                            }}
-                            accentColor={mine ? '#FFFFFF' : colors.primary}
-                            textColor={mine ? colors.onPrimary : colors.textSecondary}
-                          />
-                        );
-                      })}
-                      {fileAttachments.map((fileAttachment, fileIndex) => (
-                        <Pressable
-                          key={`${item.id}-file-${fileIndex}`}
-                          accessibilityRole="button"
-                          accessibilityLabel={
-                            fileAttachment.kind === 'audio' ? 'Скачать аудио' : 'Скачать файл'
-                          }
-                          onPress={() => {
-                            const url = fileAttachment.url;
-                            if (!url) {
-                              return;
-                            }
-                            downloadChatAttachment(
-                              url,
-                              fileAttachment.name ??
-                                (fileAttachment.kind === 'audio' ? 'audio' : 'file'),
-                            );
-                          }}
-                          style={[styles.bubbleAttachment, mine && styles.bubbleAttachmentMine]}>
-                          <Ionicons
-                            name={attachmentIcon(fileAttachment.kind)}
-                            size={20}
-                            color={mine ? colors.onPrimary : colors.primary}
-                          />
-                          <Text
-                            selectable={false}
-                            style={[
-                              styles.bubbleAttachmentName,
-                              mine && styles.bubbleAttachmentNameMine,
-                            ]}
-                            numberOfLines={2}>
-                            {fileAttachment.name ??
-                              (fileAttachment.kind === 'audio' ? 'Аудио' : 'Файл')}
                           </Text>
-                        </Pressable>
-                      ))}
-                      <View style={styles.bubbleContent}>
-                        {item.kind === 'dice_roll' ? (
-                          (() => {
-                            const dicePayload = parseDiceRollPayload(item.body);
-                            return dicePayload ? (
-                              <ChatDiceBubble
-                                payload={dicePayload}
-                                mine={mine}
-                              />
-                            ) : bodyText ? (
-                              <ChatMessageBody
-                                text={bodyText}
-                                textStyle={[styles.bubbleText, mine && styles.bubbleTextMine]}
-                                linkStyle={mine ? styles.bubbleLinkMine : styles.bubbleLink}
-                              />
-                            ) : null;
-                          })()
-                        ) : bodyText ? (
-                          <ChatMessageBody
-                            text={bodyText}
-                            textStyle={[styles.bubbleText, mine && styles.bubbleTextMine]}
-                            linkStyle={mine ? styles.bubbleLinkMine : styles.bubbleLink}
-                          />
-                        ) : null}
-                        <View style={styles.metaRow}>
-                          {isPending ? (
-                            <ActivityIndicator
-                              size="small"
-                              color={mine ? 'rgba(255,255,255,0.9)' : colors.primary}
-                            />
-                          ) : (
-                            <Text
-                              selectable={false}
-                              style={[styles.metaTime, mine && styles.metaTimeMine]}
-                              {...timeAccessibilityProps}>
-                              {timeLabel}
-                            </Text>
-                          )}
-                          {mine && !isPending ? (
-                            <Ionicons
-                              name={isRead ? 'checkmark-done' : 'checkmark'}
-                              size={12}
-                              color={isRead ? '#B8F2C8' : 'rgba(255,255,255,0.82)'}
-                            />
+                          {timeLabel ? (
+                            <View style={styles.favoriteNoticeMeta}>
+                              <View style={styles.favoriteNoticeDot} />
+                              <Text style={styles.favoriteNoticeTime} {...timeAccessibilityProps}>
+                                {timeLabel}
+                              </Text>
+                            </View>
                           ) : null}
                         </View>
                       </View>
-                      {isUnblockNotice && !mine && conversation?.blockedByMe ? (
-                        <Pressable
-                          accessibilityRole="button"
-                          disabled={unblocking}
-                          onPress={() => void handleUnblock()}
-                          style={({ pressed }) => [
-                            styles.favoriteReplyButton,
-                            pressed && styles.favoriteReplyButtonPressed,
-                          ]}>
-                          <Text style={styles.favoriteReplyLabel}>
-                            {unblocking ? 'Разблокируем…' : 'Разблокировать в ответ'}
-                          </Text>
-                        </Pressable>
-                      ) : null}
                     </View>
-                    <BubbleTail color={bubbleColor} side={mine ? 'right' : 'left'} />
-                  </View>
-                </ChatMessagePressable>
-              );
-            }}
-          />
-        )}
+                  );
+                }
 
-        <ChatImageLightbox
-          uris={lightbox?.uris ?? null}
-          index={lightbox?.index ?? 0}
-          onClose={() => setLightbox(null)}
-        />
+                return (
+                  <ChatMessagePressable
+                    selectionMode={selectionMode}
+                    onOpenActions={() => openMessageActions(item)}
+                    onDoubleTap={() => void handleReact(item, '❤️')}
+                    style={[styles.bubbleRow, mine && styles.bubbleRowMine]}
+                  >
+                    {selectionMode ? (
+                      <View style={styles.selectMark}>
+                        <Ionicons
+                          name={selectedIds.includes(item.id) ? 'checkbox' : 'square-outline'}
+                          size={20}
+                          color={selectedIds.includes(item.id) ? colors.primary : colors.textMuted}
+                        />
+                      </View>
+                    ) : null}
+                    {isGroup && !mine ? (
+                      <View style={styles.authorAvatarCol}>
+                        {timelineItem.showAuthorMeta ? (
+                          <Pressable
+                            accessibilityRole="button"
+                            accessibilityLabel={`Профиль ${item.sender?.nickname ?? 'участника'}`}
+                            onPress={() => {
+                              if (item.senderId) {
+                                router.push(`/users/${item.senderId}`);
+                              }
+                            }}
+                            style={styles.authorAvatarButton}
+                          >
+                            <UserAvatar
+                              nickname={item.sender?.nickname ?? 'Игрок'}
+                              avatarUrl={resolveStableSenderAvatar(
+                                item.senderId,
+                                item.sender?.avatarUrl ?? members.find((member) => member.id === item.senderId)?.avatarUrl ?? null,
+                              )}
+                              size={30}
+                              badges={item.sender?.badges ?? members.find((member) => member.id === item.senderId)?.badges}
+                              frameId={item.sender?.avatarFrameId ?? members.find((member) => member.id === item.senderId)?.avatarFrameId}
+                            />
+                          </Pressable>
+                        ) : (
+                          <View style={styles.authorAvatarSpacer} />
+                        )}
+                      </View>
+                    ) : null}
+                    <View style={[styles.bubbleShell, mine && styles.bubbleShellMine]}>
+                      {isGroup && !mine && timelineItem.showAuthorMeta ? (
+                        <NameWithBadges
+                          name={item.sender?.nickname ?? 'Игрок'}
+                          badges={item.sender?.badges ?? members.find((member) => member.id === item.senderId)?.badges}
+                          textStyle={styles.senderName}
+                          badgeSize={11}
+                        />
+                      ) : null}
+                      <View
+                        style={[styles.bubble, mine && styles.bubbleMine, highlightedMessageId === item.id && styles.bubbleHighlighted]}
+                      >
+                        {item.forwardedFrom ? (
+                          <Text selectable={false} style={[styles.forwardLabel, mine && styles.forwardLabelMine]} numberOfLines={1}>
+                            Переслано от: {item.forwardedFrom.nickname}
+                          </Text>
+                        ) : null}
+                        {item.replyTo ? (
+                          <View style={styles.replyInBubble}>
+                            <ChatReplyQuote
+                              preview={{
+                                id: item.replyTo.id,
+                                senderNickname: item.replyTo.senderNickname,
+                                body: item.replyTo.body,
+                                hasMedia: item.replyTo.hasMedia,
+                              }}
+                              mine={mine}
+                              compact
+                              onPress={() => scrollToMessage(item.replyTo!.id)}
+                            />
+                          </View>
+                        ) : null}
+                        {imageAttachments.length > 0 ? (
+                          <ChatAlbumGrid
+                            images={imageAttachments}
+                            onOpen={(index) =>
+                              setLightbox({
+                                uris: lightboxUris,
+                                index,
+                              })
+                            }
+                          />
+                        ) : null}
+                        {audioAttachments.map((audioAttachment, audioIndex) => {
+                          const voiceKey = `${item.id}-audio-${audioIndex}`;
+                          return (
+                            <ChatAudioPlayer
+                              key={voiceKey}
+                              playbackKey={voiceKey}
+                              attachment={{
+                                ...audioAttachment,
+                                url: fullUrlForAttachment(audioAttachment),
+                              }}
+                              mine={mine}
+                              active={activeVoiceKey === voiceKey}
+                              playing={playingVoiceKey === voiceKey}
+                              onPress={() => {
+                                if (activeVoiceKey === voiceKey) {
+                                  toggleVoice(voiceKey);
+                                } else {
+                                  playVoice(voiceKey, voiceQueue);
+                                }
+                              }}
+                              accentColor={mine ? '#FFFFFF' : colors.primary}
+                              textColor={mine ? colors.onPrimary : colors.textSecondary}
+                            />
+                          );
+                        })}
+                        {fileAttachments.map((fileAttachment, fileIndex) => (
+                          <Pressable
+                            key={`${item.id}-file-${fileIndex}`}
+                            accessibilityRole="button"
+                            accessibilityLabel={fileAttachment.kind === 'audio' ? 'Скачать аудио' : 'Скачать файл'}
+                            onPress={() => {
+                              const url = fileAttachment.url;
+                              if (!url) {
+                                return;
+                              }
+                              downloadChatAttachment(url, fileAttachment.name ?? (fileAttachment.kind === 'audio' ? 'audio' : 'file'));
+                            }}
+                            style={[styles.bubbleAttachment, mine && styles.bubbleAttachmentMine]}
+                          >
+                            <Ionicons
+                              name={attachmentIcon(fileAttachment.kind)}
+                              size={20}
+                              color={mine ? colors.onPrimary : colors.primary}
+                            />
+                            <Text
+                              selectable={false}
+                              style={[styles.bubbleAttachmentName, mine && styles.bubbleAttachmentNameMine]}
+                              numberOfLines={2}
+                            >
+                              {fileAttachment.name ?? (fileAttachment.kind === 'audio' ? 'Аудио' : 'Файл')}
+                            </Text>
+                          </Pressable>
+                        ))}
+                        <View style={styles.bubbleContent}>
+                          {item.kind === 'dice_roll' ? (
+                            (() => {
+                              const dicePayload = parseDiceRollPayload(item.body);
+                              return dicePayload ? (
+                                <ChatDiceBubble payload={dicePayload} mine={mine} />
+                              ) : bodyText ? (
+                                <ChatMessageBody
+                                  text={bodyText}
+                                  textStyle={[styles.bubbleText, mine && styles.bubbleTextMine]}
+                                  linkStyle={mine ? styles.bubbleLinkMine : styles.bubbleLink}
+                                />
+                              ) : null;
+                            })()
+                          ) : bodyText ? (
+                            <ChatMessageBody
+                              text={bodyText}
+                              textStyle={[styles.bubbleText, mine && styles.bubbleTextMine]}
+                              linkStyle={mine ? styles.bubbleLinkMine : styles.bubbleLink}
+                            />
+                          ) : null}
+                          <View style={styles.metaRow}>
+                            {isPending ? (
+                              <ActivityIndicator size="small" color={mine ? 'rgba(255,255,255,0.9)' : colors.primary} />
+                            ) : (
+                              <Text selectable={false} style={[styles.metaTime, mine && styles.metaTimeMine]} {...timeAccessibilityProps}>
+                                {timeLabel}
+                              </Text>
+                            )}
+                            {mine && !isPending ? (
+                              <Ionicons
+                                name={isRead ? 'checkmark-done' : 'checkmark'}
+                                size={12}
+                                color={isRead ? '#B8F2C8' : 'rgba(255,255,255,0.82)'}
+                              />
+                            ) : null}
+                          </View>
+                        </View>
+                        {isUnblockNotice && !mine && conversation?.blockedByMe ? (
+                          <Pressable
+                            accessibilityRole="button"
+                            disabled={unblocking}
+                            onPress={() => void handleUnblock()}
+                            style={({ pressed }) => [styles.favoriteReplyButton, pressed && styles.favoriteReplyButtonPressed]}
+                          >
+                            <Text style={styles.favoriteReplyLabel}>{unblocking ? 'Разблокируем…' : 'Разблокировать в ответ'}</Text>
+                          </Pressable>
+                        ) : null}
+                        {item.reactions?.length ? (
+                          <View
+                            style={{
+                              flexDirection: 'row',
+                              flexWrap: 'wrap',
+                              gap: 5,
+                              paddingTop: 5,
+                            }}
+                          >
+                            {item.reactions.map((reaction) => (
+                              <Pressable
+                                key={reaction.emoji}
+                                accessibilityRole="button"
+                                accessibilityLabel={`Реакция ${reaction.emoji}, ${reaction.count}`}
+                                onPress={() => void handleReact(item, reaction.emoji)}
+                                style={{
+                                  flexDirection: 'row',
+                                  alignItems: 'center',
+                                  gap: 4,
+                                  paddingHorizontal: 8,
+                                  paddingVertical: 3,
+                                  borderRadius: 14,
+                                  backgroundColor: reaction.reactedByMe ? colors.primary + '35' : colors.surfaceMuted,
+                                }}
+                              >
+                                <Text>{reaction.emoji}</Text>
+                                {reaction.count > 4 || !reaction.reactors?.length ? (
+                                  <Text
+                                    style={{
+                                      color: colors.textSecondary,
+                                      fontSize: 12,
+                                    }}
+                                  >
+                                    {reaction.count}
+                                  </Text>
+                                ) : (
+                                  <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                                    {reaction.reactors.map((reactor, index) => (
+                                      <View
+                                        key={reactor.userId}
+                                        style={{
+                                          width: 17,
+                                          height: 17,
+                                          borderRadius: 9,
+                                          overflow: 'hidden',
+                                          alignItems: 'center',
+                                          justifyContent: 'center',
+                                          backgroundColor: colors.surface,
+                                          borderWidth: 1,
+                                          borderColor: colors.border,
+                                          marginLeft: index === 0 ? 0 : -5,
+                                        }}
+                                      >
+                                        {reactor.avatarUrl ? (
+                                          <Image
+                                            source={{ uri: reactor.avatarUrl }}
+                                            style={{ width: '100%', height: '100%' }}
+                                            contentFit="cover"
+                                          />
+                                        ) : (
+                                          <Text style={{ color: colors.textSecondary, fontSize: 10, lineHeight: 14 }}>
+                                            {reactor.nickname.trim().slice(0, 1).toUpperCase() || '?'}
+                                          </Text>
+                                        )}
+                                      </View>
+                                    ))}
+                                  </View>
+                                )}
+                              </Pressable>
+                            ))}
+                          </View>
+                        ) : null}
+                      </View>
+                      <BubbleTail color={bubbleColor} side={mine ? 'right' : 'left'} />
+                    </View>
+                  </ChatMessagePressable>
+                );
+              }}
+            />
+          )}
 
-        {pendingAttachments.length > 0 ? (
-          <View style={styles.pendingStrip}>
-            {pendingAttachments.map((item) => (
-              <View key={item.id} style={styles.pendingThumbWrap}>
-                {item.kind === 'image' ? (
-                  <Image
-                    source={{ uri: item.uri }}
-                    style={styles.pendingImage}
-                    contentFit="cover"
-                  />
-                ) : (
-                  <View style={styles.pendingFileChip}>
-                    <Ionicons
-                      name={attachmentIcon(item.kind)}
-                      size={18}
-                      color={colors.primary}
-                    />
-                    <Text style={styles.pendingFileName} numberOfLines={2}>
-                      {item.name}
-                    </Text>
-                  </View>
-                )}
-                {sending ? (
-                  <View style={styles.pendingBusy}>
-                    <ActivityIndicator color="#fff" size="small" />
-                  </View>
-                ) : (
-                  <Pressable
-                    accessibilityRole="button"
-                    accessibilityLabel="Убрать вложение"
-                    onPress={() => removePendingAttachment(item.id)}
-                    style={styles.pendingClear}>
-                    <Ionicons name="close" size={14} color={colors.text} />
-                  </Pressable>
-                )}
-              </View>
-            ))}
-          </View>
-        ) : null}
+          <ChatImageLightbox uris={lightbox?.uris ?? null} index={lightbox?.index ?? 0} onClose={() => setLightbox(null)} />
 
-        {selectionMode ? (
-          <View style={styles.selectionBar}>
-            <Pressable accessibilityRole="button" onPress={clearSelection} hitSlop={8}>
-              <Text style={styles.selectionCancel}>Отмена</Text>
-            </Pressable>
-            <Text style={styles.selectionCount}>Выбрано: {selectedIds.length}</Text>
-            <Pressable
-              accessibilityRole="button"
-              disabled={selectedIds.length === 0}
-              onPress={() => handleStartForward(selectedIds)}
-              style={[
-                styles.selectionForward,
-                selectedIds.length === 0 && styles.selectionForwardDisabled,
-              ]}>
-              <Ionicons name="arrow-redo-outline" size={16} color={colors.onPrimary} />
-              <Text style={styles.selectionForwardLabel}>Переслать</Text>
-            </Pressable>
-          </View>
-        ) : null}
+          {pendingAttachments.length > 0 ? (
+            <View style={styles.pendingStrip}>
+              {pendingAttachments.map((item) => (
+                <View key={item.id} style={styles.pendingThumbWrap}>
+                  {item.kind === 'image' ? (
+                    <Image source={{ uri: item.uri }} style={styles.pendingImage} contentFit="cover" />
+                  ) : (
+                    <View style={styles.pendingFileChip}>
+                      <Ionicons name={attachmentIcon(item.kind)} size={18} color={colors.primary} />
+                      <Text style={styles.pendingFileName} numberOfLines={2}>
+                        {item.name}
+                      </Text>
+                    </View>
+                  )}
+                  {sending ? (
+                    <View style={styles.pendingBusy}>
+                      <ActivityIndicator color="#fff" size="small" />
+                    </View>
+                  ) : (
+                    <Pressable
+                      accessibilityRole="button"
+                      accessibilityLabel="Убрать вложение"
+                      onPress={() => removePendingAttachment(item.id)}
+                      style={styles.pendingClear}
+                    >
+                      <Ionicons name="close" size={14} color={colors.text} />
+                    </Pressable>
+                  )}
+                </View>
+              ))}
+            </View>
+          ) : null}
 
-        {conversation?.blockedMe ? (
-          <View style={styles.blockedBanner}>
-            <Text style={styles.blockedBannerText}>
-              Вас заблокировали. Отправлять сообщения нельзя.
-            </Text>
-          </View>
-        ) : (
-        <View style={styles.composerShell}>
-        {replyTo ? (
-          <View style={styles.replyBar}>
-            <ChatReplyQuote preview={replyTo} onClear={() => setReplyTo(null)} />
-          </View>
-        ) : null}
-        {emojiPanelOpen ? <ChatEmojiPanel onSelect={insertEmoji} /> : null}
-        <View style={[styles.composer, { overflow: 'visible' }]}>
-          {conversationId ? (
-            <ChatVoiceComposer
-              conversationId={conversationId}
-              disabled={sending}
-              replyToId={replyTo?.id}
-              showMic={!hasMessageText && pendingAttachments.length === 0}
-              trailing={
+          {selectionMode ? (
+            <View style={styles.selectionBar}>
+              <Pressable accessibilityRole="button" onPress={clearSelection} hitSlop={8}>
+                <Text style={styles.selectionCancel}>Отмена</Text>
+              </Pressable>
+              <Text style={styles.selectionCount}>Выбрано: {selectedIds.length}</Text>
+              <Pressable
+                accessibilityRole="button"
+                disabled={selectedIds.length === 0}
+                onPress={() => handleStartForward(selectedIds)}
+                style={[styles.selectionForward, selectedIds.length === 0 && styles.selectionForwardDisabled]}
+              >
+                <Ionicons name="arrow-redo-outline" size={16} color={colors.onPrimary} />
+                <Text style={styles.selectionForwardLabel}>Переслать</Text>
+              </Pressable>
+            </View>
+          ) : null}
+
+          {conversation?.blockedMe ? (
+            <View style={styles.blockedBanner}>
+              <Text style={styles.blockedBannerText}>Вас заблокировали. Отправлять сообщения нельзя.</Text>
+            </View>
+          ) : (
+            <View style={styles.composerShell}>
+              {unreadReactionCount > 0 && !voiceRecording ? (
                 <Pressable
                   accessibilityRole="button"
-                  accessibilityLabel="Отправить"
-                  disabled={!canSend}
-                  onPress={() => void handleSend()}
-                  style={[styles.sendButton, canSend && styles.sendButtonReady]}>
-                  {sending ? (
-                    <ActivityIndicator size="small" color={colors.onPrimary} />
-                  ) : (
-                    <Ionicons
-                      name="send"
-                      size={18}
-                      color={canSend ? colors.onPrimary : colors.textMuted}
-                    />
-                  )}
+                  accessibilityLabel={`${unreadReactionCount} непрочитанных реакций`}
+                  onPress={() => void goToNextUnreadReaction()}
+                  style={{
+                    position: 'absolute',
+                    right: Spacing.md + 6,
+                    top: -48,
+                    height: 40,
+                    minWidth: 48,
+                    borderRadius: 20,
+                    paddingHorizontal: 12,
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: 6,
+                    backgroundColor: colors.primary,
+                    zIndex: 10,
+                    elevation: 5,
+                  }}
+                >
+                  <Text style={{ fontSize: 18 }}>❤️</Text>
+                  <Text
+                    style={{
+                      color: colors.onPrimary,
+                      fontSize: 13,
+                      fontWeight: '700',
+                    }}
+                  >
+                    {unreadReactionCount}
+                  </Text>
                 </Pressable>
-              }
-              onSent={(message) => {
-                setReplyTo(null);
-                setMessages((prev) =>
-                  prev.some((item) => item.id === message.id) ? prev : [...prev, message],
-                );
-                scrollToBottom();
-              }}
-              idleChildren={
-                <>
-                  <Pressable
-                    accessibilityRole="button"
-                    accessibilityLabel="Прикрепить файл"
-                    onPress={() => void pickAttachment()}
-                    style={styles.iconButton}>
-                    <Ionicons name="attach-outline" size={20} color={colors.textMuted} />
-                  </Pressable>
-                  <View ref={composerFieldWrapRef} collapsable={false} style={styles.composerField}>
-                    <TextInput
-                      ref={composerInputRef}
-                      style={styles.input}
-                      value={draft}
-                      onChangeText={(value) => {
-                        if (
-                          suppressComposerClearRef.current &&
-                          value === '' &&
-                          draftRef.current.length > 0
-                        ) {
-                          return;
-                        }
-                        draftRef.current = value;
-                        setDraft(value);
-                      }}
-                      onSelectionChange={(event) => {
-                        selectionRef.current = event.nativeEvent.selection;
-                      }}
-                      onFocus={handleComposerFocus}
-                      showSoftInputOnFocus={!emojiPanelOpen}
-                      nativeID="chat-composer-input"
-                      placeholder="Сообщение"
-                      placeholderTextColor={colors.textMuted}
-                      multiline
-                      blurOnSubmit={false}
-                      submitBehavior="newline"
-                      returnKeyType="default"
-                      enterKeyHint={shouldSendChatOnEnter() ? 'send' : 'enter'}
-                      onKeyPress={shouldSendChatOnEnter() ? handleKeyPress : undefined}
-                    />
-                  </View>
-                  <Pressable
-                    accessibilityRole="button"
-                    accessibilityLabel={emojiPanelOpen ? 'Скрыть эмодзи' : 'Эмодзи'}
-                    accessibilityState={{ selected: emojiPanelOpen }}
-                    onPressIn={() => {
-                      // Blur инпута часто приходит раньше onPress и шлёт пустой onChangeText.
-                      suppressComposerClearRef.current = true;
+              ) : null}
+              {replyTo ? (
+                <View style={styles.replyBar}>
+                  <ChatReplyQuote preview={replyTo} onClear={() => setReplyTo(null)} />
+                </View>
+              ) : null}
+              {emojiPanelOpen ? <ChatEmojiPanel onSelect={insertEmoji} /> : null}
+              <View style={[styles.composer, { overflow: 'visible' }]}>
+                {conversationId ? (
+                  <ChatVoiceComposer
+                    conversationId={conversationId}
+                    disabled={sending}
+                    replyToId={replyTo?.id}
+                    showMic={!hasMessageText && pendingAttachments.length === 0}
+                    onRecordingStateChange={setVoiceRecording}
+                    trailing={
+                      <Pressable
+                        accessibilityRole="button"
+                        accessibilityLabel="Отправить"
+                        disabled={!canSend}
+                        onPress={() => void handleSend()}
+                        style={[styles.sendButton, canSend && styles.sendButtonReady]}
+                      >
+                        {sending ? (
+                          <ActivityIndicator size="small" color={colors.onPrimary} />
+                        ) : (
+                          <Ionicons name="send" size={18} color={canSend ? colors.onPrimary : colors.textMuted} />
+                        )}
+                      </Pressable>
+                    }
+                    onSent={(message) => {
+                      setReplyTo(null);
+                      setMessages((prev) => (prev.some((item) => item.id === message.id) ? prev : [...prev, message]));
+                      scrollToBottom();
                     }}
-                    onPress={toggleEmojiPanel}
-                    // @ts-expect-error RN Web: не забирать фокус у поля ввода
-                    onMouseDown={(event: { preventDefault?: () => void }) => {
-                      event.preventDefault?.();
-                    }}
-                    style={[styles.iconButton, emojiPanelOpen ? styles.iconButtonActive : null]}>
-                    <Ionicons
-                      name={emojiPanelOpen ? 'happy' : 'happy-outline'}
-                      size={20}
-                      color={emojiPanelOpen ? colors.primary : colors.textMuted}
-                    />
-                  </Pressable>
-                  <Pressable
-                    accessibilityRole="button"
-                    accessibilityLabel="Бросить кости"
-                    accessibilityState={{ selected: dicePopoverOpen }}
-                    onPress={() => {
-                      setEmojiPanelOpen(false);
-                      emojiPanelOpenRef.current = false;
-                      setDicePopoverOpen(true);
-                    }}
-                    style={[styles.iconButton, dicePopoverOpen ? styles.iconButtonActive : null]}>
-                    <Ionicons
-                      name="dice-outline"
-                      size={20}
-                      color={dicePopoverOpen ? colors.primary : colors.textMuted}
-                    />
-                  </Pressable>
-                </>
-              }
-            />
-          ) : null}
-        </View>
-        </View>
-        )}
+                    idleChildren={
+                      <>
+                        <Pressable
+                          accessibilityRole="button"
+                          accessibilityLabel="Прикрепить файл"
+                          onPress={() => void pickAttachment()}
+                          style={styles.iconButton}
+                        >
+                          <Ionicons name="attach-outline" size={20} color={colors.textMuted} />
+                        </Pressable>
+                        <View ref={composerFieldWrapRef} collapsable={false} style={styles.composerField}>
+                          <TextInput
+                            ref={composerInputRef}
+                            style={styles.input}
+                            value={draft}
+                            onChangeText={(value) => {
+                              if (suppressComposerClearRef.current && value === '' && draftRef.current.length > 0) {
+                                return;
+                              }
+                              draftRef.current = value;
+                              setDraft(value);
+                            }}
+                            onSelectionChange={(event) => {
+                              selectionRef.current = event.nativeEvent.selection;
+                            }}
+                            onFocus={handleComposerFocus}
+                            showSoftInputOnFocus={!emojiPanelOpen}
+                            nativeID="chat-composer-input"
+                            placeholder="Сообщение"
+                            placeholderTextColor={colors.textMuted}
+                            multiline
+                            blurOnSubmit={false}
+                            submitBehavior="newline"
+                            returnKeyType="default"
+                            enterKeyHint={shouldSendChatOnEnter() ? 'send' : 'enter'}
+                            onKeyPress={shouldSendChatOnEnter() ? handleKeyPress : undefined}
+                          />
+                        </View>
+                        <Pressable
+                          accessibilityRole="button"
+                          accessibilityLabel={emojiPanelOpen ? 'Скрыть эмодзи' : 'Эмодзи'}
+                          accessibilityState={{ selected: emojiPanelOpen }}
+                          onPressIn={() => {
+                            // Blur инпута часто приходит раньше onPress и шлёт пустой onChangeText.
+                            suppressComposerClearRef.current = true;
+                          }}
+                          onPress={toggleEmojiPanel}
+                          // @ts-expect-error RN Web: не забирать фокус у поля ввода
+                          onMouseDown={(event: { preventDefault?: () => void }) => {
+                            event.preventDefault?.();
+                          }}
+                          style={[styles.iconButton, emojiPanelOpen ? styles.iconButtonActive : null]}
+                        >
+                          <Ionicons
+                            name={emojiPanelOpen ? 'happy' : 'happy-outline'}
+                            size={20}
+                            color={emojiPanelOpen ? colors.primary : colors.textMuted}
+                          />
+                        </Pressable>
+                        <Pressable
+                          accessibilityRole="button"
+                          accessibilityLabel="Бросить кости"
+                          accessibilityState={{ selected: dicePopoverOpen }}
+                          onPress={() => {
+                            setEmojiPanelOpen(false);
+                            emojiPanelOpenRef.current = false;
+                            setDicePopoverOpen(true);
+                          }}
+                          style={[styles.iconButton, dicePopoverOpen ? styles.iconButtonActive : null]}
+                        >
+                          <Ionicons name="dice-outline" size={20} color={dicePopoverOpen ? colors.primary : colors.textMuted} />
+                        </Pressable>
+                      </>
+                    }
+                  />
+                ) : null}
+              </View>
+            </View>
+          )}
         </View>
       </KeyboardAvoidingView>
 
-        <Modal visible={menuOpen} transparent animationType="fade" onRequestClose={handleCloseMenu}>
-          <View style={styles.menuRoot}>
-            <Pressable style={styles.menuBackdrop} onPress={handleCloseMenu} />
-            <View style={[styles.menu, { top: headerPadTop + 44 }]}>
-              <Pressable
-                accessibilityRole="button"
-                onPress={() => {
-                  handleCloseMenu();
-                  setBackgroundPickerOpen(true);
-                }}
-                style={({ pressed }) => [styles.menuItem, pressed && styles.menuItemPressed]}>
-                <Ionicons name="image-outline" size={18} color={colors.primary} />
-                <Text style={[styles.menuItemLabel, { color: colors.primary }]}>Фон чата</Text>
-              </Pressable>
-              {isGroup ? (
-                <>
+      <Modal visible={menuOpen} transparent animationType="fade" onRequestClose={handleCloseMenu}>
+        <View style={styles.menuRoot}>
+          <Pressable style={styles.menuBackdrop} onPress={handleCloseMenu} />
+          <View style={[styles.menu, { top: headerPadTop + 44 }]}>
+            <Pressable
+              accessibilityRole="button"
+              onPress={() => {
+                handleCloseMenu();
+                setBackgroundPickerOpen(true);
+              }}
+              style={({ pressed }) => [styles.menuItem, pressed && styles.menuItemPressed]}
+            >
+              <Ionicons name="image-outline" size={18} color={colors.primary} />
+              <Text style={[styles.menuItemLabel, { color: colors.primary }]}>Фон чата</Text>
+            </Pressable>
+            {isGroup ? (
+              <>
+                <Pressable
+                  accessibilityRole="button"
+                  onPress={() => {
+                    handleCloseMenu();
+                    void handleOpenMembers();
+                  }}
+                  style={({ pressed }) => [styles.menuItem, pressed && styles.menuItemPressed]}
+                >
+                  <Ionicons name="people-outline" size={18} color={colors.primary} />
+                  <Text style={[styles.menuItemLabel, { color: colors.primary }]}>Участники</Text>
+                </Pressable>
+                {canManageGroup ? (
                   <Pressable
                     accessibilityRole="button"
                     onPress={() => {
                       handleCloseMenu();
-                      void handleOpenMembers();
+                      setRenameOpen(true);
                     }}
-                    style={({ pressed }) => [styles.menuItem, pressed && styles.menuItemPressed]}>
-                    <Ionicons name="people-outline" size={18} color={colors.primary} />
-                    <Text style={[styles.menuItemLabel, { color: colors.primary }]}>
-                      Участники
-                    </Text>
+                    style={({ pressed }) => [styles.menuItem, pressed && styles.menuItemPressed]}
+                  >
+                    <Ionicons name="pencil-outline" size={18} color={colors.primary} />
+                    <Text style={[styles.menuItemLabel, { color: colors.primary }]}>Переименовать</Text>
                   </Pressable>
-                  {canManageGroup ? (
-                    <Pressable
-                      accessibilityRole="button"
-                      onPress={() => {
-                        handleCloseMenu();
-                        setRenameOpen(true);
-                      }}
-                      style={({ pressed }) => [styles.menuItem, pressed && styles.menuItemPressed]}>
-                      <Ionicons name="pencil-outline" size={18} color={colors.primary} />
-                      <Text style={[styles.menuItemLabel, { color: colors.primary }]}>
-                        Переименовать
-                      </Text>
-                    </Pressable>
-                  ) : null}
-                  {canManageGroup ? (
-                    <Pressable
-                      accessibilityRole="button"
-                      onPress={() => {
-                        handleCloseMenu();
-                        void handleOpenAddMembers();
-                      }}
-                      style={({ pressed }) => [styles.menuItem, pressed && styles.menuItemPressed]}>
-                      <Ionicons name="person-add-outline" size={18} color={colors.primary} />
-                      <Text style={[styles.menuItemLabel, { color: colors.primary }]}>
-                        Добавить участников
-                      </Text>
-                    </Pressable>
-                  ) : null}
+                ) : null}
+                {canManageGroup ? (
                   <Pressable
                     accessibilityRole="button"
-                    disabled={isMenuBusy}
-                    onPress={() => void handleLeaveGroup()}
-                    style={({ pressed }) => [styles.menuItem, pressed && styles.menuItemPressed]}>
-                    <Ionicons name="exit-outline" size={18} color={colors.destructive} />
-                    <Text style={styles.menuItemLabel}>
-                      {conversation?.gameId ? 'Скрыть чат' : 'Выйти из группы'}
-                    </Text>
+                    onPress={() => {
+                      handleCloseMenu();
+                      void handleOpenAddMembers();
+                    }}
+                    style={({ pressed }) => [styles.menuItem, pressed && styles.menuItemPressed]}
+                  >
+                    <Ionicons name="person-add-outline" size={18} color={colors.primary} />
+                    <Text style={[styles.menuItemLabel, { color: colors.primary }]}>Добавить участников</Text>
                   </Pressable>
-                  {isGroupOwner ? (
-                    <Pressable
-                      accessibilityRole="button"
-                      onPress={() => {
-                        handleCloseMenu();
-                        setPendingDeleteGroup(true);
-                      }}
-                      style={({ pressed }) => [styles.menuItem, pressed && styles.menuItemPressed]}>
-                      <Ionicons name="trash-outline" size={18} color={colors.destructive} />
-                      <Text style={styles.menuItemLabel}>Удалить группу</Text>
-                    </Pressable>
-                  ) : (
-                    <Pressable
-                      accessibilityRole="button"
-                      onPress={() => {
-                        handleCloseMenu();
-                        setPendingDelete(true);
-                      }}
-                      style={({ pressed }) => [styles.menuItem, pressed && styles.menuItemPressed]}>
-                      <Ionicons name="eye-off-outline" size={18} color={colors.destructive} />
-                      <Text style={styles.menuItemLabel}>Скрыть у себя</Text>
-                    </Pressable>
-                  )}
-                </>
-              ) : (
-                <>
-                  {conversation &&
-                  !conversation.isFavorite &&
-                  !conversation.blockedByMe &&
-                  !conversation.blockedMe ? (
-                    <Pressable
-                      accessibilityRole="button"
-                      disabled={addingBack}
-                      onPress={() => {
-                        handleCloseMenu();
-                        void handleAddBack();
-                      }}
-                      style={({ pressed }) => [styles.menuItem, pressed && styles.menuItemPressed]}>
-                      <MaterialCommunityIcons name="crown" size={18} color="#C9A227" />
-                      <Text style={[styles.menuItemLabel, styles.menuItemLabelFavorite]}>
-                        {addingBack ? 'Добавляем…' : 'В избранные'}
-                      </Text>
-                    </Pressable>
-                  ) : null}
-                  {conversation?.isFavorite &&
-                  !conversation.blockedByMe &&
-                  !conversation.blockedMe ? (
-                    <Pressable
-                      accessibilityRole="button"
-                      disabled={addingBack}
-                      onPress={() => {
-                        handleCloseMenu();
-                        void handleCancelFavorite();
-                      }}
-                      style={({ pressed }) => [styles.menuItem, pressed && styles.menuItemPressed]}>
-                      <CrownOffIcon
-                        size={18}
-                        color={isDark ? '#E8B87A' : '#9A6B2F'}
-                        haloColor={isDark ? colors.background : undefined}
-                      />
-                      <Text style={[styles.menuItemLabel, styles.menuItemLabelFavorite]}>
-                        {addingBack ? 'Убираем…' : 'Убрать из избранных'}
-                      </Text>
-                    </Pressable>
-                  ) : null}
-                  {conversation?.blockedByMe ? (
-                    <Pressable
-                      accessibilityRole="button"
-                      disabled={unblocking}
-                      onPress={() => void handleUnblock()}
-                      style={({ pressed }) => [styles.menuItem, pressed && styles.menuItemPressed]}>
-                      <Ionicons name="lock-open-outline" size={18} color={colors.primary} />
-                      <Text style={[styles.menuItemLabel, { color: colors.primary }]}>
-                        {unblocking ? 'Разблокируем…' : 'Разблокировать'}
-                      </Text>
-                    </Pressable>
-                  ) : (
-                    <Pressable
-                      accessibilityRole="button"
-                      onPress={() => {
-                        handleCloseMenu();
-                        setPendingBlock(true);
-                      }}
-                      style={({ pressed }) => [styles.menuItem, pressed && styles.menuItemPressed]}>
-                      <Ionicons name="ban-outline" size={18} color={colors.destructive} />
-                      <Text style={styles.menuItemLabel}>Заблокировать</Text>
-                    </Pressable>
-                  )}
+                ) : null}
+                <Pressable
+                  accessibilityRole="button"
+                  disabled={isMenuBusy}
+                  onPress={() => void handleLeaveGroup()}
+                  style={({ pressed }) => [styles.menuItem, pressed && styles.menuItemPressed]}
+                >
+                  <Ionicons name="exit-outline" size={18} color={colors.destructive} />
+                  <Text style={styles.menuItemLabel}>{conversation?.gameId ? 'Скрыть чат' : 'Выйти из группы'}</Text>
+                </Pressable>
+                {isGroupOwner ? (
+                  <Pressable
+                    accessibilityRole="button"
+                    onPress={() => {
+                      handleCloseMenu();
+                      setPendingDeleteGroup(true);
+                    }}
+                    style={({ pressed }) => [styles.menuItem, pressed && styles.menuItemPressed]}
+                  >
+                    <Ionicons name="trash-outline" size={18} color={colors.destructive} />
+                    <Text style={styles.menuItemLabel}>Удалить группу</Text>
+                  </Pressable>
+                ) : (
                   <Pressable
                     accessibilityRole="button"
                     onPress={() => {
                       handleCloseMenu();
                       setPendingDelete(true);
                     }}
-                    style={({ pressed }) => [styles.menuItem, pressed && styles.menuItemPressed]}>
-                    <Ionicons name="trash-outline" size={18} color={colors.destructive} />
-                    <Text style={styles.menuItemLabel}>Удалить</Text>
+                    style={({ pressed }) => [styles.menuItem, pressed && styles.menuItemPressed]}
+                  >
+                    <Ionicons name="eye-off-outline" size={18} color={colors.destructive} />
+                    <Text style={styles.menuItemLabel}>Скрыть у себя</Text>
                   </Pressable>
-                </>
-              )}
-            </View>
+                )}
+              </>
+            ) : (
+              <>
+                {conversation && !conversation.isFavorite && !conversation.blockedByMe && !conversation.blockedMe ? (
+                  <Pressable
+                    accessibilityRole="button"
+                    disabled={addingBack}
+                    onPress={() => {
+                      handleCloseMenu();
+                      void handleAddBack();
+                    }}
+                    style={({ pressed }) => [styles.menuItem, pressed && styles.menuItemPressed]}
+                  >
+                    <MaterialCommunityIcons name="crown" size={18} color="#C9A227" />
+                    <Text style={[styles.menuItemLabel, styles.menuItemLabelFavorite]}>{addingBack ? 'Добавляем…' : 'В избранные'}</Text>
+                  </Pressable>
+                ) : null}
+                {conversation?.isFavorite && !conversation.blockedByMe && !conversation.blockedMe ? (
+                  <Pressable
+                    accessibilityRole="button"
+                    disabled={addingBack}
+                    onPress={() => {
+                      handleCloseMenu();
+                      void handleCancelFavorite();
+                    }}
+                    style={({ pressed }) => [styles.menuItem, pressed && styles.menuItemPressed]}
+                  >
+                    <CrownOffIcon size={18} color={isDark ? '#E8B87A' : '#9A6B2F'} haloColor={isDark ? colors.background : undefined} />
+                    <Text style={[styles.menuItemLabel, styles.menuItemLabelFavorite]}>
+                      {addingBack ? 'Убираем…' : 'Убрать из избранных'}
+                    </Text>
+                  </Pressable>
+                ) : null}
+                {conversation?.blockedByMe ? (
+                  <Pressable
+                    accessibilityRole="button"
+                    disabled={unblocking}
+                    onPress={() => void handleUnblock()}
+                    style={({ pressed }) => [styles.menuItem, pressed && styles.menuItemPressed]}
+                  >
+                    <Ionicons name="lock-open-outline" size={18} color={colors.primary} />
+                    <Text style={[styles.menuItemLabel, { color: colors.primary }]}>{unblocking ? 'Разблокируем…' : 'Разблокировать'}</Text>
+                  </Pressable>
+                ) : (
+                  <Pressable
+                    accessibilityRole="button"
+                    onPress={() => {
+                      handleCloseMenu();
+                      setPendingBlock(true);
+                    }}
+                    style={({ pressed }) => [styles.menuItem, pressed && styles.menuItemPressed]}
+                  >
+                    <Ionicons name="ban-outline" size={18} color={colors.destructive} />
+                    <Text style={styles.menuItemLabel}>Заблокировать</Text>
+                  </Pressable>
+                )}
+                <Pressable
+                  accessibilityRole="button"
+                  onPress={() => {
+                    handleCloseMenu();
+                    setPendingDelete(true);
+                  }}
+                  style={({ pressed }) => [styles.menuItem, pressed && styles.menuItemPressed]}
+                >
+                  <Ionicons name="trash-outline" size={18} color={colors.destructive} />
+                  <Text style={styles.menuItemLabel}>Удалить</Text>
+                </Pressable>
+              </>
+            )}
           </View>
-        </Modal>
+        </View>
+      </Modal>
 
-        <GroupMembersSheet
-          visible={membersOpen}
-          title={title}
-          members={members}
-          loading={membersLoading}
-          busy={membersBusy}
-          myUserId={myId}
-          myRole={myGroupRole}
-          readOnly={Boolean(conversation?.gameId)}
-          onClose={() => setMembersOpen(false)}
-          onOpenProfile={(userId) => {
-            setMembersOpen(false);
-            router.push(`/users/${userId}`);
-          }}
-          onAddMembers={() => {
-            void handleOpenAddMembers();
-          }}
-          onPromote={(userId) => void handlePromoteMember(userId)}
-          onDemote={(userId) => void handleDemoteMember(userId)}
-          onTransfer={(userId) => void handleTransferOwnership(userId)}
-          onRemove={(userId) => void handleRemoveMember(userId)}
-        />
+      <GroupMembersSheet
+        visible={membersOpen}
+        title={title}
+        members={members}
+        loading={membersLoading}
+        busy={membersBusy}
+        myUserId={myId}
+        myRole={myGroupRole}
+        readOnly={Boolean(conversation?.gameId)}
+        onClose={() => setMembersOpen(false)}
+        onOpenProfile={(userId) => {
+          setMembersOpen(false);
+          router.push(`/users/${userId}`);
+        }}
+        onAddMembers={() => {
+          void handleOpenAddMembers();
+        }}
+        onPromote={(userId) => void handlePromoteMember(userId)}
+        onDemote={(userId) => void handleDemoteMember(userId)}
+        onTransfer={(userId) => void handleTransferOwnership(userId)}
+        onRemove={(userId) => void handleRemoveMember(userId)}
+      />
 
-        <RenameGroupDialog
-          visible={renameOpen}
-          initialTitle={conversation?.title?.trim() || title}
-          isBusy={membersBusy}
-          onCancel={() => setRenameOpen(false)}
-          onSubmit={(nextTitle) => void handleRenameGroup(nextTitle)}
-        />
+      <RenameGroupDialog
+        visible={renameOpen}
+        initialTitle={conversation?.title?.trim() || title}
+        isBusy={membersBusy}
+        onCancel={() => setRenameOpen(false)}
+        onSubmit={(nextTitle) => void handleRenameGroup(nextTitle)}
+      />
 
-        <AddGroupMembersDialog
-          visible={addMembersOpen}
-          contacts={addMemberContacts}
-          excludeIds={members.map((member) => member.id)}
-          isBusy={membersBusy}
-          onCancel={() => setAddMembersOpen(false)}
-          onSubmit={(ids) => void handleAddMembers(ids)}
-        />
+      <AddGroupMembersDialog
+        visible={addMembersOpen}
+        contacts={addMemberContacts}
+        excludeIds={members.map((member) => member.id)}
+        isBusy={membersBusy}
+        onCancel={() => setAddMembersOpen(false)}
+        onSubmit={(ids) => void handleAddMembers(ids)}
+      />
 
-        <DeleteChatDialog
-          visible={pendingDeleteGroup}
-          nickname={title}
-          isDeleting={isMenuBusy}
-          title="Удалить группу"
-          message={`Группа «${title}» исчезнет у всех участников. Это нельзя отменить.`}
-          confirmLabel="Удалить для всех"
-          onDeleteForMe={() => void handleDeleteGroup()}
-          onCancel={() => setPendingDeleteGroup(false)}
-        />
+      <DeleteChatDialog
+        visible={pendingDeleteGroup}
+        nickname={title}
+        isDeleting={isMenuBusy}
+        title="Удалить группу"
+        message={`Группа «${title}» исчезнет у всех участников. Это нельзя отменить.`}
+        confirmLabel="Удалить для всех"
+        onDeleteForMe={() => void handleDeleteGroup()}
+        onCancel={() => setPendingDeleteGroup(false)}
+      />
 
-        <ChatBackgroundPickerSheet
-          visible={backgroundPickerOpen}
-          conversationId={conversationId}
-          onClose={() => setBackgroundPickerOpen(false)}
-          onConversationUpdated={(next) => {
-            setConversation((prev) => withStablePeerAvatar(prev, next));
-            publishConversationUpdate(next);
-          }}
-        />
+      <ChatBackgroundPickerSheet
+        visible={backgroundPickerOpen}
+        conversationId={conversationId}
+        onClose={() => setBackgroundPickerOpen(false)}
+        onConversationUpdated={(next) => {
+          setConversation((prev) => withStablePeerAvatar(prev, next));
+          publishConversationUpdate(next);
+        }}
+      />
 
-        <DeleteChatDialog
-          visible={pendingDelete}
-          nickname={title}
-          isDeleting={isMenuBusy}
-          onDeleteForMe={() => void handleDeleteChat(false)}
-          onDeleteForEveryone={isGroup ? undefined : () => void handleDeleteChat(true)}
-          onCancel={() => {
-            if (!isMenuBusy) {
-              setPendingDelete(false);
+      <DeleteChatDialog
+        visible={pendingDelete}
+        nickname={title}
+        isDeleting={isMenuBusy}
+        onDeleteForMe={() => void handleDeleteChat(false)}
+        onDeleteForEveryone={isGroup ? undefined : () => void handleDeleteChat(true)}
+        onCancel={() => {
+          if (!isMenuBusy) {
+            setPendingDelete(false);
+          }
+        }}
+      />
+
+      <BlockUserDialog
+        visible={pendingBlock}
+        nickname={conversation?.peer?.nickname ?? ''}
+        isBusy={isMenuBusy}
+        onConfirm={(deleteChat) => void handleBlock(deleteChat)}
+        onCancel={() => {
+          if (!isMenuBusy) {
+            setPendingBlock(false);
+          }
+        }}
+      />
+
+      <ChatMessageActionsSheet
+        visible={Boolean(actionMessage)}
+        onClose={() => setActionMessage(null)}
+        allowCopy={Boolean(actionMessage && getMessageCopyText(actionMessage))}
+        selectedEmoji={actionMessage?.reactions?.find((reaction) => reaction.reactedByMe)?.emoji}
+        reactionOrder={reactionOrder}
+        onReact={(emoji) => {
+          if (actionMessage) void handleReact(actionMessage, emoji);
+        }}
+        onCopy={() => {
+          if (actionMessage) {
+            void handleCopyMessage(actionMessage);
+          }
+        }}
+        onReply={() => {
+          if (actionMessage) {
+            handleStartReply(actionMessage);
+          }
+        }}
+        onForward={() => {
+          if (actionMessage) {
+            handleStartForward([actionMessage.id]);
+          }
+        }}
+        onSelectMore={() => {
+          if (actionMessage) {
+            handleEnterSelection(actionMessage);
+          }
+        }}
+      />
+
+      <ChatForwardPicker
+        visible={forwardOpen}
+        excludeConversationId={null}
+        busy={forwardBusy}
+        onClose={() => {
+          if (!forwardBusy) {
+            setForwardOpen(false);
+            if (!selectionMode) {
+              setSelectedIds([]);
             }
-          }}
-        />
+          }
+        }}
+        onPick={(targetId) => void handleForwardToChat(targetId)}
+      />
 
-        <BlockUserDialog
-          visible={pendingBlock}
-          nickname={conversation?.peer?.nickname ?? ''}
-          isBusy={isMenuBusy}
-          onConfirm={(deleteChat) => void handleBlock(deleteChat)}
-          onCancel={() => {
-            if (!isMenuBusy) {
-              setPendingBlock(false);
-            }
-          }}
-        />
+      <ChatDicePopover
+        visible={dicePopoverOpen}
+        busy={diceRollBusy}
+        onClose={() => {
+          setDicePopoverOpen(false);
+        }}
+        onRoll={(input) => void handleDiceRoll(input)}
+      />
 
-        <ChatMessageActionsSheet
-          visible={Boolean(actionMessage)}
-          onClose={() => setActionMessage(null)}
-          allowCopy={Boolean(actionMessage && getMessageCopyText(actionMessage))}
-          onCopy={() => {
-            if (actionMessage) {
-              void handleCopyMessage(actionMessage);
-            }
-          }}
-          onReply={() => {
-            if (actionMessage) {
-              handleStartReply(actionMessage);
-            }
-          }}
-          onForward={() => {
-            if (actionMessage) {
-              handleStartForward([actionMessage.id]);
-            }
-          }}
-          onSelectMore={() => {
-            if (actionMessage) {
-              handleEnterSelection(actionMessage);
-            }
-          }}
-        />
-
-        <ChatForwardPicker
-          visible={forwardOpen}
-          excludeConversationId={null}
-          busy={forwardBusy}
-          onClose={() => {
-            if (!forwardBusy) {
-              setForwardOpen(false);
-              if (!selectionMode) {
-                setSelectedIds([]);
-              }
-            }
-          }}
-          onPick={(targetId) => void handleForwardToChat(targetId)}
-        />
-
-        <ChatDicePopover
-          visible={dicePopoverOpen}
-          busy={diceRollBusy}
-          onClose={() => {
-            setDicePopoverOpen(false);
-          }}
-          onRoll={(input) => void handleDiceRoll(input)}
-        />
-
-        <ChatDiceOverlay
-          request={localDiceRoll ? null : diceOverlayRequest}
-          localRoll={localDiceRoll}
-          onLocalRollComplete={handleLocalDiceRollComplete}
-          warm={dicePopoverOpen || diceRollBusy || Boolean(localDiceRoll)}
-          onReveal={revealHeldDiceMessage}
-          onAdvance={advanceDiceAnimationQueue}
-        />
-      </ScreenTransition>
+      <ChatDiceOverlay
+        request={localDiceRoll ? null : diceOverlayRequest}
+        localRoll={localDiceRoll}
+        onLocalRollComplete={handleLocalDiceRollComplete}
+        warm={dicePopoverOpen || diceRollBusy || Boolean(localDiceRoll)}
+        onReveal={revealHeldDiceMessage}
+        onAdvance={advanceDiceAnimationQueue}
+      />
+    </ScreenTransition>
   );
 }

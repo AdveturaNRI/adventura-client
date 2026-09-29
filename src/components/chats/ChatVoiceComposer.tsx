@@ -9,16 +9,7 @@ import {
   useAudioRecorder,
 } from 'expo-audio';
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import {
-  ActivityIndicator,
-  Animated,
-  Easing,
-  Platform,
-  Pressable,
-  StyleSheet,
-  Text,
-  View,
-} from 'react-native';
+import { ActivityIndicator, Animated, Easing, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Gesture, GestureDetector, MouseButton } from 'react-native-gesture-handler';
 import { runOnJS } from 'react-native-reanimated';
 
@@ -29,10 +20,7 @@ import { localizeErrorMessage } from '@/utils/localizeError';
 import { sendChatMessage, type ChatMessage } from '@/services/chats/chatsApi';
 import { peaksFromUris, prepareVoiceUpload } from '@/utils/voice-audio-edit';
 import { loadVoiceDevicePrefs } from '@/utils/voice-device-settings';
-import {
-  applyPreferredMicToAudioRecorder,
-  clearAudioRecorderMicOverride,
-} from '@/utils/voice-media-devices';
+import { applyPreferredMicToAudioRecorder, clearAudioRecorderMicOverride } from '@/utils/voice-media-devices';
 
 type Phase = 'idle' | 'holding' | 'locked' | 'paused';
 type Segment = { uri: string; durationSec: number };
@@ -58,6 +46,7 @@ type Props = {
   trailing?: ReactNode;
   idleChildren: ReactNode;
   onSent: (message: ChatMessage) => void;
+  onRecordingStateChange?: (recording: boolean) => void;
 };
 
 function formatClock(ms: number) {
@@ -90,7 +79,16 @@ function resampleWaveform(values: number[], count: number) {
   });
 }
 
-export function ChatVoiceComposer({ conversationId, disabled, replyToId, showMic = true, trailing, idleChildren, onSent }: Props) {
+export function ChatVoiceComposer({
+  conversationId,
+  disabled,
+  replyToId,
+  showMic = true,
+  trailing,
+  idleChildren,
+  onSent,
+  onRecordingStateChange,
+}: Props) {
   const colors = useTheme();
   const recorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
   const [phase, setPhase] = useState<Phase>('idle');
@@ -123,12 +121,9 @@ export function ChatVoiceComposer({ conversationId, disabled, replyToId, showMic
   trimStartRef.current = trimStart;
   trimEndRef.current = trimEnd;
 
-  const elapsedMs =
-    startedAt != null ? recordedMs + (now - startedAt) : recordedMs;
+  const elapsedMs = startedAt != null ? recordedMs + (now - startedAt) : recordedMs;
   const previewUris = segments.map((item) => item.uri);
-  const previewDurationMs = Math.round(
-    segments.reduce((sum, item) => sum + item.durationSec, 0) * 1000,
-  );
+  const previewDurationMs = Math.round(segments.reduce((sum, item) => sum + item.durationSec, 0) * 1000);
 
   useEffect(() => {
     if (startedAt == null) return undefined;
@@ -140,13 +135,15 @@ export function ChatVoiceComposer({ conversationId, disabled, replyToId, showMic
   // Do not enable recording on mount — allowsRecording switches iOS to playAndRecord
   // and shows the system mic indicator even when idle.
   useEffect(() => {
-    void setAudioModeAsync({ playsInSilentMode: true, allowsRecording: false }).catch(
-      () => undefined,
-    );
+    void setAudioModeAsync({
+      playsInSilentMode: true,
+      allowsRecording: false,
+    }).catch(() => undefined);
     return () => {
-      void setAudioModeAsync({ playsInSilentMode: true, allowsRecording: false }).catch(
-        () => undefined,
-      );
+      void setAudioModeAsync({
+        playsInSilentMode: true,
+        allowsRecording: false,
+      }).catch(() => undefined);
     };
   }, []);
 
@@ -196,9 +193,10 @@ export function ChatVoiceComposer({ conversationId, disabled, replyToId, showMic
     cancelTriggeredRef.current = false;
     setTrimStart(0);
     setTrimEnd(1);
-    void setAudioModeAsync({ playsInSilentMode: true, allowsRecording: false }).catch(
-      () => undefined,
-    );
+    void setAudioModeAsync({
+      playsInSilentMode: true,
+      allowsRecording: false,
+    }).catch(() => undefined);
   }, []);
 
   const stopCurrent = useCallback(async (): Promise<Segment | null> => {
@@ -218,54 +216,59 @@ export function ChatVoiceComposer({ conversationId, disabled, replyToId, showMic
     return { uri, durationSec };
   }, [recorder]);
 
-  const startRecording = useCallback(async (resuming = false) => {
-    if (disabled || sending || (busyRef.current && !resuming)) return;
-    try {
-      // After the first approval, querying the current state is immediate and
-      // avoids a second permission request on every held recording.
-      const currentPermission = await getRecordingPermissionsAsync();
-      const permission = currentPermission.granted
-        ? currentPermission
-        : await requestRecordingPermissionsAsync();
-      if (!pressingRef.current && phaseRef.current !== 'locked') return;
-      if (!permission.granted) {
-        toast.error('Не удалось получить доступ к микрофону');
-        reset();
-        return;
-      }
-      await setAudioModeAsync({ playsInSilentMode: true, allowsRecording: true });
-      if (!pressingRef.current && phaseRef.current !== 'locked') {
-        await setAudioModeAsync({ playsInSilentMode: true, allowsRecording: false }).catch(
-          () => undefined,
-        );
-        return;
-      }
-      await loadVoiceDevicePrefs();
-      const pinnedMic = await applyPreferredMicToAudioRecorder(recorder);
+  const startRecording = useCallback(
+    async (resuming = false) => {
+      if (disabled || sending || (busyRef.current && !resuming)) return;
       try {
-        await recorder.prepareToRecordAsync();
-      } catch (error) {
-        if (!pinnedMic) {
-          throw error;
+        // After the first approval, querying the current state is immediate and
+        // avoids a second permission request on every held recording.
+        const currentPermission = await getRecordingPermissionsAsync();
+        const permission = currentPermission.granted ? currentPermission : await requestRecordingPermissionsAsync();
+        if (!pressingRef.current && phaseRef.current !== 'locked') return;
+        if (!permission.granted) {
+          toast.error('Не удалось получить доступ к микрофону');
+          reset();
+          return;
         }
-        clearAudioRecorderMicOverride(recorder);
-        await recorder.prepareToRecordAsync();
-      }
-      if (!pressingRef.current && phaseRef.current !== 'locked') return;
-      const at = Date.now();
-      startedAtRef.current = at;
-      setStartedAt(at);
-      setNow(at);
-      recorder.record({ forDuration: 900 });
-      if (!pressingRef.current && phaseRef.current !== 'locked' && recorder.isRecording) {
-        await recorder.stop();
+        await setAudioModeAsync({
+          playsInSilentMode: true,
+          allowsRecording: true,
+        });
+        if (!pressingRef.current && phaseRef.current !== 'locked') {
+          await setAudioModeAsync({
+            playsInSilentMode: true,
+            allowsRecording: false,
+          }).catch(() => undefined);
+          return;
+        }
+        await loadVoiceDevicePrefs();
+        const pinnedMic = await applyPreferredMicToAudioRecorder(recorder);
+        try {
+          await recorder.prepareToRecordAsync();
+        } catch (error) {
+          if (!pinnedMic) {
+            throw error;
+          }
+          clearAudioRecorderMicOverride(recorder);
+          await recorder.prepareToRecordAsync();
+        }
+        if (!pressingRef.current && phaseRef.current !== 'locked') return;
+        const at = Date.now();
+        startedAtRef.current = at;
+        setStartedAt(at);
+        setNow(at);
+        recorder.record({ forDuration: 900 });
+        if (!pressingRef.current && phaseRef.current !== 'locked' && recorder.isRecording) {
+          await recorder.stop();
+          reset();
+        }
+      } catch {
         reset();
+        toast.error('Не удалось начать запись');
       }
-    } catch {
-      reset();
-      toast.error('Не удалось начать запись');
-    }
-  }, [disabled, recorder, reset, sending]);
+    },
+    [disabled, recorder, reset, sending],
+  );
 
   const discard = useCallback(async () => {
     busyRef.current = true;
@@ -298,9 +301,10 @@ export function ChatVoiceComposer({ conversationId, disabled, replyToId, showMic
       trimStartRef.current = 0;
       trimEndRef.current = 1;
       setPhase('paused');
-      void setAudioModeAsync({ playsInSilentMode: true, allowsRecording: false }).catch(
-        () => undefined,
-      );
+      void setAudioModeAsync({
+        playsInSilentMode: true,
+        allowsRecording: false,
+      }).catch(() => undefined);
       try {
         const uris = next.map((item) => item.uri);
         if (uris.length > 1) {
@@ -367,13 +371,14 @@ export function ChatVoiceComposer({ conversationId, disabled, replyToId, showMic
         return;
       }
       setSending(true);
-      const start = all.length === 1 && trimStartRef.current === 0 && trimEndRef.current === 1
-        ? null
-        : await prepareVoiceUpload(
-            all.map((item) => item.uri),
-            trimStartRef.current,
-            trimEndRef.current,
-          );
+      const start =
+        all.length === 1 && trimStartRef.current === 0 && trimEndRef.current === 1
+          ? null
+          : await prepareVoiceUpload(
+              all.map((item) => item.uri),
+              trimStartRef.current,
+              trimEndRef.current,
+            );
       const file = start ?? {
         uri: all[0].uri,
         durationSec,
@@ -384,20 +389,20 @@ export function ChatVoiceComposer({ conversationId, disabled, replyToId, showMic
         // Persist real audio peaks with the message. The server returns them
         // to every participant, so each bubble reflects speech rather than a
         // decorative, repeated fallback pattern.
-        voiceWaveform = (await peaksFromUris([file.uri], 256)).map(
-          (peak) => Math.round(peak * 100) / 100,
-        );
+        voiceWaveform = (await peaksFromUris([file.uri], 256)).map((peak) => Math.round(peak * 100) / 100);
       } catch {
         // Native platforms may not expose Web Audio decoding. The message is
         // still sent; its UI falls back to a neutral waveform.
       }
       const message = await sendChatMessage(conversationId, {
         replyToId,
-        files: [{
-          uri: file.uri,
-          name: `voice-${Date.now()}.${file.mimeType.includes('wav') ? 'wav' : Platform.OS === 'web' ? 'webm' : 'm4a'}`,
-          mimeType: file.mimeType,
-        }],
+        files: [
+          {
+            uri: file.uri,
+            name: `voice-${Date.now()}.${file.mimeType.includes('wav') ? 'wav' : Platform.OS === 'web' ? 'webm' : 'm4a'}`,
+            mimeType: file.mimeType,
+          },
+        ],
         voiceDurationSec: Math.max(1, Math.round(file.durationSec)),
         voiceWaveform,
       });
@@ -428,17 +433,20 @@ export function ChatVoiceComposer({ conversationId, disabled, replyToId, showMic
     }, 180);
   }, [discard]);
 
-  const updateHoldGesture = useCallback((translationX: number, translationY: number) => {
-    if (phaseRef.current !== 'holding' || cancelTriggeredRef.current) return;
-    const distance = cancelSwipeDistanceRef.current;
-    const progress = Math.max(0, Math.min(1, -translationX / distance));
-    setCancelSwipeProgress(progress);
-    if (-translationX >= distance) {
-      cancelBySwipe();
-    } else if (translationY <= LOCK_SWIPE_Y) {
-      lockRecording();
-    }
-  }, [cancelBySwipe, lockRecording]);
+  const updateHoldGesture = useCallback(
+    (translationX: number, translationY: number) => {
+      if (phaseRef.current !== 'holding' || cancelTriggeredRef.current) return;
+      const distance = cancelSwipeDistanceRef.current;
+      const progress = Math.max(0, Math.min(1, -translationX / distance));
+      setCancelSwipeProgress(progress);
+      if (-translationX >= distance) {
+        cancelBySwipe();
+      } else if (translationY <= LOCK_SWIPE_Y) {
+        lockRecording();
+      }
+    },
+    [cancelBySwipe, lockRecording],
+  );
 
   const beginHold = useCallback(() => {
     if (!showMic || disabled || sending || phaseRef.current !== 'idle') return;
@@ -482,23 +490,23 @@ export function ChatVoiceComposer({ conversationId, disabled, replyToId, showMic
   const showIdle = phase === 'idle';
   const recording = phase === 'holding' || phase === 'locked';
 
+  useEffect(() => {
+    onRecordingStateChange?.(recording);
+  }, [onRecordingStateChange, recording]);
+
   return (
     <View
       style={styles.wrap}
       onLayout={(event) => {
         // Centre of mic (right) → outer edge of the enlarged trash hit area.
         // This cancels on entering the bin, rather than only at its centre.
-        cancelSwipeDistanceRef.current = Math.max(
-          MIN_CANCEL_SWIPE_DISTANCE,
-          event.nativeEvent.layout.width - CANCEL_SWIPE_HIT_DIAMETER,
-        );
-      }}>
+        cancelSwipeDistanceRef.current = Math.max(MIN_CANCEL_SWIPE_DISTANCE, event.nativeEvent.layout.width - CANCEL_SWIPE_HIT_DIAMETER);
+      }}
+    >
       {/* Keep the real input mounted as a layout-sized skeleton while voice
           controls are displayed. Removing it changes the web TextInput's
           intrinsic height and makes the complete composer jump. */}
-      <View
-        pointerEvents={showIdle ? 'auto' : 'none'}
-        style={[styles.idleSlot, !showIdle ? styles.idleSlotReserved : null]}>
+      <View pointerEvents={showIdle ? 'auto' : 'none'} style={[styles.idleSlot, !showIdle ? styles.idleSlotReserved : null]}>
         {idleChildren}
       </View>
 
@@ -507,7 +515,13 @@ export function ChatVoiceComposer({ conversationId, disabled, replyToId, showMic
           <View style={styles.recordingDot} />
           <Text style={[styles.timer, { color: colors.text }]}>{formatClock(elapsedMs)}</Text>
           {phase === 'locked' ? (
-            <Pressable accessibilityRole="button" accessibilityLabel="Отменить запись" onPress={() => void discard()} hitSlop={8} style={styles.cancelButton}>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Отменить запись"
+              onPress={() => void discard()}
+              hitSlop={8}
+              style={styles.cancelButton}
+            >
               <Text style={[styles.cancel, { color: colors.textSecondary }]}>Отмена</Text>
             </Pressable>
           ) : (
@@ -546,12 +560,9 @@ export function ChatVoiceComposer({ conversationId, disabled, replyToId, showMic
               },
               Platform.OS === 'web' ? ({ userSelect: 'none', cursor: 'pointer' } as object) : null,
               phase === 'holding' ? { zIndex: 2 } : null,
-            ]}>
-            <Ionicons
-              name={phase === 'holding' ? 'mic' : 'mic-outline'}
-              size={21}
-              color={colors.onPrimary}
-            />
+            ]}
+          >
+            <Ionicons name={phase === 'holding' ? 'mic' : 'mic-outline'} size={21} color={colors.onPrimary} />
           </View>
         </GestureDetector>
       ) : null}
@@ -575,12 +586,9 @@ export function ChatVoiceComposer({ conversationId, disabled, replyToId, showMic
               {
                 backgroundColor: colors.destructive,
               },
-            ]}>
-            <Ionicons
-              name="trash-outline"
-              size={22}
-              color={colors.onPrimary}
-            />
+            ]}
+          >
+            <Ionicons name="trash-outline" size={22} color={colors.onPrimary} />
           </View>
           <View
             pointerEvents="none"
@@ -596,22 +604,28 @@ export function ChatVoiceComposer({ conversationId, disabled, replyToId, showMic
             pointerEvents="none"
             style={[
               styles.lockHint,
-              { transform: [{ translateY: Animated.multiply(lockGuideOffset, -0.78) }] },
-            ]}>
+              {
+                transform: [{ translateY: Animated.multiply(lockGuideOffset, -0.78) }],
+              },
+            ]}
+          >
             <Ionicons name="lock-open-outline" size={25} color="#FFFFFF" />
           </Animated.View>
           <Animated.View
             pointerEvents="none"
             style={[
               styles.swipeHint,
-              { transform: [{ translateY: Animated.multiply(lockGuideOffset, -0.4) }] },
-            ]}>
+              {
+                transform: [{ translateY: Animated.multiply(lockGuideOffset, -0.4) }],
+              },
+            ]}
+          >
             <Ionicons name="chevron-up" size={24} color="#FFFFFF" />
           </Animated.View>
         </>
       ) : null}
 
-      {(phase === 'locked' || phase === 'paused') ? (
+      {phase === 'locked' || phase === 'paused' ? (
         <>
           <Pressable
             accessibilityRole="button"
@@ -626,19 +640,17 @@ export function ChatVoiceComposer({ conversationId, disabled, replyToId, showMic
                 backgroundColor: VOICE_CONTROL_COLOR,
                 borderColor: VOICE_CONTROL_COLOR,
               },
-            ]}>
-            <Ionicons
-              name={phase === 'paused' ? 'mic-outline' : 'pause'}
-              size={20}
-              color="#FFFFFF"
-            />
+            ]}
+          >
+            <Ionicons name={phase === 'paused' ? 'mic-outline' : 'pause'} size={20} color="#FFFFFF" />
           </Pressable>
           <Pressable
             accessibilityRole="button"
             accessibilityLabel="Отправить голосовое"
             disabled={sending}
             onPress={() => void sendVoice()}
-            style={[styles.roundButton, { backgroundColor: colors.primary }]}>
+            style={[styles.roundButton, { backgroundColor: colors.primary }]}
+          >
             {sending ? (
               <ActivityIndicator size="small" color={colors.onPrimary} />
             ) : (
@@ -676,19 +688,11 @@ function PausedVoiceBar({
   const status = useAudioPlayerStatus(player);
   const widthRef = useRef(1);
   const [width, setWidth] = useState(1);
-  const sourceBars = peaks.length
-    ? peaks
-    : Array.from(
-        { length: WAVE_BARS },
-        (_, index) => 0.16 + (((index * 37) % 29) / 29) * 0.56,
-      );
+  const sourceBars = peaks.length ? peaks : Array.from({ length: WAVE_BARS }, (_, index) => 0.16 + (((index * 37) % 29) / 29) * 0.56);
   // On a wide desktop composer, add more narrow samples instead of turning
   // a fixed 72 samples into wide square blocks. The same formula also keeps
   // the control compact on a phone.
-  const bars = useMemo(
-    () => resampleWaveform(sourceBars, Math.max(32, Math.round(width / EDITOR_WAVE_BAR_PITCH))),
-    [sourceBars, width],
-  );
+  const bars = useMemo(() => resampleWaveform(sourceBars, Math.max(32, Math.round(width / EDITOR_WAVE_BAR_PITCH))), [sourceBars, width]);
   const durationSec = Math.max(0.2, durationMs / 1000);
   const startSec = trimStart * durationSec;
   const endSec = trimEnd * durationSec;
@@ -710,14 +714,20 @@ function PausedVoiceBar({
   endRatioRef.current = trimEnd;
   const dragOriginRef = useRef(0);
 
-  const moveStart = useCallback((translationX: number) => {
-    const next = Math.min(endRatioRef.current - 0.05, Math.max(0, dragOriginRef.current + translationX / widthRef.current));
-    onTrimStart(next);
-  }, [onTrimStart]);
-  const moveEnd = useCallback((translationX: number) => {
-    const next = Math.max(startRatioRef.current + 0.05, Math.min(1, dragOriginRef.current + translationX / widthRef.current));
-    onTrimEnd(next);
-  }, [onTrimEnd]);
+  const moveStart = useCallback(
+    (translationX: number) => {
+      const next = Math.min(endRatioRef.current - 0.05, Math.max(0, dragOriginRef.current + translationX / widthRef.current));
+      onTrimStart(next);
+    },
+    [onTrimStart],
+  );
+  const moveEnd = useCallback(
+    (translationX: number) => {
+      const next = Math.max(startRatioRef.current + 0.05, Math.min(1, dragOriginRef.current + translationX / widthRef.current));
+      onTrimEnd(next);
+    },
+    [onTrimEnd],
+  );
 
   const captureLeftOrigin = useCallback(() => {
     dragOriginRef.current = startRatioRef.current;
@@ -757,7 +767,8 @@ function PausedVoiceBar({
         accessibilityRole="button"
         accessibilityLabel="Удалить запись"
         onPress={onTrash}
-        style={[styles.iconPlain, { backgroundColor: colors.destructive }]}>
+        style={[styles.iconPlain, { backgroundColor: colors.destructive }]}
+      >
         <Ionicons name="trash-outline" size={20} color="#FFFFFF" />
       </Pressable>
       <View
@@ -766,7 +777,8 @@ function PausedVoiceBar({
           const next = event.nativeEvent.layout.width;
           widthRef.current = next;
           setWidth(next);
-        }}>
+        }}
+      >
         <View style={styles.waveRow}>
           {bars.map((value, index) => {
             const ratio = (index + 0.5) / bars.length;
@@ -785,18 +797,8 @@ function PausedVoiceBar({
             );
           })}
         </View>
-        <View
-          pointerEvents="none"
-          style={[styles.trimmedAway, { left: 0, width: trimStart * width }]}
-        />
-        <View
-          pointerEvents="none"
-          style={[
-            styles.trimmedAway,
-            styles.trimmedAwayRight,
-            { left: trimEnd * width, right: 0 },
-          ]}
-        />
+        <View pointerEvents="none" style={[styles.trimmedAway, { left: 0, width: trimStart * width }]} />
+        <View pointerEvents="none" style={[styles.trimmedAway, styles.trimmedAwayRight, { left: trimEnd * width, right: 0 }]} />
         <GestureDetector gesture={leftGesture}>
           <View style={[styles.trimHitArea, { left: Math.max(-12, trimStart * width - 18) }]}>
             <View style={styles.trimHandle} />
@@ -825,11 +827,10 @@ function PausedVoiceBar({
               left: previewLeft,
               backgroundColor: VOICE_CONTROL_COLOR,
             },
-          ]}>
+          ]}
+        >
           <Ionicons name={status.playing ? 'pause' : 'play'} size={12} color="#FFFFFF" />
-          <Text style={styles.previewTime}>
-            {formatPreview((trimEnd - trimStart) * durationMs)}
-          </Text>
+          <Text style={styles.previewTime}>{formatPreview((trimEnd - trimStart) * durationMs)}</Text>
         </Pressable>
       </View>
     </View>
@@ -882,7 +883,12 @@ const styles = StyleSheet.create({
   recordingRowWithTrash: {
     paddingLeft: 52,
   },
-  recordingDot: { width: 9, height: 9, borderRadius: 5, backgroundColor: '#E5484D' },
+  recordingDot: {
+    width: 9,
+    height: 9,
+    borderRadius: 5,
+    backgroundColor: '#E5484D',
+  },
   timer: {
     flexShrink: 0,
     fontSize: FontSize.label,
