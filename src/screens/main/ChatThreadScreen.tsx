@@ -123,6 +123,10 @@ import {
 } from '@/utils/chat-thread-cache';
 import { shouldSendChatOnEnter } from '@/utils/chat-enter-key';
 import { beginMicrophonePrimeFromGesture } from '@/utils/voice-media-devices';
+import {
+  markVoiceCallLocallyEnded,
+  wasVoiceCallLocallyEnded,
+} from '@/utils/voice-call-local-end';
 import { getCachedFileTooLargeMessage, getCachedUploadLimits } from '@/utils/upload-limits';
 
 function isGroupConversation(item: ConversationListItem | null | undefined) {
@@ -1427,23 +1431,27 @@ export default function ChatThreadScreen() {
     conversationId: voiceConversationId,
     startCall,
     joinOngoingCall,
+    presentIncomingFromActive,
     hangup: hangupLiveVoice,
     minimized: voiceMinimized,
   } = useVoiceCall();
   const voiceActiveHere =
     Boolean(conversationId) && voiceConversationId === conversationId && voicePhase !== 'idle' && voicePhase !== 'incoming';
+  /** Incoming Accept/Decline owns the UI — don't compete with the late-join banner. */
+  const voiceIncomingHere =
+    Boolean(conversationId) && voiceConversationId === conversationId && voicePhase === 'incoming';
   const [ongoingVoiceCall, setOngoingVoiceCall] = useState<ActiveChatVoiceCall | null>(null);
   const [joiningOngoingVoice, setJoiningOngoingVoice] = useState(false);
 
   useEffect(() => {
-    if (!conversationId || voiceActiveHere) {
+    if (!conversationId || voiceActiveHere || voiceIncomingHere) {
       setOngoingVoiceCall(null);
       return;
     }
     let cancelled = false;
     let inFlight = false;
-    /** Fallback only — realtime call events + focus cover the hot path. */
-    const FALLBACK_POLL_MS = 30_000;
+    /** Fallback when WS invite is dropped — keep short so Accept UI still appears mid-ring. */
+    const FALLBACK_POLL_MS = 4_000;
 
     const refresh = async () => {
       if (cancelled || inFlight) {
@@ -1453,6 +1461,17 @@ export default function ChatThreadScreen() {
       try {
         const active = await getActiveChatVoiceCall(conversationId);
         if (cancelled) {
+          return;
+        }
+        // Hangup on this device — don't flash «Вернуться» if /active is briefly stale.
+        if (active && wasVoiceCallLocallyEnded(active.callId)) {
+          setOngoingVoiceCall(null);
+          return;
+        }
+        // WS invite missed — still show Accept + ringtone while server has us ringing.
+        if (active?.isRinging && !active.isJoined) {
+          presentIncomingFromActive(active);
+          setOngoingVoiceCall(null);
           return;
         }
         // Show for anyone not already in this call UI — including rejoin after drop.
@@ -1506,6 +1525,12 @@ export default function ChatThreadScreen() {
       if (event.payload.conversationId !== conversationId) {
         return;
       }
+      // Drop the join banner immediately — don't wait on /active (TTL prune used to skip events).
+      if (event.type === 'ended') {
+        setOngoingVoiceCall((prev) =>
+          prev?.callId === event.payload.callId ? null : prev,
+        );
+      }
       void refresh();
     });
 
@@ -1518,7 +1543,13 @@ export default function ChatThreadScreen() {
       }
       unsubscribe();
     };
-  }, [conversationId, subscribeCallEvents, voiceActiveHere]);
+  }, [
+    conversationId,
+    presentIncomingFromActive,
+    subscribeCallEvents,
+    voiceActiveHere,
+    voiceIncomingHere,
+  ]);
   const [draft, setDraft] = useState('');
   const [pendingAttachments, setPendingAttachments] = useState<PendingAttachment[]>([]);
   const [lightbox, setLightbox] = useState<{
@@ -3662,21 +3693,37 @@ export default function ChatThreadScreen() {
                   void hangupLiveVoice();
                   return;
                 }
-                // Active lobby in this chat — join it (do not start a second invite).
-                // 1:1 hangup ends the call for both on the server, so this path is mostly groups.
+                // Live multi-party lobby → rejoin. Solo/zombie lobby → fall through to
+                // startCall (kills lobby + fresh invite) so the peer gets Accept + ringtone.
                 if (ongoingVoiceCall) {
-                  setJoiningOngoingVoice(true);
-                  void joinOngoingCall(
-                    conversationId,
-                    ongoingVoiceCall.callId,
-                    ongoingVoiceCall.isGroup ? ongoingVoiceCall.conversationTitle || title : ongoingVoiceCall.fromNickname,
-                    ongoingVoiceCall.fromAvatarUrl,
-                    {
-                      isGroup: ongoingVoiceCall.isGroup,
-                      myRole: ongoingVoiceCall.isGroup ? myGroupRole : null,
-                    },
-                  ).finally(() => setJoiningOngoingVoice(false));
-                  return;
+                  const aloneLobby =
+                    Boolean(ongoingVoiceCall.isJoined) && ongoingVoiceCall.joinedCount <= 1;
+                  if (!aloneLobby) {
+                    const callSnapshot = ongoingVoiceCall;
+                    setJoiningOngoingVoice(true);
+                    void joinOngoingCall(
+                      conversationId,
+                      callSnapshot.callId,
+                      callSnapshot.isGroup
+                        ? callSnapshot.conversationTitle || title
+                        : callSnapshot.fromNickname,
+                      callSnapshot.fromAvatarUrl,
+                      {
+                        isGroup: callSnapshot.isGroup,
+                        myRole: callSnapshot.isGroup ? myGroupRole : null,
+                      },
+                    )
+                      .then((ok) => {
+                        if (!ok) {
+                          setOngoingVoiceCall((prev) =>
+                            prev?.callId === callSnapshot.callId ? null : prev,
+                          );
+                        }
+                      })
+                      .finally(() => setJoiningOngoingVoice(false));
+                    return;
+                  }
+                  setOngoingVoiceCall(null);
                 }
                 void (async () => {
                   // Mic prime already started in onPressIn — do not await network before takePrimedMicrophone inside startCall.
@@ -3746,12 +3793,18 @@ export default function ChatThreadScreen() {
                     : ongoingVoiceCall.fromNickname?.trim() || 'Голосовой чат'}
                 </Text>
                 <Text style={styles.voiceJoinHint} numberOfLines={1}>
-                  {ongoingVoiceCall.joinedCount > 1 ? `${ongoingVoiceCall.joinedCount} в эфире` : 'В эфире'}
+                  {ongoingVoiceCall.joinedCount > 1
+                    ? `${ongoingVoiceCall.joinedCount} в эфире`
+                    : 'Можно присоединиться'}
                 </Text>
               </View>
               <Pressable
                 accessibilityRole="button"
-                accessibilityLabel={ongoingVoiceCall.isJoined ? 'Вернуться в голосовой чат' : 'Присоединиться к голосовому чату'}
+                accessibilityLabel={
+                  ongoingVoiceCall.isJoined
+                    ? 'Вернуться в голосовой чат'
+                    : 'Присоединиться к голосовому чату'
+                }
                 disabled={joiningOngoingVoice}
                 onPressIn={() => {
                   if (Platform.OS === 'web') {
@@ -3762,24 +3815,66 @@ export default function ChatThreadScreen() {
                   if (!conversationId || !ongoingVoiceCall) {
                     return;
                   }
+                  const callSnapshot = ongoingVoiceCall;
+                  // Solo zombie with me already listed — re-ring via startCall, don't silent-rejoin.
+                  const aloneLobby =
+                    Boolean(callSnapshot.isJoined) && callSnapshot.joinedCount <= 1;
+                  if (aloneLobby) {
+                    setOngoingVoiceCall(null);
+                    void startCall(
+                      conversationId,
+                      title,
+                      conversation?.peer?.avatarUrl ?? null,
+                      {
+                        isGroup,
+                        ringingPeers: conversation?.peer
+                          ? [
+                              {
+                                userId: conversation.peer.id,
+                                nickname: conversation.peer.nickname,
+                                avatarUrl: conversation.peer.avatarUrl,
+                              },
+                            ]
+                          : [],
+                        myRole: isGroup ? myGroupRole : null,
+                      },
+                    );
+                    return;
+                  }
                   setJoiningOngoingVoice(true);
                   void joinOngoingCall(
                     conversationId,
-                    ongoingVoiceCall.callId,
-                    ongoingVoiceCall.isGroup ? ongoingVoiceCall.conversationTitle || title : ongoingVoiceCall.fromNickname,
-                    ongoingVoiceCall.fromAvatarUrl,
+                    callSnapshot.callId,
+                    callSnapshot.isGroup
+                      ? callSnapshot.conversationTitle || title
+                      : callSnapshot.fromNickname,
+                    callSnapshot.fromAvatarUrl,
                     {
-                      isGroup: ongoingVoiceCall.isGroup,
-                      myRole: ongoingVoiceCall.isGroup ? myGroupRole : null,
+                      isGroup: callSnapshot.isGroup,
+                      myRole: callSnapshot.isGroup ? myGroupRole : null,
                     },
-                  ).finally(() => setJoiningOngoingVoice(false));
+                  )
+                    .then((ok) => {
+                      if (!ok) {
+                        setOngoingVoiceCall((prev) =>
+                          prev?.callId === callSnapshot.callId ? null : prev,
+                        );
+                      }
+                    })
+                    .finally(() => setJoiningOngoingVoice(false));
                 }}
                 style={({ pressed }) => [styles.voiceJoinButton, pressed && styles.voiceJoinButtonPressed]}
               >
                 {joiningOngoingVoice ? (
                   <ActivityIndicator size="small" color="#FFFFFF" />
                 ) : (
-                  <Text style={styles.voiceJoinButtonLabel}>{ongoingVoiceCall.isJoined ? 'Вернуться' : 'Присоединиться'}</Text>
+                  <Text style={styles.voiceJoinButtonLabel}>
+                    {ongoingVoiceCall.isJoined && ongoingVoiceCall.joinedCount > 1
+                      ? 'Вернуться'
+                      : ongoingVoiceCall.isJoined
+                        ? 'Позвонить снова'
+                        : 'Присоединиться'}
+                  </Text>
                 )}
               </Pressable>
             </View>

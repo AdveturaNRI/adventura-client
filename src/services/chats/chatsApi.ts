@@ -522,6 +522,8 @@ export type ActiveChatVoiceCall = {
   canJoin: boolean;
   /** Already on the server join list (e.g. dropped client still listed). */
   isJoined?: boolean;
+  /** Caller is still ringing this user — show Accept modal (WS invite may have been missed). */
+  isRinging?: boolean;
 };
 
 export function getActiveChatVoiceCall(conversationId: string) {

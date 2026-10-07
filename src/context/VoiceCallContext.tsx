@@ -18,8 +18,10 @@ import { useRealtime } from '@/context/RealtimeContext';
 import { setVoiceCallOwnsDice } from '@/context/voice-call-dice-gate';
 import {
   useChatLiveVoice,
+  type ChatLiveScreenStream,
   type ChatLiveVoiceParticipant,
   type ChatLiveVoiceStatus,
+  type ScreenShareQuality,
 } from '@/hooks/use-chat-live-voice';
 import { useCallSharedMusic } from '@/hooks/use-call-shared-music';
 import {
@@ -41,7 +43,10 @@ import {
   stopMediaStream,
   takePrimedMicrophone,
 } from '@/utils/voice-media-devices';
-import { markVoiceCallLocallyEnded } from '@/utils/voice-call-local-end';
+import {
+  clearVoiceCallLocallyEnded,
+  markVoiceCallLocallyEnded,
+} from '@/utils/voice-call-local-end';
 
 /** Discord-like: stop showing unanswered invitees after this. */
 const RINGING_PEER_TIMEOUT_MS = 30_000;
@@ -74,6 +79,8 @@ type VoiceCallContextValue = {
   cameraOn: boolean;
   cameraFacing: 'user' | 'environment';
   screenShareOn: boolean;
+  selectedScreenIdentity: string | null;
+  screenStreams: ChatLiveScreenStream[];
   participants: ChatLiveVoiceParticipant[];
   startCall: (
     conversationId: string,
@@ -91,13 +98,29 @@ type VoiceCallContextValue = {
     peerName?: string | null,
     peerAvatarUrl?: string | null,
     opts?: { isGroup?: boolean; myRole?: VoiceCallGroupRole | null },
-  ) => Promise<void>;
+  ) => Promise<boolean>;
+  /**
+   * HTTP fallback when `call:invite` was missed over WS but `/voice/active` says we're ringing.
+   * No-op if already in a session / not ringing.
+   */
+  presentIncomingFromActive: (active: {
+    callId: string;
+    conversationId: string;
+    fromUserId: string;
+    fromNickname: string;
+    fromAvatarUrl: string | null;
+    conversationTitle: string | null;
+    isGroup: boolean;
+    isJoined?: boolean;
+    isRinging?: boolean;
+  }) => void;
   hangup: () => Promise<void>;
   toggleMute: () => Promise<void>;
   toggleDeafen: () => Promise<void>;
   toggleCamera: () => Promise<void>;
   switchCameraFacing: () => Promise<void>;
-  toggleScreenShare: () => Promise<void>;
+  toggleScreenShare: (quality?: ScreenShareQuality) => Promise<void>;
+  selectScreenShare: (identity: string | null) => void;
   retryLive: () => Promise<void>;
   minimize: () => void;
   expand: () => void;
@@ -214,6 +237,8 @@ export function VoiceCallProvider({ children }: { children: ReactNode }) {
     cameraOn,
     cameraFacing,
     screenShareOn,
+    selectedScreenIdentity,
+    screenStreams,
     participants,
     urgentById,
     volumeById,
@@ -224,6 +249,7 @@ export function VoiceCallProvider({ children }: { children: ReactNode }) {
     toggleCamera,
     switchCameraFacing,
     toggleScreenShare,
+    selectScreenShare,
     sendUrgentRequest,
     setParticipantVolume,
     publishRoomData,
@@ -356,10 +382,10 @@ export function VoiceCallProvider({ children }: { children: ReactNode }) {
       peerName?: string | null,
       peerAvatarUrl?: string | null,
       opts?: { isGroup?: boolean; myRole?: VoiceCallGroupRole | null },
-    ) => {
+    ): Promise<boolean> => {
       if (sessionRef.current) {
         toast.info('Сначала завершите текущий звонок');
-        return;
+        return false;
       }
       const primedMic = await takePrimedMicrophone();
       try {
@@ -386,15 +412,74 @@ export function VoiceCallProvider({ children }: { children: ReactNode }) {
         setMinimized(false);
         ringingStartedAtRef.current = null;
         await join(conversationId, { primedMic });
+        return true;
       } catch (error) {
         stopMediaStream(primedMic);
         await leave();
         sessionRef.current = null;
         setSession(null);
+        markVoiceCallLocallyEnded(callId);
         toast.error(localizeErrorMessage(error, 'Не удалось войти в звонок'));
+        return false;
       }
     },
     [join, leave, user?.id],
+  );
+
+  const presentIncomingFromActive = useCallback(
+    (active: {
+      callId: string;
+      conversationId: string;
+      fromUserId: string;
+      fromNickname: string;
+      fromAvatarUrl: string | null;
+      conversationTitle: string | null;
+      isGroup: boolean;
+      isJoined?: boolean;
+      isRinging?: boolean;
+    }) => {
+      if (!active.isRinging || active.isJoined) {
+        return;
+      }
+      if (active.fromUserId === user?.id) {
+        return;
+      }
+      const current = sessionRef.current;
+      const parked = pendingInviteRef.current;
+      if (
+        (current?.phase === 'incoming' && current.callId === active.callId) ||
+        parked?.callId === active.callId
+      ) {
+        return;
+      }
+      if (current && (current.phase === 'outgoing' || current.phase === 'active')) {
+        return;
+      }
+      clearVoiceCallLocallyEnded(active.callId);
+      const isGroup = Boolean(active.isGroup);
+      const next: Session = {
+        callId: active.callId,
+        conversationId: active.conversationId,
+        role: 'callee',
+        peerName:
+          (isGroup ? active.conversationTitle?.trim() : null) ||
+          active.fromNickname ||
+          'Собеседник',
+        peerAvatarUrl: active.fromAvatarUrl,
+        callerName: active.fromNickname,
+        isGroup,
+        myRole: null,
+        ringingPeers: [],
+        phase: 'incoming',
+      };
+      sessionRef.current = next;
+      setSession(next);
+      setMinimized(false);
+      ringingStartedAtRef.current = null;
+      clearPendingInvite();
+      startCallRingtone();
+    },
+    [clearPendingInvite, user?.id],
   );
 
   const startCall = useCallback(
@@ -413,21 +498,33 @@ export function VoiceCallProvider({ children }: { children: ReactNode }) {
         return;
       }
 
-      // Lobby still open (peer alone / abandon timer) — rejoin, don't ring again.
+      // Existing lobby: reconnect if we're already in a live multi-party call;
+      // solo/zombie lobby → kill and ring fresh so the peer gets Accept UI again.
       try {
         const active = await getActiveChatVoiceCall(conversationId);
         if (active?.callId) {
           const group = opts?.isGroup ?? active.isGroup;
-          await joinOngoingCall(
-            conversationId,
-            active.callId,
-            peerName?.trim() ||
-              (group ? active.conversationTitle : active.fromNickname) ||
-              null,
-            peerAvatarUrl ?? active.fromAvatarUrl,
-            { isGroup: group, myRole: opts?.myRole ?? null },
-          );
-          return;
+          const aloneLobby = Boolean(active.isJoined) && active.joinedCount <= 1;
+          if (aloneLobby) {
+            markVoiceCallLocallyEnded(active.callId);
+            try {
+              await endChatVoiceCall(conversationId, active.callId);
+            } catch {
+              // already gone
+            }
+            // Fall through → fresh inviteChatVoiceCall.
+          } else {
+            await joinOngoingCall(
+              conversationId,
+              active.callId,
+              peerName?.trim() ||
+                (group ? active.conversationTitle : active.fromNickname) ||
+                null,
+              peerAvatarUrl ?? active.fromAvatarUrl,
+              { isGroup: group, myRole: opts?.myRole ?? null },
+            );
+            return;
+          }
         }
       } catch {
         // Active check failed — fall through to a fresh invite.
@@ -574,9 +671,9 @@ export function VoiceCallProvider({ children }: { children: ReactNode }) {
     }
   }, [switchCameraFacing]);
 
-  const handleToggleScreenShare = useCallback(async () => {
+  const handleToggleScreenShare = useCallback(async (quality?: ScreenShareQuality) => {
     try {
-      const result = await toggleScreenShare();
+      const result = await toggleScreenShare(quality);
       if (result.enabled && !result.audioPublished) {
         toast.info(
           'Видео экрана без звука: браузер почти никогда не отдаёт audio с «Весь экран»/окна (особенно Linux). Звук стрима — только через вкладку + «Демонстрировать звук».',
@@ -608,19 +705,32 @@ export function VoiceCallProvider({ children }: { children: ReactNode }) {
 
         const nextInvite = inviteFromPayload(invite);
 
-        // Peer rejoined the lobby we're already in — no second incoming UI.
+        // Duplicate invite for the call we're already in — ignore.
         if (
           current &&
           (current.phase === 'outgoing' || current.phase === 'active') &&
-          (current.callId === invite.callId ||
-            current.conversationId === invite.conversationId)
+          current.callId === invite.callId
         ) {
           return;
         }
 
-        // In another call — park the invite as a notification, do not soft-decline.
-        if (current && (current.phase === 'outgoing' || current.phase === 'active')) {
-          // Replace a previous parked invite so we don't stack modals.
+        // Ghost/stale UI for an older call in this chat — drop it so the new ring can show.
+        if (
+          current &&
+          (current.phase === 'outgoing' || current.phase === 'active') &&
+          current.conversationId === invite.conversationId &&
+          current.callId !== invite.callId
+        ) {
+          stopCallRingtone();
+          void leave();
+          ringingStartedAtRef.current = null;
+          setMinimized(false);
+          sessionRef.current = null;
+          setSession(null);
+          clearPendingInvite();
+          // Fall through → show incoming for the new callId.
+        } else if (current && (current.phase === 'outgoing' || current.phase === 'active')) {
+          // In another chat's call — park the invite, do not soft-decline.
           if (parked && parked.callId !== invite.callId) {
             void declineChatVoiceCall(parked.conversationId, parked.callId).catch(() => undefined);
           }
@@ -630,12 +740,17 @@ export function VoiceCallProvider({ children }: { children: ReactNode }) {
           return;
         }
 
-        // Already ringing for someone else — keep that UI, soft-decline the new one.
-        if (current?.phase === 'incoming') {
-          void declineChatVoiceCall(invite.conversationId, invite.callId).catch(() => undefined);
+        // Stale incoming for an older callId — replace with the new ring (don't soft-decline it).
+        if (current?.phase === 'incoming' && current.callId !== invite.callId) {
+          stopCallRingtone();
+          sessionRef.current = null;
+          setSession(null);
+          clearPendingInvite();
+        } else if (current?.phase === 'incoming') {
           return;
         }
 
+        clearVoiceCallLocallyEnded(nextInvite.callId);
         const next: Session = {
           callId: nextInvite.callId,
           conversationId: nextInvite.conversationId,
@@ -753,7 +868,11 @@ export function VoiceCallProvider({ children }: { children: ReactNode }) {
       }
 
       if (event.type === 'ended') {
-        markVoiceCallLocallyEnded(event.payload.callId);
+        // Ring-timeout also sends `ended` while lobby stays up for late join —
+        // don't blacklist that callId or the join banner never comes back.
+        if (current.phase !== 'incoming') {
+          markVoiceCallLocallyEnded(event.payload.callId);
+        }
         const wasOutgoing = current.role === 'caller' && current.phase === 'outgoing';
         // Switching to another call — ignore end of the call we just left.
         if (switchingCallRef.current) {
@@ -1013,15 +1132,19 @@ export function VoiceCallProvider({ children }: { children: ReactNode }) {
       cameraOn,
       cameraFacing,
       screenShareOn,
+      selectedScreenIdentity,
+      screenStreams,
       participants,
       startCall,
       joinOngoingCall,
+      presentIncomingFromActive,
       hangup,
       toggleMute,
       toggleDeafen,
       toggleCamera: handleToggleCamera,
       switchCameraFacing: handleSwitchCameraFacing,
       toggleScreenShare: handleToggleScreenShare,
+      selectScreenShare,
       retryLive,
       minimize,
       expand,
@@ -1043,15 +1166,19 @@ export function VoiceCallProvider({ children }: { children: ReactNode }) {
       cameraOn,
       cameraFacing,
       screenShareOn,
+      selectedScreenIdentity,
+      screenStreams,
       participants,
       startCall,
       joinOngoingCall,
+      presentIncomingFromActive,
       hangup,
       toggleMute,
       toggleDeafen,
       handleToggleCamera,
       handleSwitchCameraFacing,
       handleToggleScreenShare,
+      selectScreenShare,
       retryLive,
       minimize,
       expand,
@@ -1092,6 +1219,8 @@ export function VoiceCallProvider({ children }: { children: ReactNode }) {
           deafened={deafened}
           cameraOn={cameraOn}
           screenShareOn={screenShareOn}
+          selectedScreenIdentity={selectedScreenIdentity}
+          screenStreams={screenStreams}
           participants={participants}
           waitingPeers={waitingPeers}
           urgentById={urgentById}
@@ -1105,8 +1234,11 @@ export function VoiceCallProvider({ children }: { children: ReactNode }) {
           onToggleCamera={() => void handleToggleCamera()}
           onSwitchCameraFacing={() => void handleSwitchCameraFacing()}
           onToggleScreenShare={
-            Platform.OS === 'web' ? () => void handleToggleScreenShare() : undefined
+            Platform.OS === 'web'
+              ? (quality) => void handleToggleScreenShare(quality)
+              : undefined
           }
+          onSelectScreenShare={selectScreenShare}
           onHangup={() => void hangup()}
           onRetry={() => void retryLive()}
           onMinimize={minimize}
