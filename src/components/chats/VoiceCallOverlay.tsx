@@ -1577,6 +1577,8 @@ export function VoiceCallOverlay({
       : `${statusLine}${mediaReady ? ` · ${formatCallDuration(elapsedSec)}` : ''}`;
 
   const useSpotlight = tiles.length >= 2;
+  const showConnectionBanner =
+    linking || failed || connection.tone === 'warn';
 
   const layout = useMemo(() => {
     const count = Math.max(tiles.length, 1);
@@ -1590,31 +1592,50 @@ export function VoiceCallOverlay({
       (tile) => tile.cameraOn || (tile.screenShareOn && tile.screenShareTrack),
     );
 
+    // Fit stage into the shell without vertical scroll.
+    const rootPadY = fullscreen
+      ? 0
+      : Math.max(insets.top, Spacing.md) + Math.max(insets.bottom, Spacing.md);
+    const shellCap = fullscreen
+      ? Math.max(280, height - rootPadY)
+      : Math.max(280, Math.min(height * 0.86, height - rootPadY));
+    const headerH = 72;
+    const controlsH = 96;
+    const bannerH = showConnectionBanner ? 58 : 0;
+    const stageBudget = Math.max(160, shellCap - headerH - controlsH - bannerH);
+
     if (useSpotlight) {
-      const filmGap = 10;
+      const filmGap = 8;
+      const hasFilm = tiles.length > 1;
+      const filmRowBudget = hasFilm
+        ? Math.min(videoMode ? 128 : 118, Math.max(84, Math.round(stageBudget * 0.26)))
+        : 0;
+      const spotRowBudget = Math.max(120, stageBudget - filmRowBudget - (hasFilm ? 10 : 0));
       const filmTileWidth = Math.min(
-        fullscreen ? 168 : 148,
-        Math.max(112, Math.floor(stageWidth / (fullscreen ? 6.5 : 5.2))),
+        fullscreen ? 150 : 132,
+        Math.max(96, Math.floor(stageWidth / (fullscreen ? 7 : 5.5))),
       );
-      const filmAvatar = Math.min(56, Math.max(44, filmTileWidth - 48));
+      const filmChrome = 44; // name + tile padding
+      const spotChrome = 48;
+      const filmAvatar = Math.min(48, Math.max(36, filmRowBudget - filmChrome));
       const filmVideoHeight = videoMode
-        ? Math.max(72, Math.round(filmTileWidth * (hasScreenShare ? 0.56 : 0.62)))
+        ? Math.max(52, Math.min(Math.round(filmTileWidth * 0.55), filmRowBudget - filmChrome))
         : null;
       const spotlightWidth = stageWidth;
-      const spotlightAvatar = isDesktop ? 120 : 100;
-      const maxSpotH = Math.max(
-        220,
-        Math.min(height * (fullscreen ? 0.72 : 0.52), fullscreen ? height * 0.78 : isDesktop ? 480 : 360),
+      const spotlightAvatar = Math.min(
+        isDesktop ? 112 : 96,
+        Math.max(56, spotRowBudget - spotChrome),
       );
       const spotlightVideoHeight = videoMode
         ? Math.max(
-            hasScreenShare ? 220 : 180,
-            Math.min(maxSpotH, Math.round(spotlightWidth * (hasScreenShare ? 0.56 : 0.56))),
+            120,
+            Math.min(spotRowBudget - spotChrome, Math.round(spotlightWidth * 0.5)),
           )
         : null;
       return {
         mode: 'spotlight' as const,
         stageWidth,
+        stageBudget,
         spotlightWidth,
         spotlightAvatar,
         spotlightVideoHeight,
@@ -1622,6 +1643,7 @@ export function VoiceCallOverlay({
         filmTileWidth,
         filmAvatar,
         filmVideoHeight,
+        filmRowBudget,
         gap: filmGap,
         tileWidth: filmTileWidth,
         avatarSize: filmAvatar,
@@ -1638,21 +1660,15 @@ export function VoiceCallOverlay({
     } else if (count >= 4) {
       columns = width < 420 ? 2 : 3;
     }
-    const gap = count >= 5 ? 12 : 16;
+    const gap = count >= 5 ? 10 : 12;
+    const rows = Math.ceil(count / columns);
     const tileWidth = Math.floor((stageWidth - gap * (columns - 1)) / columns);
-    let avatarSize = 96;
-    if (count <= 1) {
-      avatarSize = isDesktop ? 128 : 112;
-    } else if (count === 2) {
-      avatarSize = isDesktop ? 104 : 92;
-    } else if (count <= 4) {
-      avatarSize = isDesktop ? 84 : 72;
-    } else {
-      avatarSize = isDesktop ? 72 : 64;
-    }
-    avatarSize = Math.min(avatarSize, Math.max(52, tileWidth - 56));
+    const cellH = Math.floor((stageBudget - gap * Math.max(0, rows - 1)) / rows);
+    const tileChrome = 44;
+    let avatarSize = Math.min(isDesktop ? 112 : 96, Math.max(44, cellH - tileChrome));
+    avatarSize = Math.min(avatarSize, Math.max(44, tileWidth - 48));
     const videoHeight = videoMode
-      ? Math.max(hasScreenShare ? 168 : 148, Math.round(tileWidth * (hasScreenShare ? 0.62 : 0.72)))
+      ? Math.max(96, Math.min(cellH - tileChrome, Math.round(tileWidth * (hasScreenShare ? 0.55 : 0.62))))
       : null;
     return {
       mode: 'grid' as const,
@@ -1661,6 +1677,7 @@ export function VoiceCallOverlay({
       tileWidth,
       avatarSize,
       stageWidth,
+      stageBudget,
       videoHeight,
       spotlightWidth: tileWidth,
       spotlightAvatar: avatarSize,
@@ -1669,8 +1686,19 @@ export function VoiceCallOverlay({
       filmTileWidth: tileWidth,
       filmAvatar: avatarSize,
       filmVideoHeight: videoHeight,
+      filmRowBudget: 0,
     };
-  }, [fullscreen, height, isDesktop, tiles, useSpotlight, width]);
+  }, [
+    fullscreen,
+    height,
+    insets.bottom,
+    insets.top,
+    isDesktop,
+    showConnectionBanner,
+    tiles,
+    useSpotlight,
+    width,
+  ]);
 
   const spotlightTile = useMemo(() => {
     if (!useSpotlight) {
@@ -1988,7 +2016,7 @@ export function VoiceCallOverlay({
             ) : null}
           </View>
 
-          {linking || failed || connection.tone === 'warn' ? (
+          {showConnectionBanner ? (
             <View
               style={[
                 styles.connectionBanner,
@@ -2012,11 +2040,12 @@ export function VoiceCallOverlay({
                   style={[
                     styles.connectionBannerTitle,
                     failed && styles.connectionBannerTitleError,
-                  ]}>
+                  ]}
+                  numberOfLines={1}>
                   {connection.label}
                 </Text>
                 {connection.detail ? (
-                  <Text style={styles.connectionBannerDetail} numberOfLines={4}>
+                  <Text style={styles.connectionBannerDetail} numberOfLines={2}>
                     {connection.detail}
                   </Text>
                 ) : null}
@@ -2024,168 +2053,175 @@ export function VoiceCallOverlay({
             </View>
           ) : null}
 
-          <ScrollView
-            style={styles.stageScroll}
-            contentContainerStyle={styles.stageContent}
-            showsVerticalScrollIndicator={false}>
-            {layout.mode === 'spotlight' && spotlightTile ? (
-              <View style={[styles.spotlightStage, { width: layout.stageWidth }]}>
-                <ParticipantTile
-                  tile={spotlightTile}
-                  avatarSize={layout.spotlightAvatar}
-                  tileWidth={layout.spotlightWidth}
-                  videoHeight={layout.spotlightVideoHeight}
-                  spotlight
-                  volumeOpen={volumeOpenId === spotlightTile.key}
-                  onToggleVolume={
-                    spotlightTile.isBard
-                      ? onSetBardLocalVolume
-                        ? () =>
-                            setVolumeOpenId((current) =>
-                              current === spotlightTile.key ? null : spotlightTile.key,
-                            )
-                        : undefined
-                      : onSetParticipantVolume &&
-                          !spotlightTile.isLocal &&
-                          !spotlightTile.waiting
-                        ? () =>
-                            setVolumeOpenId((current) =>
-                              current === spotlightTile.key ? null : spotlightTile.key,
-                            )
-                        : undefined
-                  }
-                  onVolumeChange={
-                    spotlightTile.isBard
-                      ? onSetBardLocalVolume
-                      : onSetParticipantVolume &&
-                          !spotlightTile.isLocal &&
-                          !spotlightTile.waiting
-                        ? (volume) =>
-                            onSetParticipantVolume(tileIdentity(spotlightTile), volume)
-                        : undefined
-                  }
-                  onPress={
-                    spotlightTile.isBard
-                      ? () => {
-                          onResumeBardAudio?.();
-                          setBardSheetOpen(true);
-                        }
-                      : undefined
-                  }
-                />
-                {filmstripTiles.length > 0 ? (
-                  <ScrollView
-                    horizontal
-                    showsHorizontalScrollIndicator={false}
-                    style={styles.filmstripScroll}
-                    contentContainerStyle={[
-                      styles.filmstrip,
-                      { gap: layout.filmGap },
-                    ]}>
-                    {filmstripTiles.map((tile) => (
-                      <ParticipantTile
-                        key={tile.key}
-                        tile={tile}
-                        avatarSize={layout.filmAvatar}
-                        tileWidth={layout.filmTileWidth}
-                        videoHeight={layout.filmVideoHeight}
-                        volumeOpen={volumeOpenId === tile.key}
-                        onToggleVolume={
-                          tile.isBard
-                            ? onSetBardLocalVolume
-                              ? () =>
-                                  setVolumeOpenId((current) =>
-                                    current === tile.key ? null : tile.key,
-                                  )
-                              : undefined
-                            : onSetParticipantVolume && !tile.isLocal && !tile.waiting
-                              ? () =>
-                                  setVolumeOpenId((current) =>
-                                    current === tile.key ? null : tile.key,
-                                  )
-                              : undefined
-                        }
-                        onVolumeChange={
-                          tile.isBard
-                            ? onSetBardLocalVolume
-                            : onSetParticipantVolume && !tile.isLocal && !tile.waiting
-                              ? (volume) =>
-                                  onSetParticipantVolume(tileIdentity(tile), volume)
-                              : undefined
-                        }
-                        onPress={
-                          tile.isBard
-                            ? () => {
-                                onResumeBardAudio?.();
-                                setBardSheetOpen(true);
-                              }
-                            : () => {
-                                if (spotlightHoldRef.current) {
-                                  clearTimeout(spotlightHoldRef.current);
-                                  spotlightHoldRef.current = null;
-                                }
-                                pendingSpotlightRef.current = null;
-                                setSpotlightKey(tile.key);
-                              }
-                        }
-                      />
-                    ))}
-                  </ScrollView>
-                ) : null}
-              </View>
-            ) : (
-              <View
-                style={[
-                  styles.grid,
-                  {
-                    width: layout.stageWidth,
-                    gap: layout.gap,
-                  },
-                ]}>
-                {tiles.map((tile) => (
-                  <ParticipantTile
-                    key={tile.key}
-                    tile={tile}
-                    avatarSize={layout.avatarSize}
-                    tileWidth={layout.tileWidth}
-                    videoHeight={layout.videoHeight}
-                    volumeOpen={volumeOpenId === tile.key}
-                    onToggleVolume={
-                      tile.isBard
-                        ? onSetBardLocalVolume
-                          ? () =>
-                              setVolumeOpenId((current) =>
-                                current === tile.key ? null : tile.key,
-                              )
+          <View style={styles.stage}>
+            <View style={[styles.stageInner, { width: layout.stageWidth }]}>
+              {layout.mode === 'spotlight' && spotlightTile ? (
+                <View style={[styles.spotlightStage, { width: layout.stageWidth }]}>
+                  <View style={styles.spotlightMain}>
+                    <ParticipantTile
+                      tile={spotlightTile}
+                      avatarSize={layout.spotlightAvatar}
+                      tileWidth={layout.spotlightWidth}
+                      videoHeight={layout.spotlightVideoHeight}
+                      spotlight
+                      volumeOpen={volumeOpenId === spotlightTile.key}
+                      onToggleVolume={
+                        spotlightTile.isBard
+                          ? onSetBardLocalVolume
+                            ? () =>
+                                setVolumeOpenId((current) =>
+                                  current === spotlightTile.key ? null : spotlightTile.key,
+                                )
+                            : undefined
+                          : onSetParticipantVolume &&
+                              !spotlightTile.isLocal &&
+                              !spotlightTile.waiting
+                            ? () =>
+                                setVolumeOpenId((current) =>
+                                  current === spotlightTile.key ? null : spotlightTile.key,
+                                )
+                            : undefined
+                      }
+                      onVolumeChange={
+                        spotlightTile.isBard
+                          ? onSetBardLocalVolume
+                          : onSetParticipantVolume &&
+                              !spotlightTile.isLocal &&
+                              !spotlightTile.waiting
+                            ? (volume) =>
+                                onSetParticipantVolume(tileIdentity(spotlightTile), volume)
+                            : undefined
+                      }
+                      onPress={
+                        spotlightTile.isBard
+                          ? () => {
+                              onResumeBardAudio?.();
+                              setBardSheetOpen(true);
+                            }
                           : undefined
-                        : onSetParticipantVolume && !tile.isLocal && !tile.waiting
-                          ? () =>
-                              setVolumeOpenId((current) =>
-                                current === tile.key ? null : tile.key,
-                              )
-                          : undefined
-                    }
-                    onVolumeChange={
-                      tile.isBard
-                        ? onSetBardLocalVolume
-                        : onSetParticipantVolume && !tile.isLocal && !tile.waiting
-                          ? (volume) =>
-                              onSetParticipantVolume(tileIdentity(tile), volume)
-                          : undefined
-                    }
-                    onPress={
-                      tile.isBard
-                        ? () => {
-                            onResumeBardAudio?.();
-                            setBardSheetOpen(true);
+                      }
+                    />
+                  </View>
+                  {filmstripTiles.length > 0 ? (
+                    <ScrollView
+                      horizontal
+                      showsHorizontalScrollIndicator={false}
+                      style={[
+                        styles.filmstripScroll,
+                        layout.filmRowBudget
+                          ? { maxHeight: layout.filmRowBudget }
+                          : null,
+                      ]}
+                      contentContainerStyle={[
+                        styles.filmstrip,
+                        { gap: layout.filmGap },
+                      ]}>
+                      {filmstripTiles.map((tile) => (
+                        <ParticipantTile
+                          key={tile.key}
+                          tile={tile}
+                          avatarSize={layout.filmAvatar}
+                          tileWidth={layout.filmTileWidth}
+                          videoHeight={layout.filmVideoHeight}
+                          volumeOpen={volumeOpenId === tile.key}
+                          onToggleVolume={
+                            tile.isBard
+                              ? onSetBardLocalVolume
+                                ? () =>
+                                    setVolumeOpenId((current) =>
+                                      current === tile.key ? null : tile.key,
+                                    )
+                                : undefined
+                              : onSetParticipantVolume && !tile.isLocal && !tile.waiting
+                                ? () =>
+                                    setVolumeOpenId((current) =>
+                                      current === tile.key ? null : tile.key,
+                                    )
+                                : undefined
                           }
-                        : undefined
-                    }
-                  />
-                ))}
-              </View>
-            )}
-          </ScrollView>
+                          onVolumeChange={
+                            tile.isBard
+                              ? onSetBardLocalVolume
+                              : onSetParticipantVolume && !tile.isLocal && !tile.waiting
+                                ? (volume) =>
+                                    onSetParticipantVolume(tileIdentity(tile), volume)
+                                : undefined
+                          }
+                          onPress={
+                            tile.isBard
+                              ? () => {
+                                  onResumeBardAudio?.();
+                                  setBardSheetOpen(true);
+                                }
+                              : () => {
+                                  if (spotlightHoldRef.current) {
+                                    clearTimeout(spotlightHoldRef.current);
+                                    spotlightHoldRef.current = null;
+                                  }
+                                  pendingSpotlightRef.current = null;
+                                  setSpotlightKey(tile.key);
+                                }
+                          }
+                        />
+                      ))}
+                    </ScrollView>
+                  ) : null}
+                </View>
+              ) : (
+                <View
+                  style={[
+                    styles.grid,
+                    {
+                      width: layout.stageWidth,
+                      gap: layout.gap,
+                      maxHeight: layout.stageBudget,
+                    },
+                  ]}>
+                  {tiles.map((tile) => (
+                    <ParticipantTile
+                      key={tile.key}
+                      tile={tile}
+                      avatarSize={layout.avatarSize}
+                      tileWidth={layout.tileWidth}
+                      videoHeight={layout.videoHeight}
+                      volumeOpen={volumeOpenId === tile.key}
+                      onToggleVolume={
+                        tile.isBard
+                          ? onSetBardLocalVolume
+                            ? () =>
+                                setVolumeOpenId((current) =>
+                                  current === tile.key ? null : tile.key,
+                                )
+                            : undefined
+                          : onSetParticipantVolume && !tile.isLocal && !tile.waiting
+                            ? () =>
+                                setVolumeOpenId((current) =>
+                                  current === tile.key ? null : tile.key,
+                                )
+                            : undefined
+                      }
+                      onVolumeChange={
+                        tile.isBard
+                          ? onSetBardLocalVolume
+                          : onSetParticipantVolume && !tile.isLocal && !tile.waiting
+                            ? (volume) =>
+                                onSetParticipantVolume(tileIdentity(tile), volume)
+                            : undefined
+                      }
+                      onPress={
+                        tile.isBard
+                          ? () => {
+                              onResumeBardAudio?.();
+                              setBardSheetOpen(true);
+                            }
+                          : undefined
+                      }
+                    />
+                  ))}
+                </View>
+              )}
+            </View>
+          </View>
 
           <View style={styles.controls}>
             {failed && onRetry ? (
@@ -2526,6 +2562,7 @@ const styles = StyleSheet.create({
     flex: 1,
     width: '100%',
     maxWidth: 720,
+    maxHeight: '86%',
     borderRadius: 20,
     backgroundColor: '#1E1F22',
     overflow: 'hidden',
@@ -2534,9 +2571,6 @@ const styles = StyleSheet.create({
     zIndex: 1,
   },
   shellDesktop: {
-    flexGrow: 0,
-    minHeight: 520,
-    maxHeight: '86%',
     maxWidth: 980,
   },
   shellFullscreen: {
@@ -2552,6 +2586,7 @@ const styles = StyleSheet.create({
   header: {
     flexDirection: 'row',
     alignItems: 'flex-start',
+    flexShrink: 0,
     gap: 12,
     paddingHorizontal: Spacing.lg,
     paddingTop: Spacing.lg,
@@ -2612,11 +2647,12 @@ const styles = StyleSheet.create({
   connectionBanner: {
     flexDirection: 'row',
     alignItems: 'flex-start',
+    flexShrink: 0,
     gap: 10,
     marginHorizontal: Spacing.md,
     marginBottom: Spacing.sm,
     paddingHorizontal: 14,
-    paddingVertical: 12,
+    paddingVertical: 10,
     borderRadius: 12,
     borderWidth: 1,
   },
@@ -2661,37 +2697,53 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '700',
   },
-  stageScroll: {
+  stage: {
     flex: 1,
+    minHeight: 0,
+    width: '100%',
   },
-  stageContent: {
-    flexGrow: 1,
+  stageInner: {
+    flex: 1,
+    minHeight: 0,
+    alignSelf: 'center',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.lg,
-    minHeight: 240,
+    paddingHorizontal: Spacing.sm,
+    paddingVertical: Spacing.sm,
   },
   spotlightStage: {
+    flex: 1,
+    minHeight: 0,
+    width: '100%',
     alignItems: 'center',
-    gap: 14,
+    justifyContent: 'center',
+    gap: 8,
+  },
+  spotlightMain: {
+    flex: 1,
+    minHeight: 0,
+    width: '100%',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   filmstripScroll: {
     width: '100%',
-    maxHeight: 240,
     flexGrow: 0,
+    flexShrink: 0,
   },
   filmstrip: {
     flexDirection: 'row',
     alignItems: 'flex-start',
     justifyContent: 'center',
     paddingHorizontal: 4,
-    paddingBottom: 4,
+    paddingBottom: 2,
   },
   grid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     justifyContent: 'center',
+    alignContent: 'center',
+    overflow: 'hidden',
   },
   tile: {
     alignItems: 'center',
@@ -2704,7 +2756,9 @@ const styles = StyleSheet.create({
     position: 'relative',
   },
   tileSpotlight: {
-    paddingVertical: 10,
+    paddingVertical: 6,
+    paddingHorizontal: 6,
+    gap: 6,
     backgroundColor: '#1E1F22',
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.06)',
@@ -2712,6 +2766,7 @@ const styles = StyleSheet.create({
   tileVideo: {
     paddingHorizontal: 6,
     paddingTop: 6,
+    paddingBottom: 6,
     alignItems: 'stretch',
   },
   videoFrame: {
@@ -3146,11 +3201,12 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
+    flexShrink: 0,
     flexWrap: 'wrap',
-    gap: 14,
-    paddingHorizontal: Spacing.lg,
-    paddingBottom: Spacing.lg,
-    paddingTop: Spacing.sm,
+    gap: 10,
+    paddingHorizontal: Spacing.md,
+    paddingBottom: Spacing.md,
+    paddingTop: Spacing.xs,
   },
   controlBtn: {
     width: 56,
