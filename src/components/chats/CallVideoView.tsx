@@ -5,11 +5,18 @@ import type { VideoTrack } from 'livekit-client';
 type Props = {
   track: VideoTrack | null;
   mirror?: boolean;
+  /** Screen share → contain; camera → cover. */
+  objectFit?: 'cover' | 'contain';
   style?: StyleProp<ViewStyle>;
 };
 
 /** Web: attach LiveKit track to a muted <video> (audio stays on hidden audio nodes). */
-export function CallVideoView({ track, mirror = false, style }: Props) {
+export function CallVideoView({
+  track,
+  mirror = false,
+  objectFit = 'cover',
+  style,
+}: Props) {
   const hostRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -24,7 +31,7 @@ export function CallVideoView({ track, mirror = false, style }: Props) {
     el.setAttribute('playsinline', 'true');
     el.style.width = '100%';
     el.style.height = '100%';
-    el.style.objectFit = 'cover';
+    el.style.objectFit = objectFit;
     el.style.background = '#111214';
     el.style.transform = mirror ? 'scaleX(-1)' : '';
     host.replaceChildren(el);
@@ -37,7 +44,7 @@ export function CallVideoView({ track, mirror = false, style }: Props) {
       el.remove();
       host.replaceChildren();
     };
-  }, [mirror, track]);
+  }, [mirror, objectFit, track]);
 
   if (!track) {
     return null;

@@ -73,6 +73,7 @@ type VoiceCallContextValue = {
   deafened: boolean;
   cameraOn: boolean;
   cameraFacing: 'user' | 'environment';
+  screenShareOn: boolean;
   participants: ChatLiveVoiceParticipant[];
   startCall: (
     conversationId: string,
@@ -96,6 +97,7 @@ type VoiceCallContextValue = {
   toggleDeafen: () => Promise<void>;
   toggleCamera: () => Promise<void>;
   switchCameraFacing: () => Promise<void>;
+  toggleScreenShare: () => Promise<void>;
   retryLive: () => Promise<void>;
   minimize: () => void;
   expand: () => void;
@@ -211,6 +213,7 @@ export function VoiceCallProvider({ children }: { children: ReactNode }) {
     deafened,
     cameraOn,
     cameraFacing,
+    screenShareOn,
     participants,
     urgentById,
     volumeById,
@@ -220,6 +223,7 @@ export function VoiceCallProvider({ children }: { children: ReactNode }) {
     toggleDeafen,
     toggleCamera,
     switchCameraFacing,
+    toggleScreenShare,
     sendUrgentRequest,
     setParticipantVolume,
     publishRoomData,
@@ -569,6 +573,19 @@ export function VoiceCallProvider({ children }: { children: ReactNode }) {
       toast.error(localizeErrorMessage(error, 'Не удалось переключить камеру'));
     }
   }, [switchCameraFacing]);
+
+  const handleToggleScreenShare = useCallback(async () => {
+    try {
+      const result = await toggleScreenShare();
+      if (result.enabled && !result.audioPublished) {
+        toast.info(
+          'Видео экрана без звука: браузер почти никогда не отдаёт audio с «Весь экран»/окна (особенно Linux). Звук стрима — только через вкладку + «Демонстрировать звук».',
+        );
+      }
+    } catch (error) {
+      toast.error(localizeErrorMessage(error, 'Не удалось начать демонстрацию экрана'));
+    }
+  }, [toggleScreenShare]);
 
   useEffect(() => {
     return subscribeCallEvents((event) => {
@@ -945,12 +962,26 @@ export function VoiceCallProvider({ children }: { children: ReactNode }) {
       if (key === 'v') {
         event.preventDefault();
         void handleToggleCamera();
+        return;
+      }
+      if (key === 's') {
+        event.preventDefault();
+        void handleToggleScreenShare();
       }
     };
 
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [handleToggleCamera, liveStatus, minimize, minimized, session?.phase, toggleDeafen, toggleMute]);
+  }, [
+    handleToggleCamera,
+    handleToggleScreenShare,
+    liveStatus,
+    minimize,
+    minimized,
+    session?.phase,
+    toggleDeafen,
+    toggleMute,
+  ]);
 
   const phase: VoiceCallPhase = session?.phase ?? (liveStatus === 'error' ? 'error' : 'idle');
 
@@ -981,6 +1012,7 @@ export function VoiceCallProvider({ children }: { children: ReactNode }) {
       deafened,
       cameraOn,
       cameraFacing,
+      screenShareOn,
       participants,
       startCall,
       joinOngoingCall,
@@ -989,6 +1021,7 @@ export function VoiceCallProvider({ children }: { children: ReactNode }) {
       toggleDeafen,
       toggleCamera: handleToggleCamera,
       switchCameraFacing: handleSwitchCameraFacing,
+      toggleScreenShare: handleToggleScreenShare,
       retryLive,
       minimize,
       expand,
@@ -1009,6 +1042,7 @@ export function VoiceCallProvider({ children }: { children: ReactNode }) {
       deafened,
       cameraOn,
       cameraFacing,
+      screenShareOn,
       participants,
       startCall,
       joinOngoingCall,
@@ -1017,6 +1051,7 @@ export function VoiceCallProvider({ children }: { children: ReactNode }) {
       toggleDeafen,
       handleToggleCamera,
       handleSwitchCameraFacing,
+      handleToggleScreenShare,
       retryLive,
       minimize,
       expand,
@@ -1056,6 +1091,7 @@ export function VoiceCallProvider({ children }: { children: ReactNode }) {
           muted={muted}
           deafened={deafened}
           cameraOn={cameraOn}
+          screenShareOn={screenShareOn}
           participants={participants}
           waitingPeers={waitingPeers}
           urgentById={urgentById}
@@ -1068,6 +1104,9 @@ export function VoiceCallProvider({ children }: { children: ReactNode }) {
           onToggleDeafen={() => void toggleDeafen()}
           onToggleCamera={() => void handleToggleCamera()}
           onSwitchCameraFacing={() => void handleSwitchCameraFacing()}
+          onToggleScreenShare={
+            Platform.OS === 'web' ? () => void handleToggleScreenShare() : undefined
+          }
           onHangup={() => void hangup()}
           onRetry={() => void retryLive()}
           onMinimize={minimize}

@@ -21,6 +21,24 @@ import {
 
 export { isUsableMediaDeviceId };
 
+/**
+ * Krisp (@livekit/krisp-noise-filter) licenses against LiveKit Cloud only.
+ * Self-hosted / local `--dev` returns 404 "Could not authenticate" and Expo redboxes it.
+ */
+function isLiveKitCloudRoom(room: Room): boolean {
+  try {
+    const engine = (room as unknown as { engine?: { url?: string } }).engine;
+    const raw = engine?.url?.trim() ?? '';
+    if (!raw) {
+      return false;
+    }
+    const host = new URL(raw.replace(/^ws/i, 'http')).hostname.toLowerCase();
+    return host.endsWith('.livekit.cloud') || host.endsWith('.livekit.run');
+  } catch {
+    return false;
+  }
+}
+
 function isMobileWebUa(): boolean {
   if (Platform.OS !== 'web' || typeof navigator === 'undefined') {
     return false;
@@ -112,13 +130,16 @@ export class AdventuraMicProcessor
   private dest?: MediaStreamAudioDestinationNode;
   private krisp: TrackProcessor<Track.Kind.Audio, AudioProcessorOptions> | null = null;
   private usedKrisp = false;
+  private allowKrisp: boolean;
 
   constructor(
     gain: number = MIC_GAIN_DEFAULT,
     noiseSuppression: boolean = NOISE_SUPPRESSION_DEFAULT,
+    allowKrisp: boolean = false,
   ) {
     this.gainValue = clampMicGain(gain);
     this.noiseSuppression = noiseSuppression;
+    this.allowKrisp = allowKrisp;
   }
 
   get usesKrisp() {
@@ -140,7 +161,7 @@ export class AdventuraMicProcessor
     this.ctx = opts.audioContext;
     let inputTrack = opts.track;
 
-    if (this.noiseSuppression && Platform.OS === 'web') {
+    if (this.noiseSuppression && this.allowKrisp && Platform.OS === 'web') {
       try {
         const { isKrispNoiseFilterSupported, KrispNoiseFilter } = await import(
           '@livekit/krisp-noise-filter'
@@ -177,11 +198,31 @@ export class AdventuraMicProcessor
   }
 
   async onPublish(room: Room): Promise<void> {
-    await this.krisp?.onPublish?.(room);
+    if (!this.krisp) {
+      return;
+    }
+    if (!isLiveKitCloudRoom(room)) {
+      await this.krisp.destroy().catch(() => undefined);
+      this.krisp = null;
+      this.usedKrisp = false;
+      return;
+    }
+    try {
+      await this.krisp.onPublish?.(room);
+    } catch {
+      // Cloud entitlement missing / model CDN 404 — keep gain chain, drop Krisp.
+      await this.krisp.destroy().catch(() => undefined);
+      this.krisp = null;
+      this.usedKrisp = false;
+    }
   }
 
   async onUnpublish(): Promise<void> {
-    await this.krisp?.onUnpublish?.();
+    try {
+      await this.krisp?.onUnpublish?.();
+    } catch {
+      // ignore
+    }
   }
 
   async destroy(): Promise<void> {
@@ -345,7 +386,11 @@ async function attachMicProcessor(
     }
   }
 
-  const processor = new AdventuraMicProcessor(micGain, noiseSuppression);
+  const processor = new AdventuraMicProcessor(
+    micGain,
+    noiseSuppression,
+    isLiveKitCloudRoom(room),
+  );
   try {
     await track.setProcessor(processor);
     return { usedKrisp: processor.usesKrisp, enabled: true };

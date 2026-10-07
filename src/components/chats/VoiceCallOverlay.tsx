@@ -35,12 +35,17 @@ export const BARD_TILE_KEY = 'bard';
 
 type OverlayTile = {
   key: string;
+  /** LiveKit identity — used for volume / urgent (screen tiles use `${id}:screen` as key). */
+  identity?: string;
   name: string;
   avatarUrl: string | null;
   speaking: boolean;
   muted: boolean;
   cameraOn: boolean;
   videoTrack: VideoTrack | null;
+  /** Separate tile for screen/window share (camera stays on the person tile). */
+  screenShareOn?: boolean;
+  screenShareTrack?: VideoTrack | null;
   isLocal: boolean;
   waiting?: boolean;
   /** Accepted, still joining LiveKit. */
@@ -56,6 +61,13 @@ type OverlayTile = {
   /** Local track buffering — spinner around Bard avatar. */
   bardLoading?: boolean;
 };
+
+function tileIdentity(tile: OverlayTile): string {
+  return tile.identity ?? tile.key;
+}
+
+const SPEAKER_HOLD_MS = 1100;
+const SPEAKER_SWITCH_SILENT_MS = 350;
 
 export type VoiceCallWaitingPeer = {
   id: string;
@@ -75,6 +87,7 @@ type Props = {
   muted: boolean;
   deafened: boolean;
   cameraOn?: boolean;
+  screenShareOn?: boolean;
   participants: ChatLiveVoiceParticipant[];
   /** Members still being rung / not yet in LiveKit. */
   waitingPeers?: VoiceCallWaitingPeer[];
@@ -92,6 +105,8 @@ type Props = {
   onToggleCamera?: () => void;
   /** Flip front ↔ rear while camera is on. */
   onSwitchCameraFacing?: () => void;
+  /** Share monitor / window / tab. */
+  onToggleScreenShare?: () => void;
   onHangup: () => void;
   onRetry?: () => void;
   onMinimize?: () => void;
@@ -678,6 +693,7 @@ function ParticipantTile({
   onVolumeChange,
   onPress,
   onOpenMenu,
+  spotlight = false,
 }: {
   tile: OverlayTile;
   avatarSize: number;
@@ -688,10 +704,15 @@ function ParticipantTile({
   onVolumeChange?: (volume: number) => void;
   onPress?: () => void;
   onOpenMenu?: () => void;
+  spotlight?: boolean;
 }) {
   const avatarOuter = avatarFrameOuterSize(avatarSize);
   const ringBox = avatarOuter + 8;
-  const showVideo = Boolean(tile.cameraOn && tile.videoTrack && videoHeight);
+  const showingScreenShare = Boolean(tile.screenShareOn && tile.screenShareTrack);
+  const displayTrack = showingScreenShare ? tile.screenShareTrack! : tile.videoTrack;
+  const showVideo = Boolean(
+    displayTrack && videoHeight && (showingScreenShare || tile.cameraOn),
+  );
   const canAdjustVolume =
     Boolean(onToggleVolume && onVolumeChange) && !tile.isLocal && !tile.waiting;
   const volume = clamp01(tile.volume ?? 1);
@@ -748,6 +769,7 @@ function ParticipantTile({
         styles.tile,
         { width: tileWidth },
         showVideo ? styles.tileVideo : null,
+        spotlight && styles.tileSpotlight,
         tile.waiting && styles.tileWaiting,
         tile.urgent && styles.tileUrgent,
         tile.isBard && styles.tileBard,
@@ -764,6 +786,7 @@ function ParticipantTile({
                 <View
                   style={[
                     styles.videoFrame,
+                    showingScreenShare && styles.videoFrameScreen,
                     {
                       height: videoHeight ?? 180,
                       borderColor: tile.urgent
@@ -773,7 +796,16 @@ function ParticipantTile({
                           : 'rgba(255,255,255,0.08)',
                     },
                   ]}>
-                  <CallVideoView track={tile.videoTrack} mirror={tile.isLocal} />
+                  <CallVideoView
+                    track={displayTrack}
+                    mirror={tile.isLocal && !showingScreenShare}
+                    objectFit={showingScreenShare ? 'contain' : 'cover'}
+                  />
+                  {showingScreenShare ? (
+                    <View style={styles.videoScreenBadge} pointerEvents="none">
+                      <Ionicons name="desktop-outline" size={12} color="#FFFFFF" />
+                    </View>
+                  ) : null}
                   {tile.muted ? (
                     <View style={styles.videoMuteBadge}>
                       <Ionicons name="mic-off" size={12} color="#FFFFFF" />
@@ -1102,6 +1134,7 @@ export function VoiceCallOverlay({
   muted,
   deafened,
   cameraOn = false,
+  screenShareOn = false,
   participants,
   waitingPeers = [],
   urgentById = {},
@@ -1113,6 +1146,7 @@ export function VoiceCallOverlay({
   onToggleDeafen,
   onToggleCamera,
   onSwitchCameraFacing,
+  onToggleScreenShare,
   onHangup,
   onRetry,
   onMinimize,
@@ -1160,6 +1194,14 @@ export function VoiceCallOverlay({
   const startedAtRef = useRef<number | null>(null);
   const [nowTick, setNowTick] = useState(Date.now());
   const [diceOpen, setDiceOpen] = useState(false);
+  const [spotlightKey, setSpotlightKey] = useState<string | null>(null);
+  const spotlightKeyRef = useRef<string | null>(null);
+  spotlightKeyRef.current = spotlightKey;
+  const spotlightHoldRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** Target identity we're already waiting to promote — avoid reset on every speak tick. */
+  const pendingSpotlightRef = useRef<string | null>(null);
+  /** Fill the site viewport (not OS/monitor fullscreen — use F11 for that). */
+  const [fullscreen, setFullscreen] = useState(false);
   const connectPulse = useRef(new Animated.Value(1)).current;
   // Пока звонок на экране — не ждём LiveKit `connected` / ответ собеседника.
   const canRollDice = Boolean(conversationId?.trim()) && status !== 'error';
@@ -1220,11 +1262,22 @@ export function VoiceCallOverlay({
       setDiceOpen(false);
       setVolumeOpenId(null);
       setBardSheetOpen(false);
+      setSpotlightKey(null);
+      if (spotlightHoldRef.current) {
+        clearTimeout(spotlightHoldRef.current);
+        spotlightHoldRef.current = null;
+      }
+      pendingSpotlightRef.current = null;
+      setFullscreen(false);
       savedMiniOffset = { x: 0, y: 0 };
       miniOffsetRef.current = savedMiniOffset;
       setMiniOffset(savedMiniOffset);
     }
   }, [visible]);
+
+  const toggleFullscreen = useCallback(() => {
+    setFullscreen((prev) => !prev);
+  }, []);
 
   useEffect(() => {
     if (!bardPresent) {
@@ -1283,33 +1336,65 @@ export function VoiceCallOverlay({
   );
 
   const tiles = useMemo<OverlayTile[]>(() => {
-    const live = participants.map((p) => ({
-      key: p.identity,
-      name: p.name,
-      avatarUrl: p.isLocal && profileAvatarUrl ? profileAvatarUrl : p.avatarUrl,
-      speaking: p.speaking,
-      muted: p.muted,
-      cameraOn: p.cameraOn,
-      videoTrack: p.videoTrack,
-      isLocal: p.isLocal,
-      badges: p.badges,
-      frameId: p.avatarFrameId,
-      urgent: Boolean(urgentById[p.identity]),
-      volume: p.isLocal ? undefined : clamp01(volumeById[p.identity] ?? 1),
-    }));
-    const liveIds = new Set(live.map((p) => p.key));
+    const live: OverlayTile[] = [];
+    for (const p of participants) {
+      const avatarUrl = p.isLocal && profileAvatarUrl ? profileAvatarUrl : p.avatarUrl;
+      const volume = p.isLocal ? undefined : clamp01(volumeById[p.identity] ?? 1);
+      const urgent = Boolean(urgentById[p.identity]);
+      // Screen share as its own tile so camera stays visible in the filmstrip.
+      if (p.screenShareOn && p.screenShareTrack) {
+        live.push({
+          key: `${p.identity}:screen`,
+          identity: p.identity,
+          name: `${p.name} · экран`,
+          avatarUrl,
+          speaking: false,
+          muted: p.muted,
+          cameraOn: false,
+          videoTrack: null,
+          screenShareOn: true,
+          screenShareTrack: p.screenShareTrack,
+          isLocal: p.isLocal,
+          badges: p.badges,
+          frameId: p.avatarFrameId,
+          urgent,
+          volume,
+        });
+      }
+      live.push({
+        key: p.identity,
+        identity: p.identity,
+        name: p.name,
+        avatarUrl,
+        speaking: p.speaking,
+        muted: p.muted,
+        cameraOn: p.cameraOn,
+        videoTrack: p.videoTrack,
+        screenShareOn: false,
+        screenShareTrack: null,
+        isLocal: p.isLocal,
+        badges: p.badges,
+        frameId: p.avatarFrameId,
+        urgent,
+        volume,
+      });
+    }
+    const liveIds = new Set(live.map((p) => tileIdentity(p)));
     for (const peer of waitingPeers) {
       if (!peer.id || liveIds.has(peer.id)) {
         continue;
       }
       live.push({
         key: peer.id,
+        identity: peer.id,
         name: peer.name,
         avatarUrl: peer.avatarUrl,
         speaking: false,
         muted: false,
         cameraOn: false,
         videoTrack: null,
+        screenShareOn: false,
+        screenShareTrack: null,
         isLocal: false,
         waiting: true,
         connecting: Boolean(peer.connecting),
@@ -1320,12 +1405,15 @@ export function VoiceCallOverlay({
     if (bardPresent) {
       live.push({
         key: BARD_TILE_KEY,
+        identity: BARD_TILE_KEY,
         name: 'Бард',
         avatarUrl: null,
         speaking: Boolean(bardPlaying),
         muted: false,
         cameraOn: false,
         videoTrack: null,
+        screenShareOn: false,
+        screenShareTrack: null,
         isLocal: false,
         isBard: true,
         bardPlaque: bardTrackTitle,
@@ -1334,8 +1422,11 @@ export function VoiceCallOverlay({
         volume: clamp01(bardLocalVolume),
       });
     }
-    // Local first, then live remotes, bard near end, waiting last.
+    // Screens first among a peer, local first, bard near end, waiting last.
     return live.sort((a, b) => {
+      if (Boolean(a.screenShareOn) !== Boolean(b.screenShareOn)) {
+        return a.screenShareOn ? -1 : 1;
+      }
       if (a.isLocal !== b.isLocal) {
         return a.isLocal ? -1 : 1;
       }
@@ -1359,6 +1450,91 @@ export function VoiceCallOverlay({
     volumeById,
     waitingPeers,
   ]);
+
+  // Discord-style sticky spotlight: screen share > active speaker (with hold).
+  useEffect(() => {
+    const clearHold = () => {
+      if (spotlightHoldRef.current) {
+        clearTimeout(spotlightHoldRef.current);
+        spotlightHoldRef.current = null;
+      }
+      pendingSpotlightRef.current = null;
+    };
+
+    if (!tiles.length) {
+      clearHold();
+      setSpotlightKey(null);
+      return;
+    }
+
+    const sharer = tiles.find((t) => t.screenShareOn && t.screenShareTrack);
+    if (sharer) {
+      clearHold();
+      if (spotlightKeyRef.current !== sharer.key) {
+        setSpotlightKey(sharer.key);
+      }
+      return;
+    }
+
+    const speakers = tiles.filter(
+      (t) => t.speaking && !t.waiting && !t.isBard && !t.screenShareOn,
+    );
+    const fallback =
+      tiles.find((t) => !t.waiting && !t.isBard && !t.screenShareOn) ??
+      tiles.find((t) => !t.waiting && !t.isBard) ??
+      tiles[0] ??
+      null;
+    const prev = spotlightKeyRef.current;
+
+    if (!speakers.length) {
+      // Keep current spotlight while nobody speaks; only fix missing key.
+      if (!prev || !tiles.some((t) => t.key === prev)) {
+        clearHold();
+        setSpotlightKey(fallback?.key ?? null);
+      }
+      return;
+    }
+
+    // Prefer remote speaker when several talk; else first speaking.
+    const preferred = speakers.find((t) => !t.isLocal) ?? speakers[0]!;
+
+    if (!prev || !tiles.some((t) => t.key === prev)) {
+      clearHold();
+      setSpotlightKey(preferred.key);
+      return;
+    }
+    if (prev === preferred.key) {
+      clearHold();
+      return;
+    }
+    // Already counting down toward this speaker — don't reset the hold.
+    if (pendingSpotlightRef.current === preferred.key && spotlightHoldRef.current) {
+      return;
+    }
+
+    const current = tiles.find((t) => t.key === prev);
+    const delay = current?.speaking ? SPEAKER_HOLD_MS : SPEAKER_SWITCH_SILENT_MS;
+    if (spotlightHoldRef.current) {
+      clearTimeout(spotlightHoldRef.current);
+    }
+    pendingSpotlightRef.current = preferred.key;
+    spotlightHoldRef.current = setTimeout(() => {
+      spotlightHoldRef.current = null;
+      pendingSpotlightRef.current = null;
+      setSpotlightKey(preferred.key);
+    }, delay);
+  }, [tiles]);
+
+  useEffect(
+    () => () => {
+      if (spotlightHoldRef.current) {
+        clearTimeout(spotlightHoldRef.current);
+        spotlightHoldRef.current = null;
+      }
+      pendingSpotlightRef.current = null;
+    },
+    [],
+  );
 
   useEffect(() => {
     if (!volumeOpenId) {
@@ -1400,9 +1576,60 @@ export function VoiceCallOverlay({
       ? connection.detail || connection.label
       : `${statusLine}${mediaReady ? ` · ${formatCallDuration(elapsedSec)}` : ''}`;
 
+  const useSpotlight = tiles.length >= 2;
+
   const layout = useMemo(() => {
     const count = Math.max(tiles.length, 1);
-    const stageWidth = Math.min(width - Spacing.md * 4, isDesktop ? 680 : width - 48);
+    const stagePad = fullscreen ? Spacing.md * 2 : Spacing.md * 4;
+    const stageWidth = Math.min(
+      width - stagePad,
+      fullscreen ? width - stagePad : isDesktop ? 920 : width - 48,
+    );
+    const hasScreenShare = tiles.some((tile) => tile.screenShareOn && tile.screenShareTrack);
+    const videoMode = tiles.some(
+      (tile) => tile.cameraOn || (tile.screenShareOn && tile.screenShareTrack),
+    );
+
+    if (useSpotlight) {
+      const filmGap = 10;
+      const filmTileWidth = Math.min(
+        fullscreen ? 168 : 148,
+        Math.max(112, Math.floor(stageWidth / (fullscreen ? 6.5 : 5.2))),
+      );
+      const filmAvatar = Math.min(56, Math.max(44, filmTileWidth - 48));
+      const filmVideoHeight = videoMode
+        ? Math.max(72, Math.round(filmTileWidth * (hasScreenShare ? 0.56 : 0.62)))
+        : null;
+      const spotlightWidth = stageWidth;
+      const spotlightAvatar = isDesktop ? 120 : 100;
+      const maxSpotH = Math.max(
+        220,
+        Math.min(height * (fullscreen ? 0.72 : 0.52), fullscreen ? height * 0.78 : isDesktop ? 480 : 360),
+      );
+      const spotlightVideoHeight = videoMode
+        ? Math.max(
+            hasScreenShare ? 220 : 180,
+            Math.min(maxSpotH, Math.round(spotlightWidth * (hasScreenShare ? 0.56 : 0.56))),
+          )
+        : null;
+      return {
+        mode: 'spotlight' as const,
+        stageWidth,
+        spotlightWidth,
+        spotlightAvatar,
+        spotlightVideoHeight,
+        filmGap,
+        filmTileWidth,
+        filmAvatar,
+        filmVideoHeight,
+        gap: filmGap,
+        tileWidth: filmTileWidth,
+        avatarSize: filmAvatar,
+        videoHeight: filmVideoHeight,
+        columns: 1,
+      };
+    }
+
     let columns = 1;
     if (count === 2) {
       columns = 2;
@@ -1424,10 +1651,45 @@ export function VoiceCallOverlay({
       avatarSize = isDesktop ? 72 : 64;
     }
     avatarSize = Math.min(avatarSize, Math.max(52, tileWidth - 56));
-    const videoMode = tiles.some((tile) => tile.cameraOn);
-    const videoHeight = videoMode ? Math.max(148, Math.round(tileWidth * 0.72)) : null;
-    return { columns, gap, tileWidth, avatarSize, stageWidth, videoHeight };
-  }, [isDesktop, tiles, width]);
+    const videoHeight = videoMode
+      ? Math.max(hasScreenShare ? 168 : 148, Math.round(tileWidth * (hasScreenShare ? 0.62 : 0.72)))
+      : null;
+    return {
+      mode: 'grid' as const,
+      columns,
+      gap,
+      tileWidth,
+      avatarSize,
+      stageWidth,
+      videoHeight,
+      spotlightWidth: tileWidth,
+      spotlightAvatar: avatarSize,
+      spotlightVideoHeight: videoHeight,
+      filmGap: gap,
+      filmTileWidth: tileWidth,
+      filmAvatar: avatarSize,
+      filmVideoHeight: videoHeight,
+    };
+  }, [fullscreen, height, isDesktop, tiles, useSpotlight, width]);
+
+  const spotlightTile = useMemo(() => {
+    if (!useSpotlight) {
+      return null;
+    }
+    return (
+      tiles.find((t) => t.key === spotlightKey) ??
+      tiles.find((t) => !t.waiting && !t.isBard) ??
+      tiles[0] ??
+      null
+    );
+  }, [spotlightKey, tiles, useSpotlight]);
+
+  const filmstripTiles = useMemo(() => {
+    if (!useSpotlight || !spotlightTile) {
+      return tiles;
+    }
+    return tiles.filter((t) => t.key !== spotlightTile.key);
+  }, [spotlightTile, tiles, useSpotlight]);
 
   if (!visible) {
     return null;
@@ -1552,6 +1814,28 @@ export function VoiceCallOverlay({
               <Ionicons name="camera-reverse-outline" size={18} color="#FFFFFF" />
             </Pressable>
           ) : null}
+          {onToggleScreenShare && !pinToTop ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={
+                screenShareOn
+                  ? 'Остановить демонстрацию (Ctrl+Shift+S)'
+                  : 'Демонстрация экрана (Ctrl+Shift+S)'
+              }
+              onPress={onToggleScreenShare}
+              style={({ pressed }) => [
+                styles.miniCtrl,
+                !screenShareOn && styles.miniCtrlOff,
+                screenShareOn && styles.miniCtrlScreenOn,
+                pressed && styles.pressed,
+              ]}>
+              <Ionicons
+                name={screenShareOn ? 'desktop' : 'desktop-outline'}
+                size={18}
+                color="#FFFFFF"
+              />
+            </Pressable>
+          ) : null}
           <Pressable
             accessibilityRole="button"
             accessibilityLabel="Завершить звонок"
@@ -1622,12 +1906,13 @@ export function VoiceCallOverlay({
         <View
           style={[
             styles.root,
+            fullscreen && styles.rootFullscreen,
             {
-              paddingTop: Math.max(insets.top, Spacing.md),
-              paddingBottom: Math.max(insets.bottom, Spacing.md),
+              paddingTop: fullscreen ? 0 : Math.max(insets.top, Spacing.md),
+              paddingBottom: fullscreen ? 0 : Math.max(insets.bottom, Spacing.md),
             },
           ]}>
-          {onMinimize ? (
+          {onMinimize && !fullscreen ? (
             <Pressable
               accessibilityRole="button"
               accessibilityLabel="Свернуть звонок"
@@ -1635,7 +1920,12 @@ export function VoiceCallOverlay({
               style={styles.backdropHit}
             />
           ) : null}
-        <View style={[styles.shell, isDesktop && styles.shellDesktop]}>
+        <View
+          style={[
+            styles.shell,
+            isDesktop && styles.shellDesktop,
+            fullscreen && styles.shellFullscreen,
+          ]}>
           <View style={styles.header}>
             <View style={styles.headerCopy}>
               <Text style={styles.title} numberOfLines={1}>
@@ -1668,6 +1958,19 @@ export function VoiceCallOverlay({
                 ) : null}
               </View>
             </View>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={
+                fullscreen ? 'Свернуть звонок в окно' : 'Развернуть звонок на окно сайта'
+              }
+              onPress={toggleFullscreen}
+              style={({ pressed }) => [styles.headerAction, pressed && styles.pressed]}>
+              <Ionicons
+                name={fullscreen ? 'contract' : 'expand'}
+                size={20}
+                color="#F2F3F5"
+              />
+            </Pressable>
             {onMinimize ? (
               <Pressable
                 accessibilityRole="button"
@@ -1725,46 +2028,44 @@ export function VoiceCallOverlay({
             style={styles.stageScroll}
             contentContainerStyle={styles.stageContent}
             showsVerticalScrollIndicator={false}>
-            <View
-              style={[
-                styles.grid,
-                {
-                  width: layout.stageWidth,
-                  gap: layout.gap,
-                },
-              ]}>
-              {tiles.map((tile) => (
+            {layout.mode === 'spotlight' && spotlightTile ? (
+              <View style={[styles.spotlightStage, { width: layout.stageWidth }]}>
                 <ParticipantTile
-                  key={tile.key}
-                  tile={tile}
-                  avatarSize={layout.avatarSize}
-                  tileWidth={layout.tileWidth}
-                  videoHeight={layout.videoHeight}
-                  volumeOpen={volumeOpenId === tile.key}
+                  tile={spotlightTile}
+                  avatarSize={layout.spotlightAvatar}
+                  tileWidth={layout.spotlightWidth}
+                  videoHeight={layout.spotlightVideoHeight}
+                  spotlight
+                  volumeOpen={volumeOpenId === spotlightTile.key}
                   onToggleVolume={
-                    tile.isBard
+                    spotlightTile.isBard
                       ? onSetBardLocalVolume
                         ? () =>
                             setVolumeOpenId((current) =>
-                              current === tile.key ? null : tile.key,
+                              current === spotlightTile.key ? null : spotlightTile.key,
                             )
                         : undefined
-                      : onSetParticipantVolume && !tile.isLocal && !tile.waiting
+                      : onSetParticipantVolume &&
+                          !spotlightTile.isLocal &&
+                          !spotlightTile.waiting
                         ? () =>
                             setVolumeOpenId((current) =>
-                              current === tile.key ? null : tile.key,
+                              current === spotlightTile.key ? null : spotlightTile.key,
                             )
                         : undefined
                   }
                   onVolumeChange={
-                    tile.isBard
+                    spotlightTile.isBard
                       ? onSetBardLocalVolume
-                      : onSetParticipantVolume && !tile.isLocal && !tile.waiting
-                        ? (volume) => onSetParticipantVolume(tile.key, volume)
+                      : onSetParticipantVolume &&
+                          !spotlightTile.isLocal &&
+                          !spotlightTile.waiting
+                        ? (volume) =>
+                            onSetParticipantVolume(tileIdentity(spotlightTile), volume)
                         : undefined
                   }
                   onPress={
-                    tile.isBard
+                    spotlightTile.isBard
                       ? () => {
                           onResumeBardAudio?.();
                           setBardSheetOpen(true);
@@ -1772,8 +2073,118 @@ export function VoiceCallOverlay({
                       : undefined
                   }
                 />
-              ))}
-            </View>
+                {filmstripTiles.length > 0 ? (
+                  <ScrollView
+                    horizontal
+                    showsHorizontalScrollIndicator={false}
+                    style={styles.filmstripScroll}
+                    contentContainerStyle={[
+                      styles.filmstrip,
+                      { gap: layout.filmGap },
+                    ]}>
+                    {filmstripTiles.map((tile) => (
+                      <ParticipantTile
+                        key={tile.key}
+                        tile={tile}
+                        avatarSize={layout.filmAvatar}
+                        tileWidth={layout.filmTileWidth}
+                        videoHeight={layout.filmVideoHeight}
+                        volumeOpen={volumeOpenId === tile.key}
+                        onToggleVolume={
+                          tile.isBard
+                            ? onSetBardLocalVolume
+                              ? () =>
+                                  setVolumeOpenId((current) =>
+                                    current === tile.key ? null : tile.key,
+                                  )
+                              : undefined
+                            : onSetParticipantVolume && !tile.isLocal && !tile.waiting
+                              ? () =>
+                                  setVolumeOpenId((current) =>
+                                    current === tile.key ? null : tile.key,
+                                  )
+                              : undefined
+                        }
+                        onVolumeChange={
+                          tile.isBard
+                            ? onSetBardLocalVolume
+                            : onSetParticipantVolume && !tile.isLocal && !tile.waiting
+                              ? (volume) =>
+                                  onSetParticipantVolume(tileIdentity(tile), volume)
+                              : undefined
+                        }
+                        onPress={
+                          tile.isBard
+                            ? () => {
+                                onResumeBardAudio?.();
+                                setBardSheetOpen(true);
+                              }
+                            : () => {
+                                if (spotlightHoldRef.current) {
+                                  clearTimeout(spotlightHoldRef.current);
+                                  spotlightHoldRef.current = null;
+                                }
+                                pendingSpotlightRef.current = null;
+                                setSpotlightKey(tile.key);
+                              }
+                        }
+                      />
+                    ))}
+                  </ScrollView>
+                ) : null}
+              </View>
+            ) : (
+              <View
+                style={[
+                  styles.grid,
+                  {
+                    width: layout.stageWidth,
+                    gap: layout.gap,
+                  },
+                ]}>
+                {tiles.map((tile) => (
+                  <ParticipantTile
+                    key={tile.key}
+                    tile={tile}
+                    avatarSize={layout.avatarSize}
+                    tileWidth={layout.tileWidth}
+                    videoHeight={layout.videoHeight}
+                    volumeOpen={volumeOpenId === tile.key}
+                    onToggleVolume={
+                      tile.isBard
+                        ? onSetBardLocalVolume
+                          ? () =>
+                              setVolumeOpenId((current) =>
+                                current === tile.key ? null : tile.key,
+                              )
+                          : undefined
+                        : onSetParticipantVolume && !tile.isLocal && !tile.waiting
+                          ? () =>
+                              setVolumeOpenId((current) =>
+                                current === tile.key ? null : tile.key,
+                              )
+                          : undefined
+                    }
+                    onVolumeChange={
+                      tile.isBard
+                        ? onSetBardLocalVolume
+                        : onSetParticipantVolume && !tile.isLocal && !tile.waiting
+                          ? (volume) =>
+                              onSetParticipantVolume(tileIdentity(tile), volume)
+                          : undefined
+                    }
+                    onPress={
+                      tile.isBard
+                        ? () => {
+                            onResumeBardAudio?.();
+                            setBardSheetOpen(true);
+                          }
+                        : undefined
+                    }
+                  />
+                ))}
+              </View>
+            )}
           </ScrollView>
 
           <View style={styles.controls}>
@@ -1840,6 +2251,31 @@ export function VoiceCallOverlay({
                   !mediaReady && styles.controlDisabled,
                 ]}>
                 <Ionicons name="camera-reverse-outline" size={22} color="#FFFFFF" />
+              </Pressable>
+            ) : null}
+
+            {onToggleScreenShare ? (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={
+                  screenShareOn
+                    ? 'Остановить демонстрацию (Ctrl+Shift+S)'
+                    : 'Демонстрация экрана (Ctrl+Shift+S)'
+                }
+                accessibilityState={{ selected: screenShareOn }}
+                disabled={!mediaReady}
+                onPress={onToggleScreenShare}
+                style={({ pressed }) => [
+                  styles.controlBtn,
+                  screenShareOn ? styles.controlBtnScreenOn : styles.controlBtnSecondary,
+                  pressed && styles.pressed,
+                  !mediaReady && styles.controlDisabled,
+                ]}>
+                <Ionicons
+                  name={screenShareOn ? 'desktop' : 'desktop-outline'}
+                  size={22}
+                  color="#FFFFFF"
+                />
               </Pressable>
             ) : null}
 
@@ -1976,6 +2412,10 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingHorizontal: Spacing.md,
   },
+  rootFullscreen: {
+    paddingHorizontal: 0,
+    backgroundColor: '#111214',
+  },
   backdropHit: {
     ...StyleSheet.absoluteFillObject,
     zIndex: 0,
@@ -2076,6 +2516,9 @@ const styles = StyleSheet.create({
   miniCtrlOff: {
     backgroundColor: '#3A3C41',
   },
+  miniCtrlScreenOn: {
+    backgroundColor: '#5865F2',
+  },
   miniCtrlHangup: {
     backgroundColor: '#ED4245',
   },
@@ -2094,6 +2537,17 @@ const styles = StyleSheet.create({
     flexGrow: 0,
     minHeight: 520,
     maxHeight: '86%',
+    maxWidth: 980,
+  },
+  shellFullscreen: {
+    flex: 1,
+    flexGrow: 1,
+    width: '100%',
+    maxWidth: '100%',
+    minHeight: '100%',
+    maxHeight: '100%',
+    borderRadius: 0,
+    borderWidth: 0,
   },
   header: {
     flexDirection: 'row',
@@ -2218,6 +2672,22 @@ const styles = StyleSheet.create({
     paddingVertical: Spacing.lg,
     minHeight: 240,
   },
+  spotlightStage: {
+    alignItems: 'center',
+    gap: 14,
+  },
+  filmstripScroll: {
+    width: '100%',
+    maxHeight: 240,
+    flexGrow: 0,
+  },
+  filmstrip: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'center',
+    paddingHorizontal: 4,
+    paddingBottom: 4,
+  },
   grid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
@@ -2233,6 +2703,12 @@ const styles = StyleSheet.create({
     overflow: 'visible',
     position: 'relative',
   },
+  tileSpotlight: {
+    paddingVertical: 10,
+    backgroundColor: '#1E1F22',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.06)',
+  },
   tileVideo: {
     paddingHorizontal: 6,
     paddingTop: 6,
@@ -2247,6 +2723,9 @@ const styles = StyleSheet.create({
     position: 'relative',
     minHeight: 120,
   },
+  videoFrameScreen: {
+    backgroundColor: '#0B0C0E',
+  },
   videoMuteBadge: {
     position: 'absolute',
     left: 8,
@@ -2257,6 +2736,19 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: '#ED4245',
+    borderWidth: 2,
+    borderColor: '#2B2D31',
+  },
+  videoScreenBadge: {
+    position: 'absolute',
+    left: 8,
+    top: 8,
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(88, 101, 242, 0.95)',
     borderWidth: 2,
     borderColor: '#2B2D31',
   },
@@ -2678,6 +3170,9 @@ const styles = StyleSheet.create({
   },
   controlBtnMusicOn: {
     backgroundColor: '#157AFE',
+  },
+  controlBtnScreenOn: {
+    backgroundColor: '#5865F2',
   },
   controlBtnHangup: {
     backgroundColor: '#ED4245',
