@@ -41,6 +41,9 @@ export type QuestionnaireDraft = {
   sessionPriceMin: string;
   sessionPriceMax: string;
   playerPaymentFormat: PlayerPaymentFormat | null;
+  playerBudgetKind: SessionPriceKind | null;
+  playerBudgetMin: string;
+  playerBudgetMax: string;
 };
 
 export function roleChoiceToRoles(choice: PlayerRoleChoice): string[] {

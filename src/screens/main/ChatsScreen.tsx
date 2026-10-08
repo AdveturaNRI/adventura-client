@@ -321,6 +321,23 @@ function createStyles(colors: ThemeColors, isRail: boolean, isDark: boolean) {
       borderColor: '#D4AF37',
       zIndex: 3,
     },
+    onlineDot: {
+      position: 'absolute',
+      bottom: 0,
+      width: 12,
+      height: 12,
+      borderRadius: 6,
+      backgroundColor: colors.success,
+      borderWidth: 2,
+      borderColor: colors.background,
+      zIndex: 4,
+    },
+    onlineDotEnd: {
+      right: 0,
+    },
+    onlineDotStart: {
+      left: 0,
+    },
     nameFavorite: {
       color: colors.text,
     },
@@ -1188,6 +1205,15 @@ export default function ChatsScreen({ variant = 'page' }: ChatsScreenProps) {
                   <View style={localStyles.favoriteSeal}>
                     <MaterialCommunityIcons name="crown" size={11} color="#E4C56A" />
                   </View>
+                ) : null}
+                {!group && item.peer?.online ? (
+                  <View
+                    style={[
+                      localStyles.onlineDot,
+                      isFavorite ? localStyles.onlineDotStart : localStyles.onlineDotEnd,
+                    ]}
+                    accessibilityLabel="В сети"
+                  />
                 ) : null}
               </View>
               <View style={localStyles.body}>

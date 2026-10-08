@@ -15,6 +15,9 @@ export type QuestionnairePaymentState = {
   sessionPriceMin: string;
   sessionPriceMax: string;
   playerPaymentFormat: PlayerPaymentFormat | null;
+  playerBudgetKind: SessionPriceKind | null;
+  playerBudgetMin: string;
+  playerBudgetMax: string;
 };
 
 export const EMPTY_QUESTIONNAIRE_PAYMENT: QuestionnairePaymentState = {
@@ -23,6 +26,9 @@ export const EMPTY_QUESTIONNAIRE_PAYMENT: QuestionnairePaymentState = {
   sessionPriceMin: '',
   sessionPriceMax: '',
   playerPaymentFormat: null,
+  playerBudgetKind: null,
+  playerBudgetMin: '',
+  playerBudgetMax: '',
 };
 
 export function isGameCostFormat(value: unknown): value is GameCostFormat {
@@ -63,18 +69,26 @@ export function formatRubAmount(value: number): string {
   return `${value.toLocaleString('ru-RU')} ₽`;
 }
 
-export function getSessionPriceValidationMessage(input: {
-  gameCostFormat: GameCostFormat | null;
-  sessionPriceKind: SessionPriceKind | null;
-  sessionPriceMin: string;
-  sessionPriceMax: string;
-}): string | null {
-  if (input.gameCostFormat !== 'paid' && input.gameCostFormat !== 'both') {
-    return null;
+type PriceValidationInput = {
+  kind: SessionPriceKind | null;
+  min: string;
+  max: string;
+};
+
+export function isPriceFieldsFilled(input: PriceValidationInput): boolean {
+  const min = parseSessionPriceValue(input.min);
+  const max = parseSessionPriceValue(input.max);
+
+  if (input.kind === 'range') {
+    return min != null && max != null;
   }
 
-  const min = parseSessionPriceValue(input.sessionPriceMin);
-  const max = parseSessionPriceValue(input.sessionPriceMax);
+  return min != null;
+}
+
+export function getPriceFieldsValidationMessage(input: PriceValidationInput): string | null {
+  const min = parseSessionPriceValue(input.min);
+  const max = parseSessionPriceValue(input.max);
 
   if (min != null && min < SESSION_PRICE_MIN) {
     return 'Стоимость должна быть больше нуля';
@@ -92,7 +106,7 @@ export function getSessionPriceValidationMessage(input: {
     return 'Стоимость слишком большая';
   }
 
-  if (input.sessionPriceKind === 'range') {
+  if (input.kind === 'range') {
     if ((min != null && max == null) || (min == null && max != null)) {
       return 'Укажите обе границы диапазона';
     }
@@ -105,6 +119,23 @@ export function getSessionPriceValidationMessage(input: {
   return null;
 }
 
+export function getSessionPriceValidationMessage(input: {
+  gameCostFormat: GameCostFormat | null;
+  sessionPriceKind: SessionPriceKind | null;
+  sessionPriceMin: string;
+  sessionPriceMax: string;
+}): string | null {
+  if (input.gameCostFormat !== 'paid' && input.gameCostFormat !== 'both') {
+    return null;
+  }
+
+  return getPriceFieldsValidationMessage({
+    kind: input.sessionPriceKind,
+    min: input.sessionPriceMin,
+    max: input.sessionPriceMax,
+  });
+}
+
 export function isSessionPriceValid(input: {
   gameCostFormat: GameCostFormat | null;
   sessionPriceKind: SessionPriceKind | null;
@@ -112,6 +143,43 @@ export function isSessionPriceValid(input: {
   sessionPriceMax: string;
 }): boolean {
   return getSessionPriceValidationMessage(input) == null;
+}
+
+export function getPlayerBudgetValidationMessage(input: {
+  playerPaymentFormat: PlayerPaymentFormat | null;
+  playerBudgetKind: SessionPriceKind | null;
+  playerBudgetMin: string;
+  playerBudgetMax: string;
+}): string | null {
+  if (input.playerPaymentFormat !== 'free_and_paid') {
+    return null;
+  }
+
+  const fields = {
+    kind: input.playerBudgetKind,
+    min: input.playerBudgetMin,
+    max: input.playerBudgetMax,
+  };
+  const formatError = getPriceFieldsValidationMessage(fields);
+
+  if (formatError) {
+    return formatError;
+  }
+
+  if (!isPriceFieldsFilled(fields)) {
+    return 'Укажите комфортную сумму за игру';
+  }
+
+  return null;
+}
+
+export function isPlayerBudgetValid(input: {
+  playerPaymentFormat: PlayerPaymentFormat | null;
+  playerBudgetKind: SessionPriceKind | null;
+  playerBudgetMin: string;
+  playerBudgetMax: string;
+}): boolean {
+  return getPlayerBudgetValidationMessage(input) == null;
 }
 
 export function formatSessionPriceLabel(input: {
@@ -167,6 +235,26 @@ export function formatMasterGameCostLabel(input: {
   return price ? `Бесплатно и платно — ${price}` : 'Бесплатно и платно';
 }
 
+export function formatPlayerPaymentLabel(input: {
+  format?: PlayerPaymentFormat | null;
+  kind?: SessionPriceKind | null;
+  min?: number | null;
+  max?: number | null;
+}): string | null {
+  if (!isPlayerPaymentFormat(input.format)) {
+    return null;
+  }
+
+  if (input.format === 'free_only') {
+    return playerPaymentFormatLabel(input.format);
+  }
+
+  const price = formatSessionPriceLabel(input);
+  return price
+    ? `Бесплатно и платно — ${price}`
+    : playerPaymentFormatLabel(input.format);
+}
+
 export function hasMasterRole(roles: string[]): boolean {
   return roles.includes('Мастер');
 }
@@ -219,6 +307,38 @@ export function shouldShowPlayerPayment(
   return hasPlayerRole(roles) && isPlayerPaymentFormat(format);
 }
 
+function toStoredPriceTriple(input: {
+  kind: SessionPriceKind | null;
+  min: string;
+  max: string;
+}): {
+  kind: SessionPriceKind | null;
+  min: number | null;
+  max: number | null;
+} {
+  const min = parseSessionPriceValue(input.min);
+  const max = parseSessionPriceValue(input.max);
+  const kind = input.kind;
+
+  if (kind === 'range' && min != null && max != null) {
+    return { kind: 'range', min, max };
+  }
+
+  if (kind === 'from' && min != null) {
+    return { kind: 'from', min, max: null };
+  }
+
+  if (min != null) {
+    return {
+      kind: kind === 'from' ? 'from' : 'fixed',
+      min,
+      max: null,
+    };
+  }
+
+  return { kind: null, min: null, max: null };
+}
+
 export function toStoredSessionPrice(input: {
   gameCostFormat: GameCostFormat | null;
   sessionPriceKind: SessionPriceKind | null;
@@ -237,37 +357,46 @@ export function toStoredSessionPrice(input: {
     };
   }
 
-  const min = parseSessionPriceValue(input.sessionPriceMin);
-  const max = parseSessionPriceValue(input.sessionPriceMax);
-  const kind = input.sessionPriceKind;
-
-  if (kind === 'range' && min != null && max != null) {
-    return {
-      sessionPriceKind: 'range',
-      sessionPriceMin: min,
-      sessionPriceMax: max,
-    };
-  }
-
-  if (kind === 'from' && min != null) {
-    return {
-      sessionPriceKind: 'from',
-      sessionPriceMin: min,
-      sessionPriceMax: null,
-    };
-  }
-
-  if (min != null) {
-    return {
-      sessionPriceKind: kind === 'from' ? 'from' : 'fixed',
-      sessionPriceMin: min,
-      sessionPriceMax: null,
-    };
-  }
+  const stored = toStoredPriceTriple({
+    kind: input.sessionPriceKind,
+    min: input.sessionPriceMin,
+    max: input.sessionPriceMax,
+  });
 
   return {
-    sessionPriceKind: null,
-    sessionPriceMin: null,
-    sessionPriceMax: null,
+    sessionPriceKind: stored.kind,
+    sessionPriceMin: stored.min,
+    sessionPriceMax: stored.max,
+  };
+}
+
+export function toStoredPlayerBudget(input: {
+  playerPaymentFormat: PlayerPaymentFormat | null;
+  playerBudgetKind: SessionPriceKind | null;
+  playerBudgetMin: string;
+  playerBudgetMax: string;
+}): {
+  playerBudgetKind: SessionPriceKind | null;
+  playerBudgetMin: number | null;
+  playerBudgetMax: number | null;
+} {
+  if (input.playerPaymentFormat !== 'free_and_paid') {
+    return {
+      playerBudgetKind: null,
+      playerBudgetMin: null,
+      playerBudgetMax: null,
+    };
+  }
+
+  const stored = toStoredPriceTriple({
+    kind: input.playerBudgetKind,
+    min: input.playerBudgetMin,
+    max: input.playerBudgetMax,
+  });
+
+  return {
+    playerBudgetKind: stored.kind,
+    playerBudgetMin: stored.min,
+    playerBudgetMax: stored.max,
   };
 }

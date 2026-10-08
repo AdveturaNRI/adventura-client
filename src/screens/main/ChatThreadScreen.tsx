@@ -118,6 +118,7 @@ import {
 } from '@/utils/dice-animations-storage';
 import { setFocusedChatConversation } from '@/utils/chat-alerts';
 import { localizeErrorMessage } from '@/utils/localizeError';
+import { formatPresenceLabel } from '@/utils/presence-label';
 import { stableAvatarUrl } from '@/utils/stable-avatar-url';
 import {
   appendCachedThreadMessage,
@@ -484,72 +485,15 @@ function withStablePeerAvatar(
 }
 
 function formatLastSeen(online: boolean, lastSeenAt: string | null) {
-  if (online) {
-    return 'в сети';
-  }
-
-  if (!lastSeenAt) {
+  const label = formatPresenceLabel(online, lastSeenAt);
+  if (!label) {
     return 'давно';
   }
-
-  const date = new Date(lastSeenAt);
-  if (Number.isNaN(date.getTime())) {
-    return 'давно';
+  // В шапке чата короче: без ведущего «был».
+  if (label === 'в сети' || label === 'давно не в сети') {
+    return label === 'давно не в сети' ? 'давно' : label;
   }
-
-  const now = Date.now();
-  const diffMs = Math.max(0, now - date.getTime());
-  const diffMin = Math.floor(diffMs / 60_000);
-  const diffHours = Math.floor(diffMs / 3_600_000);
-
-  if (diffMin < 1) {
-    return 'только что';
-  }
-
-  if (diffMin < 60) {
-    return `${diffMin} мин. назад`;
-  }
-
-  const time = date.toLocaleTimeString('ru-RU', {
-    hour: '2-digit',
-    minute: '2-digit',
-  });
-
-  const nowDate = new Date(now);
-  const startOfToday = new Date(nowDate.getFullYear(), nowDate.getMonth(), nowDate.getDate());
-  const startOfThatDay = new Date(date.getFullYear(), date.getMonth(), date.getDate());
-  const dayDiff = Math.round((startOfToday.getTime() - startOfThatDay.getTime()) / 86_400_000);
-
-  if (dayDiff === 0) {
-    if (diffHours < 4) {
-      return `${diffHours} ч. назад`;
-    }
-    return `сегодня в ${time}`;
-  }
-
-  if (dayDiff === 1) {
-    return `вчера в ${time}`;
-  }
-
-  if (dayDiff < 7) {
-    const weekday = date.toLocaleDateString('ru-RU', { weekday: 'short' });
-    return `${weekday} в ${time}`;
-  }
-
-  if (date.getFullYear() === nowDate.getFullYear()) {
-    return date.toLocaleDateString('ru-RU', {
-      day: 'numeric',
-      month: 'short',
-      hour: '2-digit',
-      minute: '2-digit',
-    });
-  }
-
-  return date.toLocaleDateString('ru-RU', {
-    day: 'numeric',
-    month: 'short',
-    year: 'numeric',
-  });
+  return label.replace(/^был\s+/, '');
 }
 
 function createStyles(colors: ThemeColors, bottomPad: number, isDark: boolean) {

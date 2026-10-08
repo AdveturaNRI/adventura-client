@@ -7,8 +7,8 @@ import type { QuestionnaireDraft } from '@/screens/questionnaire/types';
 import { formatAvailability } from '@/screens/questionnaire/availability';
 import {
   formatMasterGameCostLabel,
+  formatPlayerPaymentLabel,
   parseSessionPriceValue,
-  playerPaymentFormatLabel,
 } from '@/utils/questionnaire-payment';
 import { formatTimezoneLabel } from '@/utils/timezones';
 
@@ -44,11 +44,13 @@ function getRoleSummaryLines(draft: QuestionnaireDraft): string[] {
   }
 
   if (draft.role === 'player' || draft.role === 'both') {
-    lines.push(
-      draft.playerPaymentFormat
-        ? playerPaymentFormatLabel(draft.playerPaymentFormat)
-        : `Оплата: ${ROLES_STEP.unspecifiedLabel}`,
-    );
+    const paymentLabel = formatPlayerPaymentLabel({
+      format: draft.playerPaymentFormat,
+      kind: draft.playerBudgetKind,
+      min: parseSessionPriceValue(draft.playerBudgetMin),
+      max: parseSessionPriceValue(draft.playerBudgetMax),
+    });
+    lines.push(paymentLabel ?? `Оплата: ${ROLES_STEP.unspecifiedLabel}`);
   }
 
   return lines;

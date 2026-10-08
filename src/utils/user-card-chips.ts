@@ -49,6 +49,9 @@ export type UserCardPlayInfoInput = {
   sessionPriceMin?: number | null;
   sessionPriceMax?: number | null;
   playerPaymentFormat?: PlayerPaymentFormat | null;
+  playerBudgetKind?: SessionPriceKind | null;
+  playerBudgetMin?: number | null;
+  playerBudgetMax?: number | null;
   roles?: string[];
 };
 
@@ -283,6 +286,9 @@ export function buildGameCostChips(input: {
 export function buildPlayerPaymentChips(input: {
   roles?: string[];
   format?: PlayerPaymentFormat | null;
+  kind?: SessionPriceKind | null;
+  min?: number | null;
+  max?: number | null;
 }): UserCardChip[] {
   if (!shouldShowPlayerPayment(input.roles ?? [], input.format)) {
     return [];
@@ -290,12 +296,25 @@ export function buildPlayerPaymentChips(input: {
 
   const format = input.format!;
 
+  if (format === 'free_only') {
+    return [
+      {
+        key: 'player-payment-free_only',
+        label: playerPaymentFormatChipLabel(format),
+        tone: 'success',
+        icon: 'gift-outline',
+      },
+    ];
+  }
+
+  const price = formatSessionPriceLabel(input);
+
   return [
     {
-      key: `player-payment-${format}`,
-      label: playerPaymentFormatChipLabel(format),
-      tone: format === 'free_only' ? 'success' : 'paid',
-      icon: format === 'free_only' ? 'gift-outline' : 'wallet-outline',
+      key: 'player-payment-paid',
+      label: price ?? 'Платно',
+      tone: 'paid',
+      icon: 'wallet-outline',
     },
   ];
 }

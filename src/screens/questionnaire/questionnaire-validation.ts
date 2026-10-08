@@ -1,6 +1,6 @@
 import type { QuestionnaireDraft } from '@/screens/questionnaire/types';
 import { QUESTIONNAIRE_STEP_INDEX } from '@/screens/questionnaire/questionnaire.config';
-import { isSessionPriceValid } from '@/utils/questionnaire-payment';
+import { isPlayerBudgetValid, isSessionPriceValid } from '@/utils/questionnaire-payment';
 
 export const QUESTIONNAIRE_AGE_MIN = 1;
 export const QUESTIONNAIRE_AGE_MAX = 99;
@@ -38,6 +38,9 @@ export function isRolesStepValid(
     | 'sessionPriceMin'
     | 'sessionPriceMax'
     | 'playerPaymentFormat'
+    | 'playerBudgetKind'
+    | 'playerBudgetMin'
+    | 'playerBudgetMax'
   >,
 ): boolean {
   if (value.role == null) {
@@ -59,6 +62,10 @@ export function isRolesStepValid(
     return false;
   }
 
+  if (needsPlayerPayment && !isPlayerBudgetValid(value)) {
+    return false;
+  }
+
   return true;
 }
 
@@ -71,6 +78,9 @@ export function getRolesStepValidationMessage(
     | 'sessionPriceMin'
     | 'sessionPriceMax'
     | 'playerPaymentFormat'
+    | 'playerBudgetKind'
+    | 'playerBudgetMin'
+    | 'playerBudgetMax'
   >,
 ): string | null {
   const missing = getMissingRequiredLabelsForStep(QUESTIONNAIRE_STEP_INDEX.roles, value as QuestionnaireDraft);
@@ -82,6 +92,15 @@ export function getRolesStepValidationMessage(
     ) {
       return SESSION_PRICE_STEP_VALIDATION_MESSAGE;
     }
+
+    if (
+      value.role != null &&
+      (value.role === 'player' || value.role === 'both') &&
+      !isPlayerBudgetValid(value)
+    ) {
+      return PLAYER_BUDGET_STEP_VALIDATION_MESSAGE;
+    }
+
     return null;
   }
 
@@ -113,6 +132,14 @@ export function getMissingRequiredLabelsForStep(
 
     if (needsPlayerPayment && draft.playerPaymentFormat == null) {
       missing.push('Предпочтения по оплате игр');
+    }
+
+    if (
+      needsPlayerPayment &&
+      draft.playerPaymentFormat === 'free_and_paid' &&
+      !isPlayerBudgetValid(draft)
+    ) {
+      missing.push('Сумма за игру');
     }
 
     return missing;
@@ -155,6 +182,8 @@ export const PLAYER_PAYMENT_STEP_VALIDATION_MESSAGE =
   'Выберите предпочтения по оплате игр';
 export const SESSION_PRICE_STEP_VALIDATION_MESSAGE =
   'Проверьте стоимость сессии: только положительные суммы, в диапазоне минимум не больше максимума';
+export const PLAYER_BUDGET_STEP_VALIDATION_MESSAGE =
+  'Укажите комфортную сумму за игру';
 
 export function isProfileStepValid(
   value: Pick<QuestionnaireDraft, 'status' | 'age'>,

@@ -367,11 +367,17 @@ function createStyles(colors: ThemeColors) {
       width: 24,
       height: 18,
     },
+    railPinnedTop: {
+      alignItems: 'center',
+      flexShrink: 0,
+      gap: 6,
+      paddingBottom: 2,
+      zIndex: 2,
+    },
     railDivider: {
       width: 32,
       height: StyleSheet.hairlineWidth,
       backgroundColor: 'rgba(132, 185, 255, 0.35)',
-      marginVertical: 6,
     },
     railTool: {
       width: 42,
@@ -1283,6 +1289,21 @@ export default function DiceScreen() {
     </Pressable>
   );
 
+  const clearToolCell = compact ? (
+    <View style={[styles.dieSection, styles.dieSectionCompact]}>
+      {clearTool}
+      <Text style={[styles.dieLabel, styles.dieLabelMuted]} numberOfLines={1}>
+        сброс
+      </Text>
+      <View style={styles.dieMinusSpacerCompact} />
+    </View>
+  ) : (
+    <View style={styles.railPinnedTop}>
+      {clearTool}
+      <View style={styles.railDivider} />
+    </View>
+  );
+
   const dieRail = (
     <View
       style={[
@@ -1294,24 +1315,19 @@ export default function DiceScreen() {
       ]}>
       {compact ? (
         <View style={[styles.railScrollContent, styles.railScrollContentCompact]}>
+          {clearToolCell}
           {dieCells}
-          <View style={[styles.dieSection, styles.dieSectionCompact]}>
-            {clearTool}
-            <Text style={[styles.dieLabel, styles.dieLabelMuted]} numberOfLines={1}>
-              сброс
-            </Text>
-            <View style={styles.dieMinusSpacerCompact} />
-          </View>
         </View>
       ) : (
-        <ScrollView
-          showsVerticalScrollIndicator={false}
-          contentContainerStyle={styles.railScrollContent}
-          style={styles.railScroll}>
-          {dieCells}
-          <View style={styles.railDivider} />
-          {clearTool}
-        </ScrollView>
+        <>
+          {clearToolCell}
+          <ScrollView
+            showsVerticalScrollIndicator={false}
+            contentContainerStyle={styles.railScrollContent}
+            style={styles.railScroll}>
+            {dieCells}
+          </ScrollView>
+        </>
       )}
     </View>
   );

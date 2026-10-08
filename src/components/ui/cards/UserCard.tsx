@@ -76,6 +76,9 @@ export type UserCardProps = {
   swipe?: UserCardSwipeConfig;
   badges?: RewardBadgeType[];
   auraId?: QuestionnaireAuraId | null;
+  /** «в сети» / «был 5 мин. назад» — лента Странники */
+  presenceLabel?: string | null;
+  presenceOnline?: boolean;
 };
 
 const USER_CARD_PHOTO_ASPECT_RATIO = 0.9;
@@ -306,6 +309,37 @@ function createStyles(
       color: colors.textSecondary,
       lineHeight: (isDeckStacked ? FontSize.label : cfg.taglineSize) * 1.4,
     },
+    presenceChip: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 5,
+      borderRadius: Radius.pill,
+      borderWidth: 1,
+      paddingHorizontal: cfg.chipPaddingH,
+      paddingVertical: cfg.chipPaddingV,
+      maxWidth: '100%',
+      minHeight: cfg.badgeMinHeight,
+    },
+    presenceChipOnline: {
+      borderColor: 'rgba(52, 199, 89, 0.4)',
+      backgroundColor: 'rgba(52, 199, 89, 0.14)',
+    },
+    presenceChipAway: {
+      borderColor: 'rgba(21, 122, 254, 0.35)',
+      backgroundColor: 'rgba(21, 122, 254, 0.12)',
+    },
+    presenceChipLabel: {
+      flexShrink: 1,
+      fontSize: cfg.captionSize,
+      lineHeight: cfg.captionSize * 1.35,
+      fontWeight: '700',
+    },
+    presenceChipLabelOnline: {
+      color: colors.success,
+    },
+    presenceChipLabelAway: {
+      color: colors.primary,
+    },
     blockedMark: {
       alignSelf: 'flex-start',
       marginTop: 2,
@@ -511,6 +545,8 @@ export function UserCard({
   swipe,
   badges,
   auraId,
+  presenceLabel = null,
+  presenceOnline = false,
 }: UserCardProps) {
   const colors = useTheme();
   const styles = useThemedStyles((themeColors) =>
@@ -575,6 +611,9 @@ export function UserCard({
     const playerPaymentChips = buildPlayerPaymentChips({
       roles: playInfo.roles ?? roles,
       format: playInfo.playerPaymentFormat,
+      kind: playInfo.playerBudgetKind,
+      min: playInfo.playerBudgetMin,
+      max: playInfo.playerBudgetMax,
     });
 
     return [
@@ -654,6 +693,27 @@ export function UserCard({
             style={styles.roleBadge}
           />
         ))}
+        {presenceLabel ? (
+          <View
+            style={[
+              styles.presenceChip,
+              presenceOnline ? styles.presenceChipOnline : styles.presenceChipAway,
+            ]}>
+            <Ionicons
+              name={presenceOnline ? 'radio-button-on' : 'time-outline'}
+              size={iconSize - 2}
+              color={presenceOnline ? colors.success : colors.primary}
+            />
+            <Text
+              style={[
+                styles.presenceChipLabel,
+                presenceOnline ? styles.presenceChipLabelOnline : styles.presenceChipLabelAway,
+              ]}
+              numberOfLines={1}>
+              {presenceLabel}
+            </Text>
+          </View>
+        ) : null}
       </View>
 
       {infoRows.length > 0 ? (

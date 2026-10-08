@@ -29,6 +29,21 @@ function ensureMapStyles() {
   document.head.appendChild(style);
 }
 
+function containerHasSize(el: HTMLElement | null | undefined): boolean {
+  if (!el) {
+    return false;
+  }
+  const rect = el.getBoundingClientRect();
+  return rect.width >= 1 && rect.height >= 1;
+}
+
+function mapHasSize(map: LeafletMap | null | undefined): boolean {
+  if (!map) {
+    return false;
+  }
+  return containerHasSize(map.getContainer());
+}
+
 const MapWrapper = memo(
   function MapWrapper({ containerId }: { containerId: string }) {
     return createElement('div', {
@@ -90,6 +105,11 @@ export function ClubsMap({
   const onViewChangeRef = useRef(onViewChange);
   const skipAutoFitRef = useRef(lockCamera);
   const lockCameraRef = useRef(lockCamera);
+  const pendingFocusRef = useRef<{ lat: number; lng: number; zoom: number } | null>(null);
+  const lastGoodCenterRef = useRef<[number, number]>(toLatLng(center?.[0], center?.[1]));
+  const lastGoodZoomRef = useRef(
+    Number.isFinite(Number(zoom)) ? Number(zoom) : MAP_DEFAULT_ZOOM,
+  );
   onMarkerPressRef.current = onMarkerPress;
   onViewChangeRef.current = onViewChange;
   lockCameraRef.current = lockCamera;
@@ -97,6 +117,16 @@ export function ClubsMap({
   useEffect(() => {
     setMounted(true);
   }, []);
+
+  useEffect(() => {
+    lastGoodCenterRef.current = toLatLng(center?.[0], center?.[1]);
+  }, [center]);
+
+  useEffect(() => {
+    if (Number.isFinite(Number(zoom))) {
+      lastGoodZoomRef.current = Number(zoom);
+    }
+  }, [zoom]);
 
   useEffect(() => {
     if (!mounted) {
@@ -140,6 +170,8 @@ export function ClubsMap({
 
         const safeCenter = toLatLng(center?.[0], center?.[1]);
         const safeZoom = Number.isFinite(Number(zoom)) ? Number(zoom) : MAP_DEFAULT_ZOOM;
+        lastGoodCenterRef.current = safeCenter;
+        lastGoodZoomRef.current = safeZoom;
 
         const instance = L.map(el, {
           center: safeCenter,
@@ -158,12 +190,17 @@ export function ClubsMap({
         markersLayerRef.current = L.layerGroup().addTo(instance);
 
         const emitView = () => {
+          if (!mapHasSize(instance)) {
+            return;
+          }
           try {
             const c = instance.getCenter();
             const b = instance.getBounds();
             if (!isFiniteLatLng(c.lat, c.lng)) {
               return;
             }
+            lastGoodCenterRef.current = [c.lat, c.lng];
+            lastGoodZoomRef.current = instance.getZoom();
             onViewChangeRef.current?.({
               center: [c.lat, c.lng],
               zoom: instance.getZoom(),
@@ -175,9 +212,35 @@ export function ClubsMap({
               },
             });
           } catch {
+            // Leaflet Invalid LatLng при нулевом размере контейнера
+          }
+        };
+
+        const refreshAfterResize = () => {
+          if (cancelled || !mapRef.current) {
+            return;
+          }
+          if (!containerHasSize(el)) {
+            return;
+          }
+          try {
+            instance.invalidateSize({ animate: false, pan: false });
+            const pending = pendingFocusRef.current;
+            if (pending && isFiniteLatLng(pending.lat, pending.lng)) {
+              pendingFocusRef.current = null;
+              skipAutoFitRef.current = true;
+              instance.setView([pending.lat, pending.lng], pending.zoom, { animate: false });
+            } else if (isFiniteLatLng(lastGoodCenterRef.current[0], lastGoodCenterRef.current[1])) {
+              instance.setView(lastGoodCenterRef.current, lastGoodZoomRef.current, {
+                animate: false,
+              });
+            }
+            emitView();
+          } catch {
             // ignore
           }
         };
+
         instance.on('moveend', emitView);
         instance.on('zoomend', emitView);
 
@@ -190,15 +253,14 @@ export function ClubsMap({
 
         if (typeof ResizeObserver !== 'undefined') {
           resizeObserver = new ResizeObserver(() => {
-            instance.invalidateSize({ animate: false });
+            refreshAfterResize();
           });
           resizeObserver.observe(el);
         }
 
         requestAnimationFrame(() => {
           if (!cancelled) {
-            instance.invalidateSize();
-            emitView();
+            refreshAfterResize();
           }
         });
         setMapReady(true);
@@ -274,6 +336,10 @@ export function ClubsMap({
           return;
         }
 
+        if (!mapHasSize(map)) {
+          return;
+        }
+
         try {
           if (validMarkers.length === 1) {
             const [lat, lng] = toLatLng(validMarkers[0].lat, validMarkers[0].lng);
@@ -284,7 +350,9 @@ export function ClubsMap({
             const bounds = L.latLngBounds(
               validMarkers.map((m) => toLatLng(m.lat, m.lng)),
             );
-            map.fitBounds(bounds.pad(0.18));
+            if (bounds.isValid()) {
+              map.fitBounds(bounds.pad(0.18));
+            }
           }
         } catch {
           // ignore camera fit errors
@@ -306,13 +374,25 @@ export function ClubsMap({
 
     const [lat, lng] = toLatLng(focusTarget.lat, focusTarget.lng);
     const nextZoom = Number(focusTarget.zoom ?? 12);
-    const zoom = Number.isFinite(nextZoom) ? nextZoom : 12;
+    const zoomLevel = Number.isFinite(nextZoom) ? nextZoom : 12;
 
     skipAutoFitRef.current = true;
+    lastGoodCenterRef.current = [lat, lng];
+    lastGoodZoomRef.current = zoomLevel;
+
+    if (!mapHasSize(map)) {
+      pendingFocusRef.current = { lat, lng, zoom: zoomLevel };
+      return;
+    }
+
     try {
-      map.flyTo([lat, lng], zoom, { duration: 0.75 });
+      map.flyTo([lat, lng], zoomLevel, { duration: 0.75 });
     } catch {
-      // Leaflet Invalid LatLng — не роняем экран
+      try {
+        map.setView([lat, lng], zoomLevel, { animate: false });
+      } catch {
+        // Leaflet Invalid LatLng — не роняем экран
+      }
     }
   }, [focusTarget, mapReady]);
 

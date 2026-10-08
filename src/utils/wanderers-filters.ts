@@ -14,8 +14,11 @@ import {
   isGameCostFormat,
   isPlayerPaymentFormat,
   playerPaymentFormatLabel,
+  SESSION_PRICE_MAX,
+  SESSION_PRICE_MIN,
   type GameCostFormat,
   type PlayerPaymentFormat,
+  type SessionPriceKind,
 } from '@/utils/questionnaire-payment';
 
 export type WanderersPlayMode = 'online' | 'offline';
@@ -36,6 +39,10 @@ export type WanderersFilters = {
   gameCostFormat: GameCostFormat | null;
   /** null = любой, иначе точное совпадение с анкетой */
   playerPaymentFormat: PlayerPaymentFormat | null;
+  /** Бюджет игрока: фильтр «от» (только при free_and_paid) */
+  playerBudgetMin: number | null;
+  /** Бюджет игрока: фильтр «до» (только при free_and_paid) */
+  playerBudgetMax: number | null;
 };
 
 export type WanderersFilterOptions = {
@@ -57,6 +64,8 @@ export const EMPTY_WANDERERS_FILTERS: WanderersFilters = {
   ageMax: null,
   gameCostFormat: null,
   playerPaymentFormat: null,
+  playerBudgetMin: null,
+  playerBudgetMax: null,
 };
 
 const WANDERERS_FILTERS_KEY = '@adventura/wanderers-filters';
@@ -119,6 +128,12 @@ export function hasActiveAgeFilter(filters: Pick<WanderersFilters, 'ageMin' | 'a
   return filters.ageMin != null || filters.ageMax != null;
 }
 
+export function hasActivePlayerBudgetFilter(
+  filters: Pick<WanderersFilters, 'playerBudgetMin' | 'playerBudgetMax'>,
+): boolean {
+  return filters.playerBudgetMin != null || filters.playerBudgetMax != null;
+}
+
 export function formatWanderersAgeFilter(
   filters: Pick<WanderersFilters, 'ageMin' | 'ageMax'>,
 ): string {
@@ -134,6 +149,28 @@ export function formatWanderersAgeFilter(
 
   if (ageMax != null) {
     return `до ${ageMax}`;
+  }
+
+  return '';
+}
+
+export function formatWanderersPlayerBudgetFilter(
+  filters: Pick<WanderersFilters, 'playerBudgetMin' | 'playerBudgetMax'>,
+): string {
+  const { playerBudgetMin, playerBudgetMax } = filters;
+
+  if (playerBudgetMin != null && playerBudgetMax != null) {
+    return playerBudgetMin === playerBudgetMax
+      ? `${playerBudgetMin.toLocaleString('ru-RU')} ₽`
+      : `${playerBudgetMin.toLocaleString('ru-RU')}–${playerBudgetMax.toLocaleString('ru-RU')} ₽`;
+  }
+
+  if (playerBudgetMin != null) {
+    return `от ${playerBudgetMin.toLocaleString('ru-RU')} ₽`;
+  }
+
+  if (playerBudgetMax != null) {
+    return `до ${playerBudgetMax.toLocaleString('ru-RU')} ₽`;
   }
 
   return '';
@@ -160,7 +197,9 @@ export function isWanderersFilters(value: unknown): value is WanderersFilters {
       isGameCostFormat(candidate.gameCostFormat)) &&
     (candidate.playerPaymentFormat === undefined ||
       candidate.playerPaymentFormat === null ||
-      isPlayerPaymentFormat(candidate.playerPaymentFormat))
+      isPlayerPaymentFormat(candidate.playerPaymentFormat)) &&
+    isNullableInt(candidate.playerBudgetMin ?? null) &&
+    isNullableInt(candidate.playerBudgetMax ?? null)
   );
 }
 
@@ -174,7 +213,8 @@ export function countActiveWanderersFilters(filters: WanderersFilters): number {
     (hasActiveAvailability(filters.availability) ? 1 : 0) +
     (hasActiveAgeFilter(filters) ? 1 : 0) +
     (filters.gameCostFormat ? 1 : 0) +
-    (filters.playerPaymentFormat ? 1 : 0)
+    (filters.playerPaymentFormat ? 1 : 0) +
+    (hasActivePlayerBudgetFilter(filters) ? 1 : 0)
   );
 }
 
@@ -338,6 +378,60 @@ function matchesAgeFilter(
   return true;
 }
 
+function getPlayerBudgetBounds(item: WandererCardItem): { min: number; max: number } | null {
+  if (item.playerPaymentFormat !== 'free_and_paid') {
+    return null;
+  }
+
+  const kind = item.playerBudgetKind as SessionPriceKind | null | undefined;
+  const min =
+    typeof item.playerBudgetMin === 'number' && Number.isFinite(item.playerBudgetMin)
+      ? item.playerBudgetMin
+      : null;
+  const max =
+    typeof item.playerBudgetMax === 'number' && Number.isFinite(item.playerBudgetMax)
+      ? item.playerBudgetMax
+      : null;
+
+  if (kind === 'range' && min != null && max != null) {
+    return { min, max };
+  }
+
+  if (kind === 'from' && min != null) {
+    return { min, max: SESSION_PRICE_MAX };
+  }
+
+  if (min != null) {
+    return { min, max: min };
+  }
+
+  if (max != null) {
+    return { min: max, max };
+  }
+
+  return null;
+}
+
+function matchesPlayerBudgetFilter(
+  item: WandererCardItem,
+  filters: Pick<WanderersFilters, 'playerBudgetMin' | 'playerBudgetMax'>,
+): boolean {
+  if (!hasActivePlayerBudgetFilter(filters)) {
+    return true;
+  }
+
+  const bounds = getPlayerBudgetBounds(item);
+
+  if (!bounds) {
+    return false;
+  }
+
+  const filterMin = filters.playerBudgetMin ?? SESSION_PRICE_MIN;
+  const filterMax = filters.playerBudgetMax ?? SESSION_PRICE_MAX;
+
+  return bounds.min <= filterMax && bounds.max >= filterMin;
+}
+
 export function applyWanderersFilters(
   items: WandererCardItem[],
   filters: WanderersFilters,
@@ -393,6 +487,10 @@ export function applyWanderersFilters(
       return false;
     }
 
+    if (!matchesPlayerBudgetFilter(item, filters)) {
+      return false;
+    }
+
     return true;
   });
 }
@@ -436,6 +534,8 @@ export async function loadWanderersFilters(): Promise<WanderersFilters> {
       playerPaymentFormat: isPlayerPaymentFormat(parsed.playerPaymentFormat)
         ? parsed.playerPaymentFormat
         : null,
+      playerBudgetMin: typeof parsed.playerBudgetMin === 'number' ? parsed.playerBudgetMin : null,
+      playerBudgetMax: typeof parsed.playerBudgetMax === 'number' ? parsed.playerBudgetMax : null,
       availability: stripAvailabilityTimes(parsed.availability),
     };
   } catch {

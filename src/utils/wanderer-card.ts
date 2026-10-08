@@ -2,6 +2,7 @@ import type { UserCardProps } from '@/components/ui/cards/UserCard';
 import { sanitizeBadges } from '@/data/rewards/catalog';
 import { pickProfileCardUrl } from '@/services/profile/profileApi';
 import type { WandererCardItem } from '@/services/profile/wanderersApi';
+import { formatPresenceLabel } from '@/utils/presence-label';
 import { DEFAULT_TIMEZONE } from '@/utils/timezones';
 import { formatUserCardVisibility } from '@/utils/user-card-format';
 
@@ -43,6 +44,9 @@ export function wandererCardToUserCardProps(item: WandererCardItem): UserCardPro
       sessionPriceMin: item.sessionPriceMin ?? null,
       sessionPriceMax: item.sessionPriceMax ?? null,
       playerPaymentFormat: item.playerPaymentFormat ?? null,
+      playerBudgetKind: item.playerBudgetKind ?? null,
+      playerBudgetMin: item.playerBudgetMin ?? null,
+      playerBudgetMax: item.playerBudgetMax ?? null,
     },
     bio,
     visibility: visibility.label,
@@ -53,5 +57,9 @@ export function wandererCardToUserCardProps(item: WandererCardItem): UserCardPro
       item.questionnaireAuraId === undefined
         ? undefined
         : ((item.questionnaireAuraId as UserCardProps['auraId']) ?? 'none'),
+    presenceLabel: formatPresenceLabel(Boolean(item.online), item.lastSeenAt ?? null, {
+      hideAfterDays: 3,
+    }),
+    presenceOnline: Boolean(item.online),
   };
 }

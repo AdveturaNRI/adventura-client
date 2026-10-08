@@ -16,6 +16,7 @@ import { useQuestionnaireScreenStyles } from '@/screens/questionnaire/questionna
 import { useQuestionnaireFieldFocus } from '@/hooks/use-questionnaire-field-focus';
 import { useThemedStyles } from '@/hooks/use-themed-styles';
 import {
+  isPlayerBudgetValid,
   isSessionPriceValid,
   type GameCostFormat,
   type PlayerPaymentFormat,
@@ -30,6 +31,9 @@ type RolesStepValue = Pick<
   | 'sessionPriceMin'
   | 'sessionPriceMax'
   | 'playerPaymentFormat'
+  | 'playerBudgetKind'
+  | 'playerBudgetMin'
+  | 'playerBudgetMax'
 >;
 
 export type RolesFocusSection = 'roles' | 'gameCost' | 'playerPayment';
@@ -87,14 +91,19 @@ export function RolesStep({
   const pendingRoleScrollRef = useRef(false);
   const pendingSessionPriceScrollRef = useRef(false);
   const pendingPlayerPaymentScrollRef = useRef(false);
+  const pendingPlayerBudgetScrollRef = useRef(false);
   const sessionPriceRef = useRef<View>(null);
+  const playerBudgetRef = useRef<View>(null);
   const showMasterCost = value.role === 'master' || value.role === 'both';
   const showPlayerPayment = value.role === 'player' || value.role === 'both';
   const showSessionPrice =
     showMasterCost && (value.gameCostFormat === 'paid' || value.gameCostFormat === 'both');
+  const showPlayerBudget =
+    showPlayerPayment && value.playerPaymentFormat === 'free_and_paid';
   const gameCostMissing = showMasterCost && value.gameCostFormat == null;
   const playerPaymentMissing = showPlayerPayment && value.playerPaymentFormat == null;
   const sessionPriceInvalid = showSessionPrice && !isSessionPriceValid(value);
+  const playerBudgetInvalid = showPlayerBudget && !isPlayerBudgetValid(value);
   const roleMissing = value.role == null;
 
   const patch = (next: Partial<RolesStepValue>) => {
@@ -139,7 +148,21 @@ export function RolesStep({
   };
 
   const handlePlayerPaymentChange = (format: PlayerPaymentFormat) => {
-    patch({ playerPaymentFormat: format });
+    if (format === 'free_only') {
+      patch({
+        playerPaymentFormat: format,
+        playerBudgetKind: null,
+        playerBudgetMin: '',
+        playerBudgetMax: '',
+      });
+      return;
+    }
+
+    pendingPlayerBudgetScrollRef.current = true;
+    patch({
+      playerPaymentFormat: format,
+      playerBudgetKind: value.playerBudgetKind ?? 'fixed',
+    });
   };
 
   useQuestionnaireFieldFocus({
@@ -186,10 +209,15 @@ export function RolesStep({
         return scrollToView(sessionPriceRef.current);
       }
 
+      if (playerBudgetInvalid) {
+        return scrollToView(playerBudgetRef.current);
+      }
+
       return false;
     });
   }, [
     gameCostMissing,
+    playerBudgetInvalid,
     playerPaymentMissing,
     scrollToView,
     sessionPriceInvalid,
@@ -264,6 +292,26 @@ export function RolesStep({
       return true;
     });
   }, [showPlayerPayment, scrollToView, value.gameCostFormat]);
+
+  useEffect(() => {
+    if (!pendingPlayerBudgetScrollRef.current || !showPlayerBudget) {
+      return;
+    }
+
+    return scheduleScrollAttempts(() => {
+      if (!pendingPlayerBudgetScrollRef.current) {
+        return true;
+      }
+
+      const target = playerBudgetRef.current;
+      if (!target || !scrollToView(target)) {
+        return false;
+      }
+
+      pendingPlayerBudgetScrollRef.current = false;
+      return true;
+    });
+  }, [showPlayerBudget, scrollToView, value.playerPaymentFormat]);
 
   return (
     <View style={styles.stepBody}>
@@ -346,7 +394,9 @@ export function RolesStep({
           collapsable={false}
           style={[
             localStyles.panel,
-            showValidationError && playerPaymentMissing ? localStyles.panelError : null,
+            showValidationError && (playerPaymentMissing || playerBudgetInvalid)
+              ? localStyles.panelError
+              : null,
           ]}>
           {showValidationError && playerPaymentMissing ? (
             <QuestionnaireRequiredCallout />
@@ -363,6 +413,27 @@ export function RolesStep({
               />
             ))}
           </View>
+          {showPlayerBudget ? (
+            <View ref={playerBudgetRef} collapsable={false}>
+              <SessionPriceField
+                kind={value.playerBudgetKind}
+                min={value.playerBudgetMin}
+                max={value.playerBudgetMax}
+                title={ROLES_STEP.playerBudgetTitle}
+                hint=""
+                required
+                showRequiredError={showValidationError && playerBudgetInvalid}
+                requiredMessage="Укажите комфортную сумму за игру"
+                onChange={(price) =>
+                  patch({
+                    playerBudgetKind: price.kind,
+                    playerBudgetMin: price.min,
+                    playerBudgetMax: price.max,
+                  })
+                }
+              />
+            </View>
+          ) : null}
         </View>
       ) : null}
     </View>

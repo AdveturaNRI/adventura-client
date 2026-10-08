@@ -773,6 +773,9 @@ export default function QuestionnaireScreen() {
                       sessionPriceMin: draft.sessionPriceMin,
                       sessionPriceMax: draft.sessionPriceMax,
                       playerPaymentFormat: draft.playerPaymentFormat,
+                      playerBudgetKind: draft.playerBudgetKind,
+                      playerBudgetMin: draft.playerBudgetMin,
+                      playerBudgetMax: draft.playerBudgetMax,
                     }}
                     showValidationError={rolesValidationAttempted}
                     validationScrollKey={validationScrollKey}

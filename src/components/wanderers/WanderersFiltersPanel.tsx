@@ -33,9 +33,11 @@ import {
   formatWanderersAgeFilter,
   formatWanderersAvailabilityFilter,
   formatWanderersGameCostFilter,
+  formatWanderersPlayerBudgetFilter,
   formatWanderersPlayerPaymentFilter,
   hasActiveAgeFilter,
   hasActiveAvailability,
+  hasActivePlayerBudgetFilter,
   WANDERERS_ANY_SYSTEM,
   WANDERERS_READY_TO_LEARN,
   type WanderersFilterOptions,
@@ -45,6 +47,7 @@ import {
 import {
   GAME_COST_FORMATS,
   PLAYER_PAYMENT_FORMATS,
+  SESSION_PRICE_MAX,
   gameCostFormatLabel,
   playerPaymentFormatLabel,
 } from '@/utils/questionnaire-payment';
@@ -279,10 +282,18 @@ function createStyles(
       borderWidth: 1,
       borderColor: colors.borderLight,
     },
+    sectionInline: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'flex-start',
+      flexWrap: 'wrap',
+      gap: Spacing.md,
+    },
     sectionHeader: {
       flexDirection: 'row',
       alignItems: 'center',
       gap: Spacing.xs,
+      flexShrink: 0,
     },
     sectionTitle: {
       fontSize: FontSize.caption,
@@ -301,35 +312,73 @@ function createStyles(
       flexWrap: 'wrap',
       gap: Spacing.sm,
     },
-    ageRangeRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: Spacing.sm,
+    rangeBlock: {
+      gap: 6,
+      marginTop: 2,
     },
-    ageField: {
-      flex: 1,
-      gap: 4,
-      minWidth: 0,
-    },
-    ageFieldLabel: {
+    rangeBlockLabel: {
       fontSize: FontSize.caption,
       fontWeight: '600',
       color: colors.textSecondary,
     },
-    ageInput: {
+    rangeRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      flexWrap: 'nowrap',
+      gap: Spacing.sm,
+      alignSelf: 'flex-start',
+      maxWidth: '100%',
+    },
+    rangeField: {
+      flexGrow: isDesktopWeb ? 0 : 1,
+      flexShrink: 1,
+      width: isDesktopWeb ? 124 : undefined,
+      minWidth: isDesktopWeb ? 124 : 96,
+    },
+    rangeFieldCompact: {
+      flexGrow: isDesktopWeb ? 0 : 1,
+      flexShrink: 1,
+      width: isDesktopWeb ? 88 : undefined,
+      minWidth: isDesktopWeb ? 88 : 72,
+    },
+    rangeInputWrap: {
       minHeight: 40,
       borderRadius: 12,
       borderWidth: 1,
       borderColor: colors.border,
       backgroundColor: colors.surface,
-      paddingHorizontal: Spacing.sm,
-      fontSize: FontSize.button,
-      color: colors.text,
+      paddingHorizontal: 10,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 4,
     },
-    ageRangeDivider: {
-      paddingTop: 18,
-      fontSize: FontSize.label,
+    rangeInput: {
+      flex: 1,
+      minWidth: 28,
+      fontSize: FontSize.button,
+      fontWeight: '600',
+      color: colors.text,
+      textAlign: 'center',
+      paddingVertical: Platform.OS === 'web' ? 8 : 6,
+      ...Platform.select({
+        web: {
+          outlineStyle: 'none',
+          outlineWidth: 0,
+          boxShadow: 'none',
+        } as object,
+        default: {},
+      }),
+    },
+    rangeAffix: {
+      fontSize: FontSize.caption,
+      fontWeight: '700',
+      color: colors.textSecondary,
+      flexShrink: 0,
+    },
+    rangeDivider: {
+      fontSize: FontSize.button,
       color: colors.textMuted,
+      flexShrink: 0,
     },
     chip: {
       flexDirection: 'row',
@@ -516,6 +565,7 @@ export function WanderersFiltersPanel({
   const activeCount = countActiveWanderersFilters(filters);
   const availabilityLabel = formatWanderersAvailabilityFilter(filters.availability);
   const ageFilterLabel = formatWanderersAgeFilter(filters);
+  const playerBudgetFilterLabel = formatWanderersPlayerBudgetFilter(filters);
   const officialSystemSet = useMemo(
     () => new Set(options.officialSystems),
     [options.officialSystems],
@@ -658,6 +708,49 @@ export function WanderersFiltersPanel({
     }
 
     onChange({ ...filters, ageMin, ageMax });
+  };
+
+  const parseBudgetFilterInput = (raw: string): number | null => {
+    const digits = raw.replace(/[^\d]/g, '').slice(0, 7);
+
+    if (!digits) {
+      return null;
+    }
+
+    const parsed = Number.parseInt(digits, 10);
+
+    if (!Number.isFinite(parsed) || parsed < 1) {
+      return null;
+    }
+
+    return Math.min(SESSION_PRICE_MAX, parsed);
+  };
+
+  const setPlayerBudgetBound = (key: 'playerBudgetMin' | 'playerBudgetMax', raw: string) => {
+    const nextValue = parseBudgetFilterInput(raw);
+    let playerBudgetMin = key === 'playerBudgetMin' ? nextValue : filters.playerBudgetMin;
+    let playerBudgetMax = key === 'playerBudgetMax' ? nextValue : filters.playerBudgetMax;
+
+    if (playerBudgetMin != null && playerBudgetMax != null && playerBudgetMin > playerBudgetMax) {
+      if (key === 'playerBudgetMin') {
+        playerBudgetMax = playerBudgetMin;
+      } else {
+        playerBudgetMin = playerBudgetMax;
+      }
+    }
+
+    onChange({ ...filters, playerBudgetMin, playerBudgetMax });
+  };
+
+  const setPlayerPaymentFormat = (format: (typeof PLAYER_PAYMENT_FORMATS)[number]) => {
+    const nextFormat = filters.playerPaymentFormat === format ? null : format;
+
+    onChange({
+      ...filters,
+      playerPaymentFormat: nextFormat,
+      playerBudgetMin: nextFormat === 'free_and_paid' ? filters.playerBudgetMin : null,
+      playerBudgetMax: nextFormat === 'free_and_paid' ? filters.playerBudgetMax : null,
+    });
   };
 
   const handleSystemsPickerChange = (selectedNames: string[]) => {
@@ -853,7 +946,26 @@ export function WanderersFiltersPanel({
               icon="cash-outline"
               selected
               removable
-              onPress={() => onChange({ ...filters, playerPaymentFormat: null })}
+              onPress={() =>
+                onChange({
+                  ...filters,
+                  playerPaymentFormat: null,
+                  playerBudgetMin: null,
+                  playerBudgetMax: null,
+                })
+              }
+            />
+          ) : null}
+          {hasActivePlayerBudgetFilter(filters) ? (
+            <FilterChip
+              key="player-budget"
+              label={playerBudgetFilterLabel || 'Бюджет'}
+              icon="wallet-outline"
+              selected
+              removable
+              onPress={() =>
+                onChange({ ...filters, playerBudgetMin: null, playerBudgetMax: null })
+              }
             />
           ) : null}
         </ScrollView>
@@ -935,59 +1047,110 @@ export function WanderersFiltersPanel({
                 ))}
               </FilterSection>
 
-              <FilterSection
-                title="Предпочтения по оплате игр"
-                icon="wallet-outline"
-                hint="Готов ли игрок платить за игры.">
-                {PLAYER_PAYMENT_FORMATS.map((format) => (
-                  <FilterChip
-                    key={format}
-                    label={playerPaymentFormatLabel(format)}
-                    icon={
-                      format === 'free_only' ? 'pricetag-outline' : 'pricetags-outline'
-                    }
-                    selected={filters.playerPaymentFormat === format}
-                    onPress={() =>
-                      onChange({
-                        ...filters,
-                        playerPaymentFormat:
-                          filters.playerPaymentFormat === format ? null : format,
-                      })
-                    }
-                  />
-                ))}
-              </FilterSection>
-
               <View style={styles.section}>
+                <View style={styles.sectionHeader}>
+                  <Ionicons name="wallet-outline" size={14} color={colors.textMuted} />
+                  <Text style={styles.sectionTitle}>Предпочтения по оплате игр</Text>
+                </View>
+                <Text style={styles.sectionHint}>Готов ли игрок платить за игры.</Text>
+                <View style={styles.chipsRow}>
+                  {PLAYER_PAYMENT_FORMATS.map((format) => (
+                    <FilterChip
+                      key={format}
+                      label={playerPaymentFormatLabel(format)}
+                      icon={
+                        format === 'free_only' ? 'pricetag-outline' : 'pricetags-outline'
+                      }
+                      selected={filters.playerPaymentFormat === format}
+                      onPress={() => setPlayerPaymentFormat(format)}
+                    />
+                  ))}
+                </View>
+                {filters.playerPaymentFormat === 'free_and_paid' ? (
+                  <View style={styles.rangeBlock}>
+                    <Text style={styles.rangeBlockLabel}>Бюджет на сессию</Text>
+                    <View style={styles.rangeRow}>
+                      <View style={styles.rangeField}>
+                        <View style={styles.rangeInputWrap}>
+                          <Text style={styles.rangeAffix}>от</Text>
+                          <TextInput
+                            value={
+                              filters.playerBudgetMin != null
+                                ? String(filters.playerBudgetMin)
+                                : ''
+                            }
+                            onChangeText={(value) =>
+                              setPlayerBudgetBound('playerBudgetMin', value)
+                            }
+                            keyboardType="number-pad"
+                            maxLength={7}
+                            placeholder="500"
+                            placeholderTextColor={colors.textSubtle}
+                            style={styles.rangeInput}
+                          />
+                          <Text style={styles.rangeAffix}>₽</Text>
+                        </View>
+                      </View>
+                      <Text style={styles.rangeDivider}>–</Text>
+                      <View style={styles.rangeField}>
+                        <View style={styles.rangeInputWrap}>
+                          <TextInput
+                            value={
+                              filters.playerBudgetMax != null
+                                ? String(filters.playerBudgetMax)
+                                : ''
+                            }
+                            onChangeText={(value) =>
+                              setPlayerBudgetBound('playerBudgetMax', value)
+                            }
+                            keyboardType="number-pad"
+                            maxLength={7}
+                            placeholder="2500"
+                            placeholderTextColor={colors.textSubtle}
+                            style={styles.rangeInput}
+                          />
+                          <Text style={styles.rangeAffix}>₽</Text>
+                        </View>
+                      </View>
+                    </View>
+                  </View>
+                ) : null}
+              </View>
+
+              <View style={[styles.section, isDesktopWeb && styles.sectionInline]}>
                 <View style={styles.sectionHeader}>
                   <Ionicons name="hourglass-outline" size={14} color={colors.textMuted} />
                   <Text style={styles.sectionTitle}>Возраст</Text>
                 </View>
-                <View style={styles.ageRangeRow}>
-                  <View style={styles.ageField}>
-                    <Text style={styles.ageFieldLabel}>От</Text>
-                    <TextInput
-                      value={filters.ageMin != null ? String(filters.ageMin) : ''}
-                      onChangeText={(value) => setAgeBound('ageMin', value)}
-                      keyboardType="number-pad"
-                      maxLength={3}
-                      placeholder={`${QUESTIONNAIRE_AGE_MIN}`}
-                      placeholderTextColor={colors.textSubtle}
-                      style={styles.ageInput}
-                    />
+                <View style={styles.rangeRow}>
+                  <View style={styles.rangeFieldCompact}>
+                    <View style={styles.rangeInputWrap}>
+                      <Text style={styles.rangeAffix}>от</Text>
+                      <TextInput
+                        value={filters.ageMin != null ? String(filters.ageMin) : ''}
+                        onChangeText={(value) => setAgeBound('ageMin', value)}
+                        keyboardType="number-pad"
+                        maxLength={3}
+                        placeholder={`${QUESTIONNAIRE_AGE_MIN}`}
+                        placeholderTextColor={colors.textSubtle}
+                        style={styles.rangeInput}
+                      />
+                    </View>
                   </View>
-                  <Text style={styles.ageRangeDivider}>—</Text>
-                  <View style={styles.ageField}>
-                    <Text style={styles.ageFieldLabel}>До</Text>
-                    <TextInput
-                      value={filters.ageMax != null ? String(filters.ageMax) : ''}
-                      onChangeText={(value) => setAgeBound('ageMax', value)}
-                      keyboardType="number-pad"
-                      maxLength={3}
-                      placeholder={`${QUESTIONNAIRE_AGE_MAX}`}
-                      placeholderTextColor={colors.textSubtle}
-                      style={styles.ageInput}
-                    />
+                  <Text style={styles.rangeDivider}>–</Text>
+                  <View style={styles.rangeFieldCompact}>
+                    <View style={styles.rangeInputWrap}>
+                      <Text style={styles.rangeAffix}>до</Text>
+                      <TextInput
+                        value={filters.ageMax != null ? String(filters.ageMax) : ''}
+                        onChangeText={(value) => setAgeBound('ageMax', value)}
+                        keyboardType="number-pad"
+                        maxLength={3}
+                        placeholder={`${QUESTIONNAIRE_AGE_MAX}`}
+                        placeholderTextColor={colors.textSubtle}
+                        style={styles.rangeInput}
+                      />
+                    </View>
                   </View>
                 </View>
               </View>

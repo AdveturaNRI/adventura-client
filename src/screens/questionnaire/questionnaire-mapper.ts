@@ -108,6 +108,17 @@ export function profileToQuestionnaireDraft(profile: UserProfile): Questionnaire
     playerPaymentFormat: isPlayerPaymentFormat(profile.playerPaymentFormat)
       ? profile.playerPaymentFormat
       : null,
+    playerBudgetKind: isSessionPriceKind(profile.playerBudgetKind)
+      ? profile.playerBudgetKind
+      : null,
+    playerBudgetMin:
+      profile.playerBudgetMin != null && Number.isFinite(profile.playerBudgetMin)
+        ? String(profile.playerBudgetMin)
+        : '',
+    playerBudgetMax:
+      profile.playerBudgetMax != null && Number.isFinite(profile.playerBudgetMax)
+        ? String(profile.playerBudgetMax)
+        : '',
   };
 }
 
@@ -139,6 +150,9 @@ export function isQuestionnaireDraftDirty(
     draft.sessionPriceKind !== saved.sessionPriceKind ||
     draft.sessionPriceMin.trim() !== saved.sessionPriceMin.trim() ||
     draft.sessionPriceMax.trim() !== saved.sessionPriceMax.trim() ||
-    draft.playerPaymentFormat !== saved.playerPaymentFormat
+    draft.playerPaymentFormat !== saved.playerPaymentFormat ||
+    draft.playerBudgetKind !== saved.playerBudgetKind ||
+    draft.playerBudgetMin.trim() !== saved.playerBudgetMin.trim() ||
+    draft.playerBudgetMax.trim() !== saved.playerBudgetMax.trim()
   );
 }

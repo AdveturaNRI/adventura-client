@@ -8,7 +8,7 @@ import {
   QUESTIONNAIRE_AGE_MIN,
 } from '@/screens/questionnaire/questionnaire-validation';
 import { roleChoiceToRoles } from '@/screens/questionnaire/types';
-import { toStoredSessionPrice } from '@/utils/questionnaire-payment';
+import { toStoredPlayerBudget, toStoredSessionPrice } from '@/utils/questionnaire-payment';
 import { isGifImage } from '@/utils/image-format';
 import { prepareImageForUpload } from '@/utils/prepare-image-upload';
 
@@ -33,6 +33,9 @@ export type UpdateProfilePayload = {
   sessionPriceMin?: number | null;
   sessionPriceMax?: number | null;
   playerPaymentFormat?: 'free_only' | 'free_and_paid' | null;
+  playerBudgetKind?: 'fixed' | 'from' | 'range' | null;
+  playerBudgetMin?: number | null;
+  playerBudgetMax?: number | null;
   questionnaireStep?: number;
   isPublic?: boolean;
   notificationSoundsEnabled?: boolean;
@@ -286,11 +289,15 @@ export async function saveQuestionnaireToServer(
   payload.isPublic = draft.isPublic;
 
   const storedPrice = toStoredSessionPrice(draft);
+  const storedBudget = toStoredPlayerBudget(draft);
   payload.gameCostFormat = draft.gameCostFormat;
   payload.sessionPriceKind = storedPrice.sessionPriceKind;
   payload.sessionPriceMin = storedPrice.sessionPriceMin;
   payload.sessionPriceMax = storedPrice.sessionPriceMax;
   payload.playerPaymentFormat = draft.playerPaymentFormat;
+  payload.playerBudgetKind = storedBudget.playerBudgetKind;
+  payload.playerBudgetMin = storedBudget.playerBudgetMin;
+  payload.playerBudgetMax = storedBudget.playerBudgetMax;
   payload.prefersFreeOnly = draft.playerPaymentFormat === 'free_only';
 
   const profile = await updateProfile(payload);

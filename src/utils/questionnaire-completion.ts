@@ -8,6 +8,7 @@ import {
   QUESTIONNAIRE_AGE_MIN,
 } from '@/screens/questionnaire/questionnaire-validation';
 import { QUESTIONNAIRE_STEP_INDEX } from '@/screens/questionnaire/questionnaire.config';
+import { isPlayerBudgetValid, isPlayerPaymentFormat } from '@/utils/questionnaire-payment';
 
 export type QuestionnaireMissingField = {
   key: keyof CompletionChecks;
@@ -82,12 +83,10 @@ function calculatePercent(checks: CompletionChecks): number {
 function buildCompletion(input: {
   checks: CompletionChecks;
   isPublic: boolean;
-  apiPercent?: number | null;
 }): QuestionnaireCompletion {
-  const fromChecks = calculatePercent(input.checks);
-  const percent = Math.min(100, Math.max(input.apiPercent ?? 0, fromChecks));
-  const isComplete = percent >= 100;
+  const percent = calculatePercent(input.checks);
   const missingFields = getMissingFields(input.checks);
+  const isComplete = missingFields.length === 0;
   const isVisibleInFeed = input.isPublic;
 
   let subtitle: string;
@@ -137,6 +136,35 @@ function paymentChecksForRole(role: ReturnType<typeof rolesToChoice>): {
   };
 }
 
+function isPlayerPaymentComplete(input: {
+  playerPaymentFormat: string | null | undefined;
+  playerBudgetKind?: string | null;
+  playerBudgetMin?: number | string | null;
+  playerBudgetMax?: number | string | null;
+}): boolean {
+  if (!isPlayerPaymentFormat(input.playerPaymentFormat)) {
+    return false;
+  }
+
+  return isPlayerBudgetValid({
+    playerPaymentFormat: input.playerPaymentFormat,
+    playerBudgetKind:
+      input.playerBudgetKind === 'fixed' ||
+      input.playerBudgetKind === 'from' ||
+      input.playerBudgetKind === 'range'
+        ? input.playerBudgetKind
+        : null,
+    playerBudgetMin:
+      input.playerBudgetMin == null || input.playerBudgetMin === ''
+        ? ''
+        : String(input.playerBudgetMin),
+    playerBudgetMax:
+      input.playerBudgetMax == null || input.playerBudgetMax === ''
+        ? ''
+        : String(input.playerBudgetMax),
+  });
+}
+
 function checksFromProfile(profile: UserProfile): CompletionChecks {
   const role = rolesToChoice(profile.roles);
   const paymentDefaults = paymentChecksForRole(role);
@@ -144,7 +172,14 @@ function checksFromProfile(profile: UserProfile): CompletionChecks {
   return {
     roles: profile.roles.length > 0,
     gameCost: paymentDefaults.gameCost || Boolean(profile.gameCostFormat),
-    playerPayment: paymentDefaults.playerPayment || Boolean(profile.playerPaymentFormat),
+    playerPayment:
+      paymentDefaults.playerPayment ||
+      isPlayerPaymentComplete({
+        playerPaymentFormat: profile.playerPaymentFormat,
+        playerBudgetKind: profile.playerBudgetKind,
+        playerBudgetMin: profile.playerBudgetMin,
+        playerBudgetMax: profile.playerBudgetMax,
+      }),
     age:
       profile.age != null &&
       profile.age >= QUESTIONNAIRE_AGE_MIN &&
@@ -164,7 +199,14 @@ function checksFromDraft(draft: QuestionnaireDraft): CompletionChecks {
   return {
     roles: draft.role != null,
     gameCost: paymentDefaults.gameCost || Boolean(draft.gameCostFormat),
-    playerPayment: paymentDefaults.playerPayment || Boolean(draft.playerPaymentFormat),
+    playerPayment:
+      paymentDefaults.playerPayment ||
+      isPlayerPaymentComplete({
+        playerPaymentFormat: draft.playerPaymentFormat,
+        playerBudgetKind: draft.playerBudgetKind,
+        playerBudgetMin: draft.playerBudgetMin,
+        playerBudgetMax: draft.playerBudgetMax,
+      }),
     age: isQuestionnaireAgeValid(draft.age),
     experience: Boolean(draft.experienceTypeId),
     availability: Boolean(formatAvailability(draft.availability)),
@@ -192,14 +234,12 @@ export function getQuestionnaireCompletion(
         systems: false,
       },
       isPublic: true,
-      apiPercent: 0,
     });
   }
 
   return buildCompletion({
     checks: checksFromProfile(profile),
     isPublic: profile.isPublic,
-    apiPercent: profile.questionnaireCompletionPercent,
   });
 }
 

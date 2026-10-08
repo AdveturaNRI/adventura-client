@@ -123,6 +123,7 @@ export const ROLES_STEP = {
       icon: 'pricetags-outline',
     },
   ] as const,
+  playerBudgetTitle: 'Укажите комфортную для вас сумму за игру',
   unspecifiedLabel: 'Не указано',
 };
 
