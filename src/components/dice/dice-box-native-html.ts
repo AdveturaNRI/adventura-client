@@ -49,9 +49,11 @@ export function buildDiceBoxNativeHtml(options?: { accent?: string; transparent?
         rolls.forEach(v=>values.push(v));
         groups.push({ sides: Number(String(group.sides).replace(/^d/i,''))||0, values:rolls, sum:rolls.reduce((a,b)=>a+b,0) });
       });
+      // Keep this expression as concatenation: this script itself sits inside
+      // an outer TypeScript template literal.
       const label = Array.isArray(notation)
-        ? notation.map((part) => typeof part === 'string' ? part : (part && typeof part === 'object' ? `${part.qty ?? 1}d${part.sides}` : String(part))).join(' + ')
-        : (typeof notation === 'object' && notation ? `${notation.qty ?? 1}d${notation.sides}` : String(notation||''));
+        ? notation.map((part) => typeof part === 'string' ? part : (part && typeof part === 'object' ? String(part.qty ?? 1) + 'd' + part.sides : String(part))).join(' + ')
+        : (typeof notation === 'object' && notation ? String(notation.qty ?? 1) + 'd' + notation.sides : String(notation||''));
       return { values, sum:values.reduce((a,b)=>a+b,0), notation:label, groups };
     }
     function normalizeNotation(n){ return Array.isArray(n) ? n.filter(Boolean) : (n||'1d20'); }

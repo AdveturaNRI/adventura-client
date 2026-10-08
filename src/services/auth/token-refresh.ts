@@ -1,4 +1,5 @@
 import { API_BASE_URL } from '@/constants/api.config';
+import { ApiError } from '@/services/api/api-error';
 import type { ApiErrorBody, AuthResponse } from '@/services/api/types';
 import {
   clearAuthSession,
@@ -32,8 +33,9 @@ async function refreshSession(refreshToken: string): Promise<AuthResponse> {
       body: JSON.stringify({ refreshToken }),
     });
   } catch (error) {
-    throw new Error(
+    throw new ApiError(
       localizeErrorMessage(error, 'Не удалось подключиться к серверу'),
+      0,
     );
   }
 
@@ -45,13 +47,16 @@ async function refreshSession(refreshToken: string): Promise<AuthResponse> {
     try {
       payload = JSON.parse(text) as AuthResponse | ApiErrorBody;
     } catch {
-      throw new Error('Сервер вернул некорректный ответ');
+      throw new ApiError('Сервер вернул некорректный ответ', response.status);
     }
   }
 
   if (!response.ok) {
     const errorBody = (payload ?? {}) as ApiErrorBody;
-    throw new Error(getErrorMessage(errorBody, 'Не удалось обновить сессию'));
+    throw new ApiError(
+      getErrorMessage(errorBody, 'Не удалось обновить сессию'),
+      response.status,
+    );
   }
 
   return payload as AuthResponse;
@@ -100,9 +105,15 @@ export async function refreshAuthTokens(): Promise<AuthResponse | null> {
       );
       notifyAccessTokenRefreshed(response.accessToken);
       return response;
-    } catch {
-      await clearAuthSession();
-      return null;
+    } catch (error) {
+      // Only a confirmed authentication rejection means the saved refresh
+      // token is unusable. Connection resets, timeouts and 5xx responses are
+      // common while a device changes network/VPN and must not log it out.
+      if (error instanceof ApiError && error.status === 401) {
+        await clearAuthSession();
+        return null;
+      }
+      throw error;
     } finally {
       refreshPromise = null;
     }

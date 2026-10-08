@@ -28,19 +28,110 @@ import type { CallMusicLayerLive, CallMusicQueueEntry } from '@/hooks/use-call-s
 import { CallVideoView } from '@/components/chats/CallVideoView';
 import { FontSize, Radius, Spacing } from '@/constants/theme';
 import { useProfile } from '@/context/ProfileContext';
-import type { ChatLiveVoiceParticipant, ChatLiveVoiceStatus } from '@/hooks/use-chat-live-voice';
+import type {
+  ChatLiveScreenStream,
+  ChatLiveVoiceParticipant,
+  ChatLiveVoiceStatus,
+  ScreenShareQuality,
+} from '@/hooks/use-chat-live-voice';
+import { SCREEN_SHARE_QUALITY_OPTIONS } from '@/hooks/use-chat-live-voice';
+import { getWebHostNode } from '@/utils/web-file-drop';
 import type { VideoTrack } from 'livekit-client';
+
+type FullscreenCapable = HTMLElement & {
+  webkitRequestFullscreen?: () => Promise<void> | void;
+  msRequestFullscreen?: () => Promise<void> | void;
+};
+
+type FullscreenDocument = Document & {
+  webkitFullscreenElement?: Element | null;
+  webkitExitFullscreen?: () => Promise<void> | void;
+  msExitFullscreen?: () => Promise<void> | void;
+};
+
+function getOsFullscreenElement(): Element | null {
+  if (typeof document === 'undefined') {
+    return null;
+  }
+  const doc = document as FullscreenDocument;
+  return document.fullscreenElement ?? doc.webkitFullscreenElement ?? null;
+}
+
+async function tryRequestFullscreen(target: FullscreenCapable): Promise<boolean> {
+  try {
+    if (typeof target.requestFullscreen === 'function') {
+      await target.requestFullscreen();
+      return true;
+    }
+    if (typeof target.webkitRequestFullscreen === 'function') {
+      await target.webkitRequestFullscreen();
+      return true;
+    }
+    if (typeof target.msRequestFullscreen === 'function') {
+      await target.msRequestFullscreen();
+      return true;
+    }
+  } catch {
+    return false;
+  }
+  return false;
+}
+
+async function requestOsFullscreen(host: HTMLElement | null): Promise<void> {
+  if (Platform.OS !== 'web' || typeof document === 'undefined') {
+    return;
+  }
+  if (getOsFullscreenElement()) {
+    return;
+  }
+  const root = document.documentElement as FullscreenCapable;
+  if (host && (await tryRequestFullscreen(host as FullscreenCapable))) {
+    return;
+  }
+  // Modal host can refuse FS — fall back to the page root (true monitor fullscreen).
+  await tryRequestFullscreen(root);
+}
+
+async function exitOsFullscreen(): Promise<void> {
+  if (Platform.OS !== 'web' || typeof document === 'undefined') {
+    return;
+  }
+  if (!getOsFullscreenElement()) {
+    return;
+  }
+  const doc = document as FullscreenDocument;
+  try {
+    if (typeof document.exitFullscreen === 'function') {
+      await document.exitFullscreen();
+      return;
+    }
+    if (typeof doc.webkitExitFullscreen === 'function') {
+      await doc.webkitExitFullscreen();
+      return;
+    }
+    if (typeof doc.msExitFullscreen === 'function') {
+      await doc.msExitFullscreen();
+    }
+  } catch {
+    // ignore
+  }
+}
 
 export const BARD_TILE_KEY = 'bard';
 
 type OverlayTile = {
   key: string;
+  /** LiveKit identity — one tile per participant; key === identity for people. */
+  identity?: string;
   name: string;
   avatarUrl: string | null;
   speaking: boolean;
   muted: boolean;
   cameraOn: boolean;
   videoTrack: VideoTrack | null;
+  /** Watching this participant's screen in their single tile (not a duplicate). */
+  screenShareOn?: boolean;
+  screenShareTrack?: VideoTrack | null;
   isLocal: boolean;
   waiting?: boolean;
   /** Accepted, still joining LiveKit. */
@@ -56,6 +147,13 @@ type OverlayTile = {
   /** Local track buffering — spinner around Bard avatar. */
   bardLoading?: boolean;
 };
+
+function tileIdentity(tile: OverlayTile): string {
+  return tile.identity ?? tile.key;
+}
+
+const SPEAKER_HOLD_MS = 1100;
+const SPEAKER_SWITCH_SILENT_MS = 350;
 
 export type VoiceCallWaitingPeer = {
   id: string;
@@ -75,6 +173,11 @@ type Props = {
   muted: boolean;
   deafened: boolean;
   cameraOn?: boolean;
+  screenShareOn?: boolean;
+  /** Currently watched screen-share identity (null = not watching / need pick). */
+  selectedScreenIdentity?: string | null;
+  /** All published screen shares for the picker. */
+  screenStreams?: ChatLiveScreenStream[];
   participants: ChatLiveVoiceParticipant[];
   /** Members still being rung / not yet in LiveKit. */
   waitingPeers?: VoiceCallWaitingPeer[];
@@ -92,6 +195,10 @@ type Props = {
   onToggleCamera?: () => void;
   /** Flip front ↔ rear while camera is on. */
   onSwitchCameraFacing?: () => void;
+  /** Share monitor / window / tab. Quality required when starting (ignored when stopping). */
+  onToggleScreenShare?: (quality?: ScreenShareQuality) => void;
+  /** Subscribe to one screen share (null = stop watching). */
+  onSelectScreenShare?: (identity: string | null) => void;
   onHangup: () => void;
   onRetry?: () => void;
   onMinimize?: () => void;
@@ -678,6 +785,9 @@ function ParticipantTile({
   onVolumeChange,
   onPress,
   onOpenMenu,
+  onExpandStream,
+  spotlight = false,
+  compact = false,
 }: {
   tile: OverlayTile;
   avatarSize: number;
@@ -688,21 +798,40 @@ function ParticipantTile({
   onVolumeChange?: (volume: number) => void;
   onPress?: () => void;
   onOpenMenu?: () => void;
+  /** Screen-share only: enter stream cinema (full stage). */
+  onExpandStream?: () => void;
+  spotlight?: boolean;
+  /** Filmstrip: tighter padding so the name fits inside the row budget. */
+  compact?: boolean;
 }) {
   const avatarOuter = avatarFrameOuterSize(avatarSize);
   const ringBox = avatarOuter + 8;
-  const showVideo = Boolean(tile.cameraOn && tile.videoTrack && videoHeight);
+  const showingScreenShare = Boolean(tile.screenShareOn && tile.screenShareTrack);
+  const displayTrack = showingScreenShare ? tile.screenShareTrack! : tile.videoTrack;
+  const showVideo = Boolean(
+    displayTrack && videoHeight && (showingScreenShare || tile.cameraOn),
+  );
   const canAdjustVolume =
     Boolean(onToggleVolume && onVolumeChange) && !tile.isLocal && !tile.waiting;
   const volume = clamp01(tile.volume ?? 1);
   const mutedLocally = volume < 0.02;
-  // Narrow tiles: vertical dock on the side; wide / video: horizontal under media.
-  const volumeOrientation: 'horizontal' | 'vertical' =
-    !showVideo && tileWidth < 168 ? 'vertical' : 'horizontal';
+  // Always horizontal overlay on media — vertical side dock gets clipped by filmstrip maxHeight.
   const volumeCaption = tile.isBard ? 'Громкость у тебя' : 'Громкость пользователя';
   const volumeChipTip = tile.isBard
     ? 'Громкость у тебя'
     : `Громкость · ${tile.name}`;
+  const volumeDock =
+    canAdjustVolume && volumeOpen && onVolumeChange ? (
+      <View style={styles.volumeDockOverlay} pointerEvents="box-none">
+        <ParticipantVolumeDock
+          value={volume}
+          onChange={onVolumeChange}
+          orientation="horizontal"
+          participantName={tile.name}
+          caption={volumeCaption}
+        />
+      </View>
+    ) : null;
 
   const openMenu = () => {
     onOpenMenu?.();
@@ -747,7 +876,9 @@ function ParticipantTile({
       style={[
         styles.tile,
         { width: tileWidth },
+        compact && styles.tileCompact,
         showVideo ? styles.tileVideo : null,
+        spotlight && styles.tileSpotlight,
         tile.waiting && styles.tileWaiting,
         tile.urgent && styles.tileUrgent,
         tile.isBard && styles.tileBard,
@@ -764,6 +895,7 @@ function ParticipantTile({
                 <View
                   style={[
                     styles.videoFrame,
+                    showingScreenShare && styles.videoFrameScreen,
                     {
                       height: videoHeight ?? 180,
                       borderColor: tile.urgent
@@ -773,7 +905,29 @@ function ParticipantTile({
                           : 'rgba(255,255,255,0.08)',
                     },
                   ]}>
-                  <CallVideoView track={tile.videoTrack} mirror={tile.isLocal} />
+                  <CallVideoView
+                    track={displayTrack}
+                    mirror={tile.isLocal && !showingScreenShare}
+                    objectFit={showingScreenShare ? 'contain' : 'cover'}
+                  />
+                  {showingScreenShare ? (
+                    <View style={styles.videoScreenBadge} pointerEvents="none">
+                      <Ionicons name="desktop-outline" size={12} color="#FFFFFF" />
+                    </View>
+                  ) : null}
+                  {showingScreenShare && onExpandStream ? (
+                    <Pressable
+                      accessibilityRole="button"
+                      accessibilityLabel="Развернуть стрим на весь экран"
+                      hitSlop={8}
+                      onPress={onExpandStream}
+                      style={({ pressed }) => [
+                        styles.videoExpandBtn,
+                        pressed && styles.pressed,
+                      ]}>
+                      <Ionicons name="expand" size={16} color="#FFFFFF" />
+                    </Pressable>
+                  ) : null}
                   {tile.muted ? (
                     <View style={styles.videoMuteBadge}>
                       <Ionicons name="mic-off" size={12} color="#FFFFFF" />
@@ -786,20 +940,16 @@ function ParticipantTile({
                   ) : null}
                 </View>,
               )}
-              {canAdjustVolume && volumeOpen && onVolumeChange ? (
-                <View style={styles.volumeDockOverlay} pointerEvents="box-none">
-                  <ParticipantVolumeDock
-                    value={volume}
-                    onChange={onVolumeChange}
-                    orientation="horizontal"
-                    participantName={tile.name}
-                    caption={volumeCaption}
-                  />
-                </View>
-              ) : null}
             </View>
           ) : (
-            <View style={[styles.avatarWrap, { width: ringBox + 28, height: ringBox + 28 }]}>
+            <View
+              style={[
+                styles.avatarWrap,
+                {
+                  width: ringBox + (compact ? 8 : 28),
+                  height: ringBox + (compact ? 8 : 28),
+                },
+              ]}>
               {wrapMenuHit(
                 <>
                   {tile.urgent ? <UrgentPulseRings size={ringBox} /> : null}
@@ -914,22 +1064,11 @@ function ParticipantTile({
                   ) : null}
                 </>,
               )}
-              {canAdjustVolume &&
-              volumeOpen &&
-              onVolumeChange &&
-              volumeOrientation === 'vertical' ? (
-                <View style={styles.volumeDockSide} pointerEvents="box-none">
-                  <ParticipantVolumeDock
-                    value={volume}
-                    onChange={onVolumeChange}
-                    orientation="vertical"
-                    participantName={tile.name}
-                    caption={volumeCaption}
-                  />
-                </View>
-              ) : null}
             </View>
           )}
+
+          {/* Full tile width — not inside avatarWrap (too narrow) or filmstrip side-clip. */}
+          {volumeDock}
 
           {canAdjustVolume ? (
             <Pressable
@@ -979,20 +1118,6 @@ function ParticipantTile({
           <Text style={styles.tileHint}>подключение…</Text>
         ) : tile.waiting && !tile.urgent ? (
           <Text style={styles.tileHint}>ожидание</Text>
-        ) : null}
-
-        {canAdjustVolume &&
-        volumeOpen &&
-        onVolumeChange &&
-        !showVideo &&
-        volumeOrientation === 'horizontal' ? (
-          <ParticipantVolumeDock
-            value={volume}
-            onChange={onVolumeChange}
-            orientation="horizontal"
-            participantName={tile.name}
-            caption={volumeCaption}
-          />
         ) : null}
       </View>
     </View>
@@ -1102,6 +1227,9 @@ export function VoiceCallOverlay({
   muted,
   deafened,
   cameraOn = false,
+  screenShareOn = false,
+  selectedScreenIdentity = null,
+  screenStreams = [],
   participants,
   waitingPeers = [],
   urgentById = {},
@@ -1113,6 +1241,8 @@ export function VoiceCallOverlay({
   onToggleDeafen,
   onToggleCamera,
   onSwitchCameraFacing,
+  onToggleScreenShare,
+  onSelectScreenShare,
   onHangup,
   onRetry,
   onMinimize,
@@ -1160,6 +1290,21 @@ export function VoiceCallOverlay({
   const startedAtRef = useRef<number | null>(null);
   const [nowTick, setNowTick] = useState(Date.now());
   const [diceOpen, setDiceOpen] = useState(false);
+  const [spotlightKey, setSpotlightKey] = useState<string | null>(null);
+  const spotlightKeyRef = useRef<string | null>(null);
+  spotlightKeyRef.current = spotlightKey;
+  const spotlightHoldRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** Target identity we're already waiting to promote — avoid reset on every speak tick. */
+  const pendingSpotlightRef = useRef<string | null>(null);
+  /** Fill the site viewport (call shell). Stream cinema separately uses OS fullscreen. */
+  const [fullscreen, setFullscreen] = useState(false);
+  /** Screen-share cinema: OS fullscreen + stream fills stage; speaker HUD top-right. */
+  const [streamCinema, setStreamCinema] = useState(false);
+  const cinemaHostRef = useRef<View>(null);
+  const streamCinemaRef = useRef(false);
+  streamCinemaRef.current = streamCinema;
+  const [screenQualityOpen, setScreenQualityOpen] = useState(false);
+  const [lastScreenQuality, setLastScreenQuality] = useState<ScreenShareQuality>('1080');
   const connectPulse = useRef(new Animated.Value(1)).current;
   // Пока звонок на экране — не ждём LiveKit `connected` / ответ собеседника.
   const canRollDice = Boolean(conversationId?.trim()) && status !== 'error';
@@ -1220,11 +1365,55 @@ export function VoiceCallOverlay({
       setDiceOpen(false);
       setVolumeOpenId(null);
       setBardSheetOpen(false);
+      setSpotlightKey(null);
+      if (spotlightHoldRef.current) {
+        clearTimeout(spotlightHoldRef.current);
+        spotlightHoldRef.current = null;
+      }
+      pendingSpotlightRef.current = null;
+      setFullscreen(false);
+      setStreamCinema(false);
+      setScreenQualityOpen(false);
+      void exitOsFullscreen();
       savedMiniOffset = { x: 0, y: 0 };
       miniOffsetRef.current = savedMiniOffset;
       setMiniOffset(savedMiniOffset);
     }
   }, [visible]);
+
+  const toggleFullscreen = useCallback(() => {
+    setFullscreen((prev) => !prev);
+  }, []);
+
+  const enterStreamCinema = useCallback(() => {
+    setStreamCinema(true);
+    setFullscreen(true);
+    setVolumeOpenId(null);
+    void requestOsFullscreen(getWebHostNode(cinemaHostRef.current));
+  }, []);
+
+  const exitStreamCinema = useCallback(() => {
+    setStreamCinema(false);
+    void exitOsFullscreen();
+  }, []);
+
+  // Esc / browser exit → drop cinema mode together with OS fullscreen.
+  useEffect(() => {
+    if (Platform.OS !== 'web' || typeof document === 'undefined') {
+      return;
+    }
+    const onFsChange = () => {
+      if (!getOsFullscreenElement() && streamCinemaRef.current) {
+        setStreamCinema(false);
+      }
+    };
+    document.addEventListener('fullscreenchange', onFsChange);
+    document.addEventListener('webkitfullscreenchange', onFsChange as EventListener);
+    return () => {
+      document.removeEventListener('fullscreenchange', onFsChange);
+      document.removeEventListener('webkitfullscreenchange', onFsChange as EventListener);
+    };
+  }, []);
 
   useEffect(() => {
     if (!bardPresent) {
@@ -1282,34 +1471,67 @@ export function VoiceCallOverlay({
     [height, insets.bottom, insets.right, width],
   );
 
-  const tiles = useMemo<OverlayTile[]>(() => {
-    const live = participants.map((p) => ({
-      key: p.identity,
+  const needsScreenPick =
+    screenStreams.length >= 2 && !selectedScreenIdentity && Boolean(onSelectScreenShare);
+
+  /** Selected remote/local screen track — separate from person tiles (they stay in the rail). */
+  const watchedScreen = useMemo(() => {
+    if (!selectedScreenIdentity) {
+      return null;
+    }
+    const p = participants.find((x) => x.identity === selectedScreenIdentity);
+    if (!p?.screenShareOn || !p.screenShareTrack) {
+      return null;
+    }
+    return {
+      identity: p.identity,
       name: p.name,
-      avatarUrl: p.isLocal && profileAvatarUrl ? profileAvatarUrl : p.avatarUrl,
-      speaking: p.speaking,
-      muted: p.muted,
-      cameraOn: p.cameraOn,
-      videoTrack: p.videoTrack,
+      track: p.screenShareTrack,
       isLocal: p.isLocal,
-      badges: p.badges,
-      frameId: p.avatarFrameId,
-      urgent: Boolean(urgentById[p.identity]),
-      volume: p.isLocal ? undefined : clamp01(volumeById[p.identity] ?? 1),
-    }));
-    const liveIds = new Set(live.map((p) => p.key));
+    };
+  }, [participants, selectedScreenIdentity]);
+
+  const tiles = useMemo<OverlayTile[]>(() => {
+    const live: OverlayTile[] = [];
+    for (const p of participants) {
+      const avatarUrl = p.isLocal && profileAvatarUrl ? profileAvatarUrl : p.avatarUrl;
+      const volume = p.isLocal ? undefined : clamp01(volumeById[p.identity] ?? 1);
+      const urgent = Boolean(urgentById[p.identity]);
+      // Person tile always stays a person (speaking/camera). Stream is `watchedScreen`.
+      live.push({
+        key: p.identity,
+        identity: p.identity,
+        name: p.name,
+        avatarUrl,
+        speaking: p.speaking,
+        muted: p.muted,
+        cameraOn: p.cameraOn,
+        videoTrack: p.videoTrack,
+        screenShareOn: false,
+        screenShareTrack: null,
+        isLocal: p.isLocal,
+        badges: p.badges,
+        frameId: p.avatarFrameId,
+        urgent,
+        volume,
+      });
+    }
+    const liveIds = new Set(live.map((p) => tileIdentity(p)));
     for (const peer of waitingPeers) {
       if (!peer.id || liveIds.has(peer.id)) {
         continue;
       }
       live.push({
         key: peer.id,
+        identity: peer.id,
         name: peer.name,
         avatarUrl: peer.avatarUrl,
         speaking: false,
         muted: false,
         cameraOn: false,
         videoTrack: null,
+        screenShareOn: false,
+        screenShareTrack: null,
         isLocal: false,
         waiting: true,
         connecting: Boolean(peer.connecting),
@@ -1320,12 +1542,15 @@ export function VoiceCallOverlay({
     if (bardPresent) {
       live.push({
         key: BARD_TILE_KEY,
+        identity: BARD_TILE_KEY,
         name: 'Бард',
         avatarUrl: null,
         speaking: Boolean(bardPlaying),
         muted: false,
         cameraOn: false,
         videoTrack: null,
+        screenShareOn: false,
+        screenShareTrack: null,
         isLocal: false,
         isBard: true,
         bardPlaque: bardTrackTitle,
@@ -1334,8 +1559,11 @@ export function VoiceCallOverlay({
         volume: clamp01(bardLocalVolume),
       });
     }
-    // Local first, then live remotes, bard near end, waiting last.
+    // Screens first among a peer, local first, bard near end, waiting last.
     return live.sort((a, b) => {
+      if (Boolean(a.screenShareOn) !== Boolean(b.screenShareOn)) {
+        return a.screenShareOn ? -1 : 1;
+      }
       if (a.isLocal !== b.isLocal) {
         return a.isLocal ? -1 : 1;
       }
@@ -1359,6 +1587,92 @@ export function VoiceCallOverlay({
     volumeById,
     waitingPeers,
   ]);
+
+  // Speaker moves between stage/rail. Watching a stream uses a separate stage (not a person tile).
+  useEffect(() => {
+    const clearHold = () => {
+      if (spotlightHoldRef.current) {
+        clearTimeout(spotlightHoldRef.current);
+        spotlightHoldRef.current = null;
+      }
+      pendingSpotlightRef.current = null;
+    };
+
+    if (!tiles.length) {
+      clearHold();
+      setSpotlightKey(null);
+      return;
+    }
+
+    // Stream on stage — don't promote the sharer out of the people rail.
+    if (watchedScreen || needsScreenPick) {
+      clearHold();
+      if (spotlightKeyRef.current != null) {
+        setSpotlightKey(null);
+      }
+      return;
+    }
+
+    const people = tiles.filter((t) => !t.waiting && !t.isBard);
+    const speakers = people.filter((t) => t.speaking);
+    const fallback =
+      people.find((t) => t.key === spotlightKeyRef.current) ??
+      people.find((t) => !t.isLocal) ??
+      people[0] ??
+      tiles[0] ??
+      null;
+    const prev = spotlightKeyRef.current;
+
+    if (!speakers.length) {
+      // Keep current stage occupant while silence; only repair missing key.
+      if (!prev || !tiles.some((t) => t.key === prev)) {
+        clearHold();
+        setSpotlightKey(fallback?.key ?? null);
+      }
+      return;
+    }
+
+    // Prefer remote speaker when several talk; else first speaking.
+    const preferred = speakers.find((t) => !t.isLocal) ?? speakers[0]!;
+
+    if (!prev || !tiles.some((t) => t.key === prev)) {
+      clearHold();
+      setSpotlightKey(preferred.key);
+      return;
+    }
+    if (prev === preferred.key) {
+      clearHold();
+      return;
+    }
+    // Already counting down toward this speaker — don't reset the hold.
+    if (pendingSpotlightRef.current === preferred.key && spotlightHoldRef.current) {
+      return;
+    }
+
+    const current = tiles.find((t) => t.key === prev);
+    // Stage person silent → swap fast; both talking → short hold to avoid flicker.
+    const delay = current?.speaking ? SPEAKER_HOLD_MS : SPEAKER_SWITCH_SILENT_MS;
+    if (spotlightHoldRef.current) {
+      clearTimeout(spotlightHoldRef.current);
+    }
+    pendingSpotlightRef.current = preferred.key;
+    spotlightHoldRef.current = setTimeout(() => {
+      spotlightHoldRef.current = null;
+      pendingSpotlightRef.current = null;
+      setSpotlightKey(preferred.key);
+    }, delay);
+  }, [needsScreenPick, tiles, watchedScreen]);
+
+  useEffect(
+    () => () => {
+      if (spotlightHoldRef.current) {
+        clearTimeout(spotlightHoldRef.current);
+        spotlightHoldRef.current = null;
+      }
+      pendingSpotlightRef.current = null;
+    },
+    [],
+  );
 
   useEffect(() => {
     if (!volumeOpenId) {
@@ -1400,9 +1714,169 @@ export function VoiceCallOverlay({
       ? connection.detail || connection.label
       : `${statusLine}${mediaReady ? ` · ${formatCallDuration(elapsedSec)}` : ''}`;
 
+  /**
+   * Watching a stream: everyone stays in the rail (including the sharer).
+   * Otherwise: speaker moves to stage, unique in the rail.
+   */
+  const { spotlightTile, filmstripTiles, useSpotlight } = useMemo(() => {
+    if (watchedScreen || needsScreenPick) {
+      return {
+        spotlightTile: null as OverlayTile | null,
+        filmstripTiles: tiles,
+        useSpotlight: true,
+      };
+    }
+    const spotlight =
+      tiles.length >= 2
+        ? (spotlightKey ? tiles.find((t) => t.key === spotlightKey) : null) ??
+          tiles.find((t) => !t.waiting && !t.isBard) ??
+          tiles[0] ??
+          null
+        : null;
+    if (!spotlight) {
+      return {
+        spotlightTile: null as OverlayTile | null,
+        filmstripTiles: tiles,
+        useSpotlight: false,
+      };
+    }
+    const stageId = tileIdentity(spotlight);
+    return {
+      spotlightTile: spotlight,
+      filmstripTiles: tiles.filter((t) => tileIdentity(t) !== stageId),
+      useSpotlight: true,
+    };
+  }, [needsScreenPick, spotlightKey, tiles, watchedScreen]);
+
+  const streamCinemaTrack = watchedScreen?.track ?? null;
+
+  /** Live speaker only — HUD must not keep a stale "speaking" snapshot. */
+  const liveSpeaker = useMemo(() => {
+    const people = tiles.filter((t) => !t.waiting && !t.isBard && t.speaking);
+    return people.find((t) => !t.isLocal) ?? people[0] ?? null;
+  }, [tiles]);
+
+  useEffect(() => {
+    if (!watchedScreen) {
+      setStreamCinema(false);
+      void exitOsFullscreen();
+    }
+  }, [watchedScreen]);
+
+  const showConnectionBanner =
+    linking || failed || connection.tone === 'warn';
+
   const layout = useMemo(() => {
     const count = Math.max(tiles.length, 1);
-    const stageWidth = Math.min(width - Spacing.md * 4, isDesktop ? 680 : width - 48);
+    const stagePad = fullscreen ? Spacing.md * 2 : Spacing.md * 4;
+    const stageWidth = Math.min(
+      width - stagePad,
+      fullscreen ? width - stagePad : isDesktop ? 920 : width - 48,
+    );
+    const hasScreenShare = Boolean(watchedScreen);
+    const videoMode =
+      hasScreenShare || tiles.some((tile) => tile.cameraOn);
+
+    // Fit stage into the shell without vertical scroll.
+    const rootPadY = fullscreen
+      ? 0
+      : Math.max(insets.top, Spacing.md) + Math.max(insets.bottom, Spacing.md);
+    const shellCap = fullscreen
+      ? Math.max(280, height - rootPadY)
+      : Math.max(280, Math.min(height * 0.86, height - rootPadY));
+    const headerH = 72;
+    const controlsH = 96;
+    const bannerH = showConnectionBanner ? 58 : 0;
+    const pickerH = screenStreams.length >= 2 ? 52 : 0;
+    const stageBudget = Math.max(160, shellCap - headerH - controlsH - bannerH - pickerH);
+
+    if (watchedScreen || needsScreenPick || (useSpotlight && spotlightTile)) {
+      const filmGap = 8;
+      const hasFilm = filmstripTiles.length > 0;
+      const volumeOpenInFilm = Boolean(
+        volumeOpenId && filmstripTiles.some((t) => t.key === volumeOpenId),
+      );
+      // Same card chrome for film + spot (padding + gap + name) — square around the user.
+      const cardPad = 20; // tileCompact vertical padding * 2-ish
+      const cardGap = 8;
+      const nameH = 18;
+      const cardChrome = cardPad + cardGap + nameH;
+      const filmAvatar = videoMode ? 40 : 44;
+      // avatarWrap ≈ ringBox+8 (compact); ringBox ≈ avatar+~20
+      const filmMediaH = filmAvatar + 28;
+      const filmTileWidth = Math.min(
+        fullscreen ? 140 : 120,
+        Math.max(filmMediaH + 12, Math.floor(stageWidth / (fullscreen ? 7 : 5.5))),
+      );
+      // Watching a stream: filmstrip tiles are people (avatar), not camera previews.
+      const filmVideoHeight =
+        watchedScreen || needsScreenPick
+          ? null
+          : videoMode
+            ? Math.max(48, Math.min(72, Math.round(filmTileWidth * 0.55)))
+            : null;
+      const filmBodyH = (filmVideoHeight ?? filmMediaH) + cardChrome;
+      const filmRowBudget = hasFilm
+        ? filmBodyH + (volumeOpenInFilm ? 24 : 0)
+        : 0;
+      const spotRowBudget = Math.max(120, stageBudget - filmRowBudget - (hasFilm ? 10 : 0));
+
+      if (watchedScreen || needsScreenPick) {
+        return {
+          mode: 'stream' as const,
+          stageWidth,
+          stageBudget,
+          spotlightWidth: stageWidth,
+          spotlightAvatar: filmAvatar,
+          spotlightVideoHeight: Math.max(160, spotRowBudget),
+          filmGap,
+          filmTileWidth,
+          filmAvatar,
+          filmVideoHeight,
+          filmRowBudget,
+          gap: filmGap,
+          tileWidth: filmTileWidth,
+          avatarSize: filmAvatar,
+          videoHeight: filmVideoHeight,
+          columns: 1,
+        };
+      }
+
+      // Spotlight = larger copy of the same square card (not full-bleed stage width).
+      const spotlightAvatar = Math.min(
+        isDesktop ? 112 : 96,
+        Math.max(64, Math.min(filmAvatar * 2.2, spotRowBudget - cardChrome - 36)),
+      );
+      const spotMediaH = spotlightAvatar + 36;
+      const spotlightWidth = videoMode
+        ? Math.min(stageWidth, Math.max(280, Math.round(spotRowBudget * 1.35)))
+        : Math.min(stageWidth, Math.max(filmTileWidth, spotMediaH + 16));
+      const spotlightVideoHeight = videoMode
+        ? Math.max(
+            120,
+            Math.min(spotRowBudget - cardChrome, Math.round(spotlightWidth * 0.5)),
+          )
+        : null;
+      return {
+        mode: 'spotlight' as const,
+        stageWidth,
+        stageBudget,
+        spotlightWidth,
+        spotlightAvatar,
+        spotlightVideoHeight,
+        filmGap,
+        filmTileWidth,
+        filmAvatar,
+        filmVideoHeight,
+        filmRowBudget,
+        gap: filmGap,
+        tileWidth: filmTileWidth,
+        avatarSize: filmAvatar,
+        videoHeight: filmVideoHeight,
+        columns: 1,
+      };
+    }
+
     let columns = 1;
     if (count === 2) {
       columns = 2;
@@ -1411,23 +1885,50 @@ export function VoiceCallOverlay({
     } else if (count >= 4) {
       columns = width < 420 ? 2 : 3;
     }
-    const gap = count >= 5 ? 12 : 16;
+    const gap = count >= 5 ? 10 : 12;
+    const rows = Math.ceil(count / columns);
     const tileWidth = Math.floor((stageWidth - gap * (columns - 1)) / columns);
-    let avatarSize = 96;
-    if (count <= 1) {
-      avatarSize = isDesktop ? 128 : 112;
-    } else if (count === 2) {
-      avatarSize = isDesktop ? 104 : 92;
-    } else if (count <= 4) {
-      avatarSize = isDesktop ? 84 : 72;
-    } else {
-      avatarSize = isDesktop ? 72 : 64;
-    }
-    avatarSize = Math.min(avatarSize, Math.max(52, tileWidth - 56));
-    const videoMode = tiles.some((tile) => tile.cameraOn);
-    const videoHeight = videoMode ? Math.max(148, Math.round(tileWidth * 0.72)) : null;
-    return { columns, gap, tileWidth, avatarSize, stageWidth, videoHeight };
-  }, [isDesktop, tiles, width]);
+    const cellH = Math.floor((stageBudget - gap * Math.max(0, rows - 1)) / rows);
+    const tileChrome = 44;
+    let avatarSize = Math.min(isDesktop ? 112 : 96, Math.max(44, cellH - tileChrome));
+    avatarSize = Math.min(avatarSize, Math.max(44, tileWidth - 48));
+    const videoHeight = videoMode
+      ? Math.max(96, Math.min(cellH - tileChrome, Math.round(tileWidth * (hasScreenShare ? 0.55 : 0.62))))
+      : null;
+    return {
+      mode: 'grid' as const,
+      columns,
+      gap,
+      tileWidth,
+      avatarSize,
+      stageWidth,
+      stageBudget,
+      videoHeight,
+      spotlightWidth: tileWidth,
+      spotlightAvatar: avatarSize,
+      spotlightVideoHeight: videoHeight,
+      filmGap: gap,
+      filmTileWidth: tileWidth,
+      filmAvatar: avatarSize,
+      filmVideoHeight: videoHeight,
+      filmRowBudget: 0,
+    };
+  }, [
+    filmstripTiles,
+    fullscreen,
+    height,
+    insets.bottom,
+    insets.top,
+    isDesktop,
+    screenStreams.length,
+    showConnectionBanner,
+    spotlightTile,
+    tiles,
+    useSpotlight,
+    volumeOpenId,
+    watchedScreen,
+    width,
+  ]);
 
   if (!visible) {
     return null;
@@ -1435,6 +1936,37 @@ export function VoiceCallOverlay({
 
   const statusColor = connection.color;
   const timerLabel = formatCallDuration(elapsedSec);
+
+  // Cinema only + currently speaking (small stream window uses the people rail).
+  const streamSpeakerHud =
+    streamCinema && watchedScreen && liveSpeaker ? (
+      <View style={[styles.streamSpeakerHud, styles.streamSpeakerHudLive]} pointerEvents="none">
+        <UserAvatar
+          nickname={liveSpeaker.name}
+          avatarUrl={
+            liveSpeaker.isLocal && profileAvatarUrl
+              ? profileAvatarUrl
+              : liveSpeaker.avatarUrl
+          }
+          size={36}
+          badges={liveSpeaker.badges}
+          frameId={liveSpeaker.frameId}
+        />
+        <View style={styles.streamSpeakerHudCopy}>
+          <Text style={styles.streamSpeakerHudEyebrow} numberOfLines={1}>
+            Сейчас говорит
+          </Text>
+          <Text style={styles.streamSpeakerHudName} numberOfLines={1}>
+            {liveSpeaker.isLocal ? `${liveSpeaker.name} (вы)` : liveSpeaker.name}
+          </Text>
+        </View>
+        {liveSpeaker.muted ? (
+          <Ionicons name="mic-off" size={14} color="#FFB4B4" />
+        ) : (
+          <View style={styles.streamSpeakerHudDot} />
+        )}
+      </View>
+    ) : null;
 
   const diceLayer =
     conversationId?.trim() ? (
@@ -1552,6 +2084,34 @@ export function VoiceCallOverlay({
               <Ionicons name="camera-reverse-outline" size={18} color="#FFFFFF" />
             </Pressable>
           ) : null}
+          {onToggleScreenShare && !pinToTop ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={
+                screenShareOn
+                  ? 'Остановить демонстрацию (Ctrl+Shift+S)'
+                  : 'Демонстрация экрана (Ctrl+Shift+S)'
+              }
+              onPress={() => {
+                if (screenShareOn) {
+                  onToggleScreenShare();
+                  return;
+                }
+                onToggleScreenShare(lastScreenQuality);
+              }}
+              style={({ pressed }) => [
+                styles.miniCtrl,
+                !screenShareOn && styles.miniCtrlOff,
+                screenShareOn && styles.miniCtrlScreenOn,
+                pressed && styles.pressed,
+              ]}>
+              <Ionicons
+                name={screenShareOn ? 'desktop' : 'desktop-outline'}
+                size={18}
+                color="#FFFFFF"
+              />
+            </Pressable>
+          ) : null}
           <Pressable
             accessibilityRole="button"
             accessibilityLabel="Завершить звонок"
@@ -1618,16 +2178,18 @@ export function VoiceCallOverlay({
   return (
     <>
     <Modal visible transparent animationType="fade" statusBarTranslucent>
-      <View style={styles.modalRoot}>
+      <View ref={cinemaHostRef} style={styles.modalRoot}>
         <View
           style={[
             styles.root,
+            fullscreen && styles.rootFullscreen,
+            streamCinema && styles.rootStreamCinema,
             {
-              paddingTop: Math.max(insets.top, Spacing.md),
-              paddingBottom: Math.max(insets.bottom, Spacing.md),
+              paddingTop: fullscreen || streamCinema ? 0 : Math.max(insets.top, Spacing.md),
+              paddingBottom: fullscreen || streamCinema ? 0 : Math.max(insets.bottom, Spacing.md),
             },
           ]}>
-          {onMinimize ? (
+          {onMinimize && !fullscreen ? (
             <Pressable
               accessibilityRole="button"
               accessibilityLabel="Свернуть звонок"
@@ -1635,57 +2197,87 @@ export function VoiceCallOverlay({
               style={styles.backdropHit}
             />
           ) : null}
-        <View style={[styles.shell, isDesktop && styles.shellDesktop]}>
-          <View style={styles.header}>
-            <View style={styles.headerCopy}>
-              <Text style={styles.title} numberOfLines={1}>
-                {title}
-              </Text>
-              <View style={styles.statusRow}>
-                <Animated.View
-                  style={[
-                    styles.statusDot,
-                    {
-                      backgroundColor: statusColor,
-                      opacity: linking ? connectPulse : 1,
-                    },
-                  ]}
-                />
-                <Text
-                  style={[
-                    styles.statusText,
-                    failed && styles.statusError,
-                    mediaReady && !error && styles.statusOk,
-                    (linking || Boolean(mediaReady && error)) && styles.statusConnecting,
-                  ]}
-                  numberOfLines={1}>
-                  {statusLine}
+        <View
+          style={[
+            styles.shell,
+            isDesktop && styles.shellDesktop,
+            (fullscreen || streamCinema) && styles.shellFullscreen,
+            streamCinema && styles.shellStreamCinema,
+          ]}>
+          {!streamCinema ? (
+            <View style={styles.header}>
+              <View style={styles.headerCopy}>
+                <Text style={styles.title} numberOfLines={1}>
+                  {title}
                 </Text>
-                {mediaReady ? (
-                  <Text style={styles.timerText} accessibilityLabel={`Длительность ${timerLabel}`}>
-                    {timerLabel}
+                <View style={styles.statusRow}>
+                  <Animated.View
+                    style={[
+                      styles.statusDot,
+                      {
+                        backgroundColor: statusColor,
+                        opacity: linking ? connectPulse : 1,
+                      },
+                    ]}
+                  />
+                  <Text
+                    style={[
+                      styles.statusText,
+                      failed && styles.statusError,
+                      mediaReady && !error && styles.statusOk,
+                      (linking || Boolean(mediaReady && error)) && styles.statusConnecting,
+                    ]}
+                    numberOfLines={1}>
+                    {statusLine}
                   </Text>
-                ) : null}
+                  {mediaReady ? (
+                    <Text style={styles.timerText} accessibilityLabel={`Длительность ${timerLabel}`}>
+                      {timerLabel}
+                    </Text>
+                  ) : null}
+                </View>
               </View>
-            </View>
-            {onMinimize ? (
+              {watchedScreen ? (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Развернуть стрим на весь монитор"
+                  onPress={enterStreamCinema}
+                  style={({ pressed }) => [styles.headerAction, pressed && styles.pressed]}>
+                  <Ionicons name="scan-outline" size={20} color="#F2F3F5" />
+                </Pressable>
+              ) : null}
               <Pressable
                 accessibilityRole="button"
-                accessibilityLabel="Свернуть звонок"
-                onPress={onMinimize}
+                accessibilityLabel={
+                  fullscreen ? 'Свернуть звонок в окно' : 'Развернуть звонок на окно сайта'
+                }
+                onPress={toggleFullscreen}
                 style={({ pressed }) => [styles.headerAction, pressed && styles.pressed]}>
-                <Ionicons name="remove" size={20} color="#F2F3F5" />
+                <Ionicons
+                  name={fullscreen ? 'contract' : 'expand'}
+                  size={20}
+                  color="#F2F3F5"
+                />
               </Pressable>
-            ) : null}
-            {isGroup ? (
-              <View style={styles.headerBadge}>
-                <Ionicons name="people" size={14} color="#B5BAC1" />
-                <Text style={styles.headerBadgeText}>{tiles.length}</Text>
-              </View>
-            ) : null}
-          </View>
+              {onMinimize ? (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Свернуть звонок"
+                  onPress={onMinimize}
+                  style={({ pressed }) => [styles.headerAction, pressed && styles.pressed]}>
+                  <Ionicons name="remove" size={20} color="#F2F3F5" />
+                </Pressable>
+              ) : null}
+              {isGroup ? (
+                <View style={styles.headerBadge}>
+                  <Ionicons name="people" size={14} color="#B5BAC1" />
+                  <Text style={styles.headerBadgeText}>{tiles.length}</Text>
+                </View>
+              ) : null}
+            </View>
+          ) : null}
 
-          {linking || failed || connection.tone === 'warn' ? (
+          {!streamCinema && showConnectionBanner ? (
             <View
               style={[
                 styles.connectionBanner,
@@ -1709,11 +2301,12 @@ export function VoiceCallOverlay({
                   style={[
                     styles.connectionBannerTitle,
                     failed && styles.connectionBannerTitleError,
-                  ]}>
+                  ]}
+                  numberOfLines={1}>
                   {connection.label}
                 </Text>
                 {connection.detail ? (
-                  <Text style={styles.connectionBannerDetail} numberOfLines={4}>
+                  <Text style={styles.connectionBannerDetail} numberOfLines={2}>
                     {connection.detail}
                   </Text>
                 ) : null}
@@ -1721,62 +2314,353 @@ export function VoiceCallOverlay({
             </View>
           ) : null}
 
-          <ScrollView
-            style={styles.stageScroll}
-            contentContainerStyle={styles.stageContent}
-            showsVerticalScrollIndicator={false}>
-            <View
-              style={[
-                styles.grid,
-                {
-                  width: layout.stageWidth,
-                  gap: layout.gap,
-                },
-              ]}>
-              {tiles.map((tile) => (
-                <ParticipantTile
-                  key={tile.key}
-                  tile={tile}
-                  avatarSize={layout.avatarSize}
-                  tileWidth={layout.tileWidth}
-                  videoHeight={layout.videoHeight}
-                  volumeOpen={volumeOpenId === tile.key}
-                  onToggleVolume={
-                    tile.isBard
-                      ? onSetBardLocalVolume
-                        ? () =>
-                            setVolumeOpenId((current) =>
-                              current === tile.key ? null : tile.key,
-                            )
-                        : undefined
-                      : onSetParticipantVolume && !tile.isLocal && !tile.waiting
-                        ? () =>
-                            setVolumeOpenId((current) =>
-                              current === tile.key ? null : tile.key,
-                            )
-                        : undefined
-                  }
-                  onVolumeChange={
-                    tile.isBard
-                      ? onSetBardLocalVolume
-                      : onSetParticipantVolume && !tile.isLocal && !tile.waiting
-                        ? (volume) => onSetParticipantVolume(tile.key, volume)
-                        : undefined
-                  }
-                  onPress={
-                    tile.isBard
-                      ? () => {
-                          onResumeBardAudio?.();
-                          setBardSheetOpen(true);
-                        }
-                      : undefined
-                  }
+          <View style={styles.stage}>
+            {streamCinema && streamCinemaTrack ? (
+              <View style={styles.streamCinemaStage}>
+                <CallVideoView
+                  track={streamCinemaTrack}
+                  mirror={false}
+                  objectFit="contain"
                 />
-              ))}
-            </View>
-          </ScrollView>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Свернуть стрим"
+                  onPress={exitStreamCinema}
+                  style={({ pressed }) => [
+                    styles.streamCinemaExit,
+                    pressed && styles.pressed,
+                  ]}>
+                  <Ionicons name="contract" size={18} color="#FFFFFF" />
+                  <Text style={styles.streamCinemaExitLabel}>Свернуть</Text>
+                </Pressable>
+                {streamSpeakerHud}
+              </View>
+            ) : (
+            <View style={[styles.stageInner, { width: layout.stageWidth }]}>
+              {screenStreams.length >= 2 && onSelectScreenShare ? (
+                <View style={[styles.screenPicker, { width: layout.stageWidth }]}>
+                  <Text style={styles.screenPickerLabel}>
+                    {needsScreenPick ? 'Выбери трансляцию' : 'Трансляции'}
+                  </Text>
+                  <ScrollView
+                    horizontal
+                    showsHorizontalScrollIndicator={false}
+                    contentContainerStyle={styles.screenPickerRow}>
+                    {screenStreams.map((stream) => {
+                      const active = selectedScreenIdentity === stream.identity;
+                      return (
+                        <Pressable
+                          key={stream.identity}
+                          accessibilityRole="button"
+                          accessibilityLabel={
+                            active
+                              ? `Стоп просмотра: ${stream.name}`
+                              : `Смотреть экран: ${stream.name}`
+                          }
+                          onPress={() =>
+                            onSelectScreenShare(active ? null : stream.identity)
+                          }
+                          style={({ pressed }) => [
+                            styles.screenPickerChip,
+                            active && styles.screenPickerChipActive,
+                            pressed && styles.pressed,
+                          ]}>
+                          <Ionicons
+                            name="desktop-outline"
+                            size={14}
+                            color={active ? '#FFFFFF' : '#B5BAC1'}
+                          />
+                          <Text
+                            style={[
+                              styles.screenPickerChipText,
+                              active && styles.screenPickerChipTextActive,
+                            ]}
+                            numberOfLines={1}>
+                            {stream.isLocal ? 'Мой экран' : stream.name}
+                          </Text>
+                        </Pressable>
+                      );
+                    })}
+                  </ScrollView>
+                </View>
+              ) : null}
 
-          <View style={styles.controls}>
+              {needsScreenPick ? (
+                <View
+                  style={[
+                    styles.screenPickPrompt,
+                    { width: layout.stageWidth, maxHeight: layout.stageBudget },
+                  ]}>
+                  <Ionicons name="tv-outline" size={36} color="#B5BAC1" />
+                  <Text style={styles.screenPickPromptTitle}>Несколько трансляций</Text>
+                  <Text style={styles.screenPickPromptDetail}>
+                    Выбери, чей экран смотреть — поток пойдёт только после выбора
+                  </Text>
+                </View>
+              ) : watchedScreen ? (
+                <View style={[styles.spotlightStage, { width: layout.stageWidth }]}>
+                  <View
+                    style={[
+                      styles.streamWatchMain,
+                      { height: layout.spotlightVideoHeight ?? 220 },
+                    ]}>
+                    <CallVideoView
+                      track={watchedScreen.track}
+                      mirror={false}
+                      objectFit="contain"
+                    />
+                    <View style={styles.streamWatchChrome} pointerEvents="box-none">
+                      <View style={styles.streamWatchLabel} pointerEvents="none">
+                        <Ionicons name="desktop-outline" size={12} color="#FFFFFF" />
+                        <Text style={styles.streamWatchLabelText} numberOfLines={1}>
+                          {watchedScreen.isLocal
+                            ? 'Твой экран'
+                            : `${watchedScreen.name} · экран`}
+                        </Text>
+                      </View>
+                      <Pressable
+                        accessibilityRole="button"
+                        accessibilityLabel="Развернуть стрим на весь монитор"
+                        hitSlop={8}
+                        onPress={enterStreamCinema}
+                        style={({ pressed }) => [
+                          styles.streamWatchExpandBtn,
+                          pressed && styles.pressed,
+                        ]}>
+                        <Ionicons name="expand" size={16} color="#FFFFFF" />
+                      </Pressable>
+                    </View>
+                  </View>
+                  {filmstripTiles.length > 0 ? (
+                    <ScrollView
+                      horizontal
+                      showsHorizontalScrollIndicator={false}
+                      style={[
+                        styles.filmstripScroll,
+                        layout.filmRowBudget
+                          ? { maxHeight: layout.filmRowBudget }
+                          : null,
+                      ]}
+                      contentContainerStyle={[
+                        styles.filmstrip,
+                        { gap: layout.filmGap },
+                      ]}>
+                      {filmstripTiles.map((tile) => (
+                        <ParticipantTile
+                          key={tile.key}
+                          tile={tile}
+                          avatarSize={layout.filmAvatar}
+                          tileWidth={layout.filmTileWidth}
+                          videoHeight={layout.filmVideoHeight}
+                          compact
+                          volumeOpen={volumeOpenId === tile.key}
+                          onToggleVolume={
+                            tile.isBard
+                              ? onSetBardLocalVolume
+                                ? () =>
+                                    setVolumeOpenId((current) =>
+                                      current === tile.key ? null : tile.key,
+                                    )
+                                : undefined
+                              : onSetParticipantVolume && !tile.isLocal && !tile.waiting
+                                ? () =>
+                                    setVolumeOpenId((current) =>
+                                      current === tile.key ? null : tile.key,
+                                    )
+                                : undefined
+                          }
+                          onVolumeChange={
+                            tile.isBard
+                              ? onSetBardLocalVolume
+                              : onSetParticipantVolume && !tile.isLocal && !tile.waiting
+                                ? (volume) =>
+                                    onSetParticipantVolume(tileIdentity(tile), volume)
+                                : undefined
+                          }
+                          onPress={
+                            tile.isBard
+                              ? () => {
+                                  onResumeBardAudio?.();
+                                  setBardSheetOpen(true);
+                                }
+                              : undefined
+                          }
+                        />
+                      ))}
+                    </ScrollView>
+                  ) : null}
+                </View>
+              ) : layout.mode === 'spotlight' && spotlightTile ? (
+                <View style={[styles.spotlightStage, { width: layout.stageWidth }]}>
+                  <View style={styles.spotlightMain}>
+                    <ParticipantTile
+                      tile={spotlightTile}
+                      avatarSize={layout.spotlightAvatar}
+                      tileWidth={layout.spotlightWidth}
+                      videoHeight={layout.spotlightVideoHeight}
+                      spotlight
+                      volumeOpen={volumeOpenId === spotlightTile.key}
+                      onToggleVolume={
+                        spotlightTile.isBard
+                          ? onSetBardLocalVolume
+                            ? () =>
+                                setVolumeOpenId((current) =>
+                                  current === spotlightTile.key ? null : spotlightTile.key,
+                                )
+                            : undefined
+                          : onSetParticipantVolume &&
+                              !spotlightTile.isLocal &&
+                              !spotlightTile.waiting
+                            ? () =>
+                                setVolumeOpenId((current) =>
+                                  current === spotlightTile.key ? null : spotlightTile.key,
+                                )
+                            : undefined
+                      }
+                      onVolumeChange={
+                        spotlightTile.isBard
+                          ? onSetBardLocalVolume
+                          : onSetParticipantVolume &&
+                              !spotlightTile.isLocal &&
+                              !spotlightTile.waiting
+                            ? (volume) =>
+                                onSetParticipantVolume(tileIdentity(spotlightTile), volume)
+                            : undefined
+                      }
+                      onPress={
+                        spotlightTile.isBard
+                          ? () => {
+                              onResumeBardAudio?.();
+                              setBardSheetOpen(true);
+                            }
+                          : undefined
+                      }
+                    />
+                  </View>
+                  {filmstripTiles.length > 0 ? (
+                    <ScrollView
+                      horizontal
+                      showsHorizontalScrollIndicator={false}
+                      style={[
+                        styles.filmstripScroll,
+                        layout.filmRowBudget
+                          ? { maxHeight: layout.filmRowBudget }
+                          : null,
+                      ]}
+                      contentContainerStyle={[
+                        styles.filmstrip,
+                        { gap: layout.filmGap },
+                      ]}>
+                      {filmstripTiles.map((tile) => (
+                        <ParticipantTile
+                          key={tile.key}
+                          tile={tile}
+                          avatarSize={layout.filmAvatar}
+                          tileWidth={layout.filmTileWidth}
+                          videoHeight={layout.filmVideoHeight}
+                          compact
+                          volumeOpen={volumeOpenId === tile.key}
+                          onToggleVolume={
+                            tile.isBard
+                              ? onSetBardLocalVolume
+                                ? () =>
+                                    setVolumeOpenId((current) =>
+                                      current === tile.key ? null : tile.key,
+                                    )
+                                : undefined
+                              : onSetParticipantVolume && !tile.isLocal && !tile.waiting
+                                ? () =>
+                                    setVolumeOpenId((current) =>
+                                      current === tile.key ? null : tile.key,
+                                    )
+                                : undefined
+                          }
+                          onVolumeChange={
+                            tile.isBard
+                              ? onSetBardLocalVolume
+                              : onSetParticipantVolume && !tile.isLocal && !tile.waiting
+                                ? (volume) =>
+                                    onSetParticipantVolume(tileIdentity(tile), volume)
+                                : undefined
+                          }
+                          onPress={
+                            tile.isBard
+                              ? () => {
+                                  onResumeBardAudio?.();
+                                  setBardSheetOpen(true);
+                                }
+                              : () => {
+                                  if (spotlightHoldRef.current) {
+                                    clearTimeout(spotlightHoldRef.current);
+                                    spotlightHoldRef.current = null;
+                                  }
+                                  pendingSpotlightRef.current = null;
+                                  setSpotlightKey(tile.key);
+                                }
+                          }
+                        />
+                      ))}
+                    </ScrollView>
+                  ) : null}
+                </View>
+              ) : (
+                <View
+                  style={[
+                    styles.grid,
+                    {
+                      width: layout.stageWidth,
+                      gap: layout.gap,
+                      maxHeight: layout.stageBudget,
+                    },
+                  ]}>
+                  {tiles.map((tile) => (
+                    <ParticipantTile
+                      key={tile.key}
+                      tile={tile}
+                      avatarSize={layout.avatarSize}
+                      tileWidth={layout.tileWidth}
+                      videoHeight={layout.videoHeight}
+                      volumeOpen={volumeOpenId === tile.key}
+                      onToggleVolume={
+                        tile.isBard
+                          ? onSetBardLocalVolume
+                            ? () =>
+                                setVolumeOpenId((current) =>
+                                  current === tile.key ? null : tile.key,
+                                )
+                            : undefined
+                          : onSetParticipantVolume && !tile.isLocal && !tile.waiting
+                            ? () =>
+                                setVolumeOpenId((current) =>
+                                  current === tile.key ? null : tile.key,
+                                )
+                            : undefined
+                      }
+                      onVolumeChange={
+                        tile.isBard
+                          ? onSetBardLocalVolume
+                          : onSetParticipantVolume && !tile.isLocal && !tile.waiting
+                            ? (volume) =>
+                                onSetParticipantVolume(tileIdentity(tile), volume)
+                            : undefined
+                      }
+                      onPress={
+                        tile.isBard
+                          ? () => {
+                              onResumeBardAudio?.();
+                              setBardSheetOpen(true);
+                            }
+                          : undefined
+                      }
+                    />
+                  ))}
+                </View>
+              )}
+            </View>
+            )}
+          </View>
+
+            <View style={styles.controls}>
             {failed && onRetry ? (
               <Pressable
                 accessibilityRole="button"
@@ -1840,6 +2724,39 @@ export function VoiceCallOverlay({
                   !mediaReady && styles.controlDisabled,
                 ]}>
                 <Ionicons name="camera-reverse-outline" size={22} color="#FFFFFF" />
+              </Pressable>
+            ) : null}
+
+            {onToggleScreenShare ? (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={
+                  screenShareOn
+                    ? 'Остановить демонстрацию (Ctrl+Shift+S)'
+                    : 'Демонстрация экрана — выбрать качество'
+                }
+                accessibilityState={{ selected: screenShareOn, expanded: screenQualityOpen }}
+                disabled={!mediaReady}
+                onPress={() => {
+                  if (screenShareOn) {
+                    setScreenQualityOpen(false);
+                    onToggleScreenShare();
+                    return;
+                  }
+                  setScreenQualityOpen((open) => !open);
+                }}
+                style={({ pressed }) => [
+                  styles.controlBtn,
+                  screenShareOn ? styles.controlBtnScreenOn : styles.controlBtnSecondary,
+                  screenQualityOpen && styles.controlBtnScreenOn,
+                  pressed && styles.pressed,
+                  !mediaReady && styles.controlDisabled,
+                ]}>
+                <Ionicons
+                  name={screenShareOn ? 'desktop' : 'desktop-outline'}
+                  size={22}
+                  color="#FFFFFF"
+                />
               </Pressable>
             ) : null}
 
@@ -1936,6 +2853,65 @@ export function VoiceCallOverlay({
         </View>
       </View>
     </Modal>
+
+    <Modal
+      visible={Boolean(visible && !minimized && screenQualityOpen && !screenShareOn)}
+      transparent
+      animationType="fade"
+      onRequestClose={() => setScreenQualityOpen(false)}>
+      <Pressable
+        style={styles.screenQualityBackdrop}
+        onPress={() => setScreenQualityOpen(false)}>
+        <View style={styles.screenQualityCard} pointerEvents="box-none">
+          <Text style={styles.screenQualityTitle}>Качество трансляции</Text>
+          <Text style={styles.screenQualityHint}>Всегда 30 кадров/с · затем выбор окна</Text>
+          <View style={styles.screenQualityRow}>
+            {SCREEN_SHARE_QUALITY_OPTIONS.map((option) => {
+              const active = lastScreenQuality === option.id;
+              return (
+                <Pressable
+                  key={option.id}
+                  accessibilityRole="button"
+                  accessibilityLabel={`${option.label}, ${option.hint}`}
+                  accessibilityState={{ selected: active }}
+                  onPress={() => {
+                    setLastScreenQuality(option.id);
+                    setScreenQualityOpen(false);
+                    onToggleScreenShare?.(option.id);
+                  }}
+                  style={({ pressed }) => [
+                    styles.screenQualityChip,
+                    active && styles.screenQualityChipActive,
+                    pressed && styles.pressed,
+                  ]}>
+                  <Text
+                    style={[
+                      styles.screenQualityChipLabel,
+                      active && styles.screenQualityChipLabelActive,
+                    ]}>
+                    {option.label}
+                  </Text>
+                  <Text
+                    style={[
+                      styles.screenQualityChipHint,
+                      active && styles.screenQualityChipHintActive,
+                    ]}>
+                    {option.hint}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Отмена"
+            onPress={() => setScreenQualityOpen(false)}
+            style={({ pressed }) => [styles.screenQualityCancel, pressed && styles.pressed]}>
+            <Text style={styles.screenQualityCancelText}>Отмена</Text>
+          </Pressable>
+        </View>
+      </Pressable>
+    </Modal>
     {diceLayer}
     <CallBardSheet
       visible={bardSheetOpen && bardPresent}
@@ -1975,6 +2951,14 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: Spacing.md,
+  },
+  rootFullscreen: {
+    paddingHorizontal: 0,
+    backgroundColor: '#111214',
+  },
+  rootStreamCinema: {
+    paddingHorizontal: 0,
+    backgroundColor: '#0B0C0E',
   },
   backdropHit: {
     ...StyleSheet.absoluteFillObject,
@@ -2076,6 +3060,9 @@ const styles = StyleSheet.create({
   miniCtrlOff: {
     backgroundColor: '#3A3C41',
   },
+  miniCtrlScreenOn: {
+    backgroundColor: '#5865F2',
+  },
   miniCtrlHangup: {
     backgroundColor: '#ED4245',
   },
@@ -2083,6 +3070,7 @@ const styles = StyleSheet.create({
     flex: 1,
     width: '100%',
     maxWidth: 720,
+    maxHeight: '86%',
     borderRadius: 20,
     backgroundColor: '#1E1F22',
     overflow: 'hidden',
@@ -2091,13 +3079,139 @@ const styles = StyleSheet.create({
     zIndex: 1,
   },
   shellDesktop: {
-    flexGrow: 0,
-    minHeight: 520,
-    maxHeight: '86%',
+    maxWidth: 980,
+  },
+  shellFullscreen: {
+    flex: 1,
+    flexGrow: 1,
+    width: '100%',
+    maxWidth: '100%',
+    minHeight: '100%',
+    maxHeight: '100%',
+    borderRadius: 0,
+    borderWidth: 0,
+  },
+  shellStreamCinema: {
+    backgroundColor: '#0B0C0E',
+  },
+  streamCinemaStage: {
+    flex: 1,
+    minHeight: 0,
+    width: '100%',
+    position: 'relative',
+    backgroundColor: '#0B0C0E',
+  },
+  streamWatchMain: {
+    width: '100%',
+    position: 'relative',
+    overflow: 'hidden',
+    borderRadius: 14,
+    backgroundColor: '#0B0C0E',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+  },
+  streamWatchChrome: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 2,
+  },
+  streamWatchLabel: {
+    position: 'absolute',
+    left: 10,
+    bottom: 10,
+    maxWidth: '70%',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 999,
+    backgroundColor: 'rgba(15, 16, 18, 0.78)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.12)',
+  },
+  streamWatchLabelText: {
+    color: '#F2F3F5',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  streamWatchExpandBtn: {
+    position: 'absolute',
+    right: 10,
+    bottom: 10,
+    zIndex: 3,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(15, 16, 18, 0.78)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.18)',
+  },
+  streamCinemaExit: {
+    position: 'absolute',
+    top: Spacing.md,
+    left: Spacing.md,
+    zIndex: 4,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 999,
+    backgroundColor: 'rgba(15, 16, 18, 0.78)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.14)',
+  },
+  streamCinemaExitLabel: {
+    color: '#F2F3F5',
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  streamSpeakerHud: {
+    position: 'absolute',
+    top: Spacing.md,
+    right: Spacing.md,
+    zIndex: 4,
+    maxWidth: 220,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    borderRadius: 14,
+    backgroundColor: 'rgba(15, 16, 18, 0.82)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.12)',
+  },
+  streamSpeakerHudLive: {
+    borderColor: 'rgba(35, 165, 89, 0.85)',
+  },
+  streamSpeakerHudCopy: {
+    flex: 1,
+    minWidth: 0,
+    gap: 2,
+  },
+  streamSpeakerHudEyebrow: {
+    color: '#B5BAC1',
+    fontSize: 10,
+    fontWeight: '600',
+  },
+  streamSpeakerHudName: {
+    color: '#F2F3F5',
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  streamSpeakerHudDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#23A559',
   },
   header: {
     flexDirection: 'row',
     alignItems: 'flex-start',
+    flexShrink: 0,
     gap: 12,
     paddingHorizontal: Spacing.lg,
     paddingTop: Spacing.lg,
@@ -2158,11 +3272,12 @@ const styles = StyleSheet.create({
   connectionBanner: {
     flexDirection: 'row',
     alignItems: 'flex-start',
+    flexShrink: 0,
     gap: 10,
     marginHorizontal: Spacing.md,
     marginBottom: Spacing.sm,
     paddingHorizontal: 14,
-    paddingVertical: 12,
+    paddingVertical: 10,
     borderRadius: 12,
     borderWidth: 1,
   },
@@ -2207,21 +3322,120 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '700',
   },
-  stageScroll: {
+  stage: {
     flex: 1,
+    minHeight: 0,
+    width: '100%',
   },
-  stageContent: {
-    flexGrow: 1,
+  stageInner: {
+    flex: 1,
+    minHeight: 0,
+    alignSelf: 'center',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.lg,
-    minHeight: 240,
+    paddingHorizontal: Spacing.sm,
+    paddingVertical: Spacing.sm,
+    gap: 8,
+  },
+  screenPicker: {
+    flexGrow: 0,
+    flexShrink: 0,
+    gap: 6,
+    paddingHorizontal: 4,
+  },
+  screenPickerLabel: {
+    color: '#B5BAC1',
+    fontSize: 12,
+    fontWeight: '700',
+    letterSpacing: 0.2,
+  },
+  screenPickerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingVertical: 2,
+  },
+  screenPickerChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    maxWidth: 180,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 10,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+  },
+  screenPickerChipActive: {
+    backgroundColor: 'rgba(88, 101, 242, 0.45)',
+    borderColor: 'rgba(88, 101, 242, 0.8)',
+  },
+  screenPickerChipText: {
+    color: '#B5BAC1',
+    fontSize: 13,
+    fontWeight: '600',
+    flexShrink: 1,
+  },
+  screenPickerChipTextActive: {
+    color: '#FFFFFF',
+  },
+  screenPickPrompt: {
+    flex: 1,
+    minHeight: 120,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+    paddingHorizontal: Spacing.lg,
+  },
+  screenPickPromptTitle: {
+    color: '#F2F3F5',
+    fontSize: FontSize.button,
+    fontWeight: '700',
+    textAlign: 'center',
+  },
+  screenPickPromptDetail: {
+    color: '#B5BAC1',
+    fontSize: 13,
+    lineHeight: 18,
+    textAlign: 'center',
+    maxWidth: 320,
+  },
+  spotlightStage: {
+    flex: 1,
+    minHeight: 0,
+    width: '100%',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  spotlightMain: {
+    flex: 1,
+    minHeight: 0,
+    width: '100%',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  filmstripScroll: {
+    width: '100%',
+    flexGrow: 0,
+    flexShrink: 0,
+    overflow: 'visible',
+  },
+  filmstrip: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'center',
+    paddingHorizontal: 4,
+    paddingBottom: 2,
+    overflow: 'visible',
   },
   grid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     justifyContent: 'center',
+    alignContent: 'center',
+    overflow: 'hidden',
   },
   tile: {
     alignItems: 'center',
@@ -2233,9 +3447,24 @@ const styles = StyleSheet.create({
     overflow: 'visible',
     position: 'relative',
   },
+  tileCompact: {
+    gap: 6,
+    paddingVertical: 8,
+    paddingHorizontal: 8,
+  },
+  tileSpotlight: {
+    // Same card chrome as filmstrip — only scale, don't stretch to stage width.
+    gap: 8,
+    paddingVertical: 10,
+    paddingHorizontal: 10,
+    backgroundColor: '#1E1F22',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.06)',
+  },
   tileVideo: {
     paddingHorizontal: 6,
     paddingTop: 6,
+    paddingBottom: 6,
     alignItems: 'stretch',
   },
   videoFrame: {
@@ -2246,6 +3475,9 @@ const styles = StyleSheet.create({
     borderWidth: 2,
     position: 'relative',
     minHeight: 120,
+  },
+  videoFrameScreen: {
+    backgroundColor: '#0B0C0E',
   },
   videoMuteBadge: {
     position: 'absolute',
@@ -2259,6 +3491,33 @@ const styles = StyleSheet.create({
     backgroundColor: '#ED4245',
     borderWidth: 2,
     borderColor: '#2B2D31',
+  },
+  videoScreenBadge: {
+    position: 'absolute',
+    left: 8,
+    top: 8,
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(88, 101, 242, 0.95)',
+    borderWidth: 2,
+    borderColor: '#2B2D31',
+  },
+  videoExpandBtn: {
+    position: 'absolute',
+    top: 8,
+    right: 8,
+    zIndex: 3,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(15, 16, 18, 0.78)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.18)',
   },
   videoUrgentChip: {
     position: 'absolute',
@@ -2468,6 +3727,7 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     width: '100%',
     maxWidth: '100%',
+    flexShrink: 0,
   },
   tileHint: {
     color: '#DCDDDE',
@@ -2479,6 +3739,8 @@ const styles = StyleSheet.create({
     position: 'relative',
     width: '100%',
     alignItems: 'center',
+    overflow: 'visible',
+    zIndex: 1,
   },
   volumeChip: {
     position: 'absolute',
@@ -2508,17 +3770,11 @@ const styles = StyleSheet.create({
   },
   volumeDockOverlay: {
     position: 'absolute',
-    left: 8,
-    right: 8,
-    bottom: 8,
-    zIndex: 3,
-  },
-  volumeDockSide: {
-    position: 'absolute',
-    right: -4,
-    top: '50%',
-    marginTop: -72,
-    zIndex: 3,
+    left: 6,
+    right: 6,
+    bottom: 6,
+    zIndex: 5,
+    minWidth: 0,
   },
   volumeDock: {
     flexDirection: 'row',
@@ -2527,7 +3783,7 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     paddingHorizontal: 10,
     borderRadius: 14,
-    backgroundColor: 'rgba(15, 16, 18, 0.82)',
+    backgroundColor: 'rgba(15, 16, 18, 0.88)',
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.12)',
     ...Platform.select({
@@ -2548,16 +3804,20 @@ const styles = StyleSheet.create({
   volumeDockControls: {
     alignItems: 'center',
     gap: 8,
+    minWidth: 0,
   },
   volumeDockControlsHorizontal: {
     flexDirection: 'row',
     width: '100%',
+    minWidth: 0,
   },
   volumeDockControlsVertical: {
     flexDirection: 'column',
   },
   volumeDockHorizontal: {
     width: '100%',
+    minWidth: 0,
+    alignSelf: 'stretch',
   },
   volumeDockVertical: {
     flexDirection: 'column',
@@ -2573,23 +3833,31 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: 'rgba(255,255,255,0.08)',
+    flexShrink: 0,
   },
   volumeMuteBtnActive: {
     backgroundColor: '#ED4245',
   },
   volumeTrackHit: {
-    flex: 1,
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: 0,
     justifyContent: 'center',
-    alignItems: 'center',
+    position: 'relative',
+    minWidth: 0,
   },
   volumeTrackHitHorizontal: {
     height: 28,
-    minWidth: 64,
+    minWidth: 72,
+    alignItems: 'stretch',
   },
   volumeTrackHitVertical: {
     width: 28,
     height: 96,
-    flex: 0,
+    flexGrow: 0,
+    flexShrink: 0,
+    flexBasis: 96,
+    alignItems: 'center',
   },
   volumeTrackRail: {
     borderRadius: 999,
@@ -2597,6 +3865,7 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   volumeTrackRailHorizontal: {
+    alignSelf: 'stretch',
     width: '100%',
     height: 5,
   },
@@ -2640,6 +3909,7 @@ const styles = StyleSheet.create({
   },
   volumePercent: {
     minWidth: 36,
+    flexShrink: 0,
     textAlign: 'right',
     color: '#DCDDDE',
     fontSize: 11,
@@ -2654,11 +3924,12 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
+    flexShrink: 0,
     flexWrap: 'wrap',
-    gap: 14,
-    paddingHorizontal: Spacing.lg,
-    paddingBottom: Spacing.lg,
-    paddingTop: Spacing.sm,
+    gap: 10,
+    paddingHorizontal: Spacing.md,
+    paddingBottom: Spacing.md,
+    paddingTop: Spacing.xs,
   },
   controlBtn: {
     width: 56,
@@ -2679,6 +3950,9 @@ const styles = StyleSheet.create({
   controlBtnMusicOn: {
     backgroundColor: '#157AFE',
   },
+  controlBtnScreenOn: {
+    backgroundColor: '#5865F2',
+  },
   controlBtnHangup: {
     backgroundColor: '#ED4245',
     width: 68,
@@ -2688,6 +3962,84 @@ const styles = StyleSheet.create({
   },
   hangupIcon: {
     transform: [{ rotate: '135deg' }],
+  },
+  screenQualityBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.55)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: Spacing.lg,
+  },
+  screenQualityCard: {
+    width: '100%',
+    maxWidth: 360,
+    borderRadius: 16,
+    padding: Spacing.md,
+    gap: 10,
+    backgroundColor: '#2B2D31',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+  },
+  screenQualityTitle: {
+    color: '#F2F3F5',
+    fontSize: FontSize.body,
+    fontWeight: '700',
+    textAlign: 'center',
+  },
+  screenQualityHint: {
+    color: '#B5BAC1',
+    fontSize: 12,
+    fontWeight: '500',
+    textAlign: 'center',
+    marginBottom: 4,
+  },
+  screenQualityRow: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  screenQualityChip: {
+    flex: 1,
+    minWidth: 0,
+    borderRadius: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 8,
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+  },
+  screenQualityChipActive: {
+    backgroundColor: 'rgba(88, 101, 242, 0.35)',
+    borderColor: 'rgba(132, 185, 255, 0.65)',
+  },
+  screenQualityChipLabel: {
+    color: '#F2F3F5',
+    fontSize: 15,
+    fontWeight: '800',
+  },
+  screenQualityChipLabelActive: {
+    color: '#FFFFFF',
+  },
+  screenQualityChipHint: {
+    color: '#949BA4',
+    fontSize: 11,
+    fontWeight: '500',
+    textAlign: 'center',
+  },
+  screenQualityChipHintActive: {
+    color: '#DCDDDE',
+  },
+  screenQualityCancel: {
+    alignSelf: 'center',
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    marginTop: 2,
+  },
+  screenQualityCancelText: {
+    color: '#B5BAC1',
+    fontSize: 13,
+    fontWeight: '600',
   },
   pressed: {
     opacity: 0.82,

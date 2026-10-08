@@ -5,10 +5,16 @@ import type { VideoTrack } from 'livekit-client';
 type Props = {
   track: VideoTrack | null;
   mirror?: boolean;
+  objectFit?: 'cover' | 'contain';
   style?: StyleProp<ViewStyle>;
 };
 
-export function CallVideoView({ track, mirror = false, style }: Props) {
+export function CallVideoView({
+  track,
+  mirror = false,
+  objectFit = 'cover',
+  style,
+}: Props) {
   if (!track) {
     return null;
   }
@@ -18,7 +24,7 @@ export function CallVideoView({ track, mirror = false, style }: Props) {
       <VideoView
         videoTrack={track}
         mirror={mirror}
-        objectFit="cover"
+        objectFit={objectFit}
         style={styles.video}
       />
     </View>

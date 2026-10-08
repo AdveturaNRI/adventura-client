@@ -1,11 +1,13 @@
 import { io, type Socket } from 'socket.io-client';
 
 import { API_ORIGIN } from '@/constants/api.config';
-import type { ChatMessage, ConversationListItem } from '@/services/chats/chatsApi';
+import type { ChatMessage, ChatReactionEvent, ConversationListItem } from '@/services/chats/chatsApi';
 import type { PortalNotification } from '@/services/notifications/notificationsApi';
 
 export const REALTIME_EVENTS = {
   MESSAGE_NEW: 'message:new',
+  MESSAGE_REACTION: 'message:reaction',
+  REACTION_UNREAD_SYNC: 'message-reaction:unread-sync',
   CONVERSATION_UPDATED: 'conversation:updated',
   CONVERSATION_READ: 'conversation:read',
   CONVERSATION_DELETED: 'conversation:deleted',
@@ -63,6 +65,8 @@ export type CallRealtimeEvent =
 
 export type RealtimeHandlers = {
   onMessageNew?: (message: ChatMessage) => void;
+  onMessageReaction?: (event: ChatReactionEvent) => void;
+  onReactionUnreadSync?: (event: { conversationId: string; count: number }) => void;
   onConversationUpdated?: (conversation: ConversationListItem) => void;
   onConversationRead?: (payload: ConversationReadPayload) => void;
   onConversationDeleted?: (payload: ConversationDeletedPayload) => void;
@@ -84,6 +88,12 @@ function ensureListeners(current: Socket) {
 
   current.on(REALTIME_EVENTS.MESSAGE_NEW, (payload: ChatMessage) => {
     handlers.onMessageNew?.(payload);
+  });
+  current.on(REALTIME_EVENTS.MESSAGE_REACTION, (payload: ChatReactionEvent) => {
+    handlers.onMessageReaction?.(payload);
+  });
+  current.on(REALTIME_EVENTS.REACTION_UNREAD_SYNC, (payload: { conversationId: string; count: number }) => {
+    handlers.onReactionUnreadSync?.(payload);
   });
   current.on(REALTIME_EVENTS.CONVERSATION_UPDATED, (payload: ConversationListItem) => {
     handlers.onConversationUpdated?.(payload);
@@ -156,10 +166,7 @@ export function updateRealtimeAuthToken(token: string) {
  * Re-auth + connect if the socket dropped while the user is still in the app.
  * `force` — после блокировки iOS Safari часто оставляет connected=true на мёртвом WS.
  */
-export function ensureRealtimeConnected(
-  token: string,
-  options?: { force?: boolean },
-) {
+export function ensureRealtimeConnected(token: string, options?: { force?: boolean }) {
   if (!token.trim()) {
     return;
   }

@@ -24,6 +24,7 @@ import {
 } from '@/services/auth/authApi';
 import type { AuthUser, LinkedOAuthProvider } from '@/services/api/types';
 import { onAccessTokenRefreshed } from '@/services/auth/token-refresh';
+import { ApiError } from '@/services/api/api-error';
 import {
   getVkAppId,
   getYandexClientId,
@@ -161,15 +162,32 @@ export function AuthProvider({
             skipLoading: true,
             skipAuthRefresh: true,
           });
-        } catch {
-          const refreshed = await refreshAuthTokens();
-          if (!refreshed) {
-            throw new Error('Session expired');
-          }
+        } catch (error) {
+          // A lost connection is not evidence that either token is invalid.
+          // Keep the cached session through VPN/network hand-offs and retry
+          // the request normally once the connection is back.
+          if (!(error instanceof ApiError) || error.status !== 401) {
+            // Keep accessToken/currentUser loaded from storage.
+          } else {
+            try {
+              const refreshed = await refreshAuthTokens();
+              if (!refreshed) {
+                await clearAuthSession();
+                if (!isMounted) return;
+                setToken(null);
+                setUser(null);
+                return;
+              }
 
-          accessToken = refreshed.accessToken;
-          refreshToken = refreshed.refreshToken;
-          currentUser = refreshed.user;
+              accessToken = refreshed.accessToken;
+              refreshToken = refreshed.refreshToken;
+              currentUser = refreshed.user;
+            } catch {
+              // The refresh endpoint was temporarily unavailable. The saved
+              // session stays intact and will be retried after the VPN/network
+              // hand-off has completed.
+            }
+          }
         }
 
         if (!isMounted) return;
@@ -179,7 +197,6 @@ export function AuthProvider({
         await saveAuthSession(accessToken, refreshToken, currentUser);
         trackUserSessionStarted('restore');
       } catch {
-        await clearAuthSession();
         if (!isMounted) return;
         setToken(null);
         setUser(null);

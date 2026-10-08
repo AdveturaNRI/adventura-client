@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { AppState, Platform } from 'react-native';
 import {
+  AudioPresets,
   ConnectionState,
   DisconnectReason,
   LocalVideoTrack,
   Room,
   RoomEvent,
+  ScreenSharePresets,
   Track,
   VideoPresets,
   type Participant,
@@ -36,6 +38,28 @@ export type ChatLiveVoiceStatus = 'idle' | 'connecting' | 'connected' | 'error';
 
 export type CameraFacingMode = 'user' | 'environment';
 
+/** Screen-share output quality (always 30 fps). */
+export type ScreenShareQuality = '480' | '720' | '1080';
+
+const SCREEN_SHARE_QUALITY_PRESETS: Record<
+  ScreenShareQuality,
+  { width: number; height: number; maxBitrate: number }
+> = {
+  '480': { width: 854, height: 480, maxBitrate: 1_500_000 },
+  '720': { width: 1280, height: 720, maxBitrate: 2_500_000 },
+  '1080': { width: 1920, height: 1080, maxBitrate: 5_000_000 },
+};
+
+export const SCREEN_SHARE_QUALITY_OPTIONS: Array<{
+  id: ScreenShareQuality;
+  label: string;
+  hint: string;
+}> = [
+  { id: '480', label: '480p', hint: 'Экономия трафика' },
+  { id: '720', label: '720p', hint: 'Баланс' },
+  { id: '1080', label: '1080p', hint: 'Максимум' },
+];
+
 export type ChatLiveVoiceParticipant = {
   identity: string;
   name: string;
@@ -43,10 +67,22 @@ export type ChatLiveVoiceParticipant = {
   muted: boolean;
   cameraOn: boolean;
   videoTrack: VideoTrack | null;
+  /** Screen / window share published (track may be null until viewer selects it). */
+  screenShareOn: boolean;
+  screenShareTrack: VideoTrack | null;
   avatarUrl: string | null;
   badges: RewardBadgeType[];
   avatarFrameId?: string | null;
   isLocal: boolean;
+};
+
+/** Available screen-share streams for the viewer picker. */
+export type ChatLiveScreenStream = {
+  identity: string;
+  name: string;
+  isLocal: boolean;
+  /** True when this client is subscribed / has local track. */
+  active: boolean;
 };
 
 const URGENT_TOPIC = 'adventura.urgent';
@@ -76,6 +112,12 @@ type UseChatLiveVoiceResult = {
   cameraOn: boolean;
   /** Local camera facing — front (`user`) or rear (`environment`). */
   cameraFacing: CameraFacingMode;
+  /** Local screen / window share active. */
+  screenShareOn: boolean;
+  /** Which remote/local screen share is subscribed for viewing (null = none). */
+  selectedScreenIdentity: string | null;
+  /** All published screen shares (even if not subscribed yet). */
+  screenStreams: ChatLiveScreenStream[];
   participants: ChatLiveVoiceParticipant[];
   /** identity → urgent flag (cleared only by sender toggle / leave) */
   urgentById: Record<string, boolean>;
@@ -88,6 +130,16 @@ type UseChatLiveVoiceResult = {
   toggleCamera: () => Promise<void>;
   /** Flip front ↔ rear camera (works while camera is on). */
   switchCameraFacing: () => Promise<void>;
+  /**
+   * Share a monitor / window / tab (browser picker).
+   * Pass quality when enabling (480/720/1080 @ 30fps). Omit / any when stopping.
+   * Returns whether tab/system audio was actually published (Chrome: need «Share audio»).
+   */
+  toggleScreenShare: (
+    quality?: ScreenShareQuality,
+  ) => Promise<{ enabled: boolean; audioPublished: boolean }>;
+  /** Subscribe to one screen share; unsubscribes the rest. Pass null to stop watching. */
+  selectScreenShare: (identity: string | null) => void;
   sendUrgentRequest: () => Promise<void>;
   setParticipantVolume: (identity: string, volume: number) => void;
   /** Reliable LiveKit data publish (topic + JSON body). No-op if not connected. */
@@ -152,8 +204,30 @@ function getCameraVideoTrack(participant: Participant): VideoTrack | null {
   return pub.track as VideoTrack;
 }
 
+function getScreenSharePublication(participant: Participant) {
+  return participant.getTrackPublication(Track.Source.ScreenShare) ?? null;
+}
+
+function getScreenShareTrack(participant: Participant): VideoTrack | null {
+  const pub = getScreenSharePublication(participant);
+  if (!pub || pub.isMuted || !pub.track) {
+    return null;
+  }
+  if (pub.track.kind !== Track.Kind.Video) {
+    return null;
+  }
+  return pub.track as VideoTrack;
+}
+
+/** Published screen share (muted pubs ignored). Track may be missing until subscribed. */
+function hasScreenSharePublication(participant: Participant): boolean {
+  const pub = getScreenSharePublication(participant);
+  return Boolean(pub && !pub.isMuted);
+}
+
 function mapOne(participant: Participant, isLocal: boolean): ChatLiveVoiceParticipant {
   const videoTrack = getCameraVideoTrack(participant);
+  const screenShareTrack = getScreenShareTrack(participant);
   return {
     identity: participant.identity,
     name: participant.name || participant.identity,
@@ -161,11 +235,46 @@ function mapOne(participant: Participant, isLocal: boolean): ChatLiveVoicePartic
     muted: !participant.isMicrophoneEnabled,
     cameraOn: Boolean(videoTrack),
     videoTrack,
+    screenShareOn: hasScreenSharePublication(participant),
+    screenShareTrack,
     avatarUrl: parseAvatarFromMetadata(participant.metadata),
     badges: parseBadgesFromMetadata(participant.metadata),
     avatarFrameId: parseFrameIdFromMetadata(participant.metadata),
     isLocal,
   };
+}
+
+function listScreenStreams(room: Room): ChatLiveScreenStream[] {
+  const all = [
+    mapOne(room.localParticipant, true),
+    ...Array.from(room.remoteParticipants.values()).map((p) => mapOne(p, false)),
+  ];
+  return all
+    .filter((p) => p.screenShareOn)
+    .map((p) => ({
+      identity: p.identity,
+      name: p.name,
+      isLocal: p.isLocal,
+      active: Boolean(p.screenShareTrack),
+    }));
+}
+
+function applyScreenShareSubscriptions(room: Room, selectedIdentity: string | null) {
+  for (const participant of room.remoteParticipants.values()) {
+    const want = selectedIdentity === participant.identity;
+    const videoPub = participant.getTrackPublication(Track.Source.ScreenShare);
+    const audioPub = participant.getTrackPublication(Track.Source.ScreenShareAudio);
+    if (videoPub && typeof videoPub.setSubscribed === 'function') {
+      if (videoPub.isSubscribed !== want) {
+        videoPub.setSubscribed(want);
+      }
+    }
+    if (audioPub && typeof audioPub.setSubscribed === 'function') {
+      if (audioPub.isSubscribed !== want) {
+        audioPub.setSubscribed(want);
+      }
+    }
+  }
 }
 
 function mapParticipants(room: Room): ChatLiveVoiceParticipant[] {
@@ -382,6 +491,11 @@ export function useChatLiveVoice(conversationId: string | null): UseChatLiveVoic
   const [muted, setMuted] = useState(false);
   const [deafened, setDeafened] = useState(false);
   const [cameraOn, setCameraOn] = useState(false);
+  const [screenShareOn, setScreenShareOn] = useState(false);
+  const [selectedScreenIdentity, setSelectedScreenIdentity] = useState<string | null>(null);
+  const selectedScreenIdentityRef = useRef<string | null>(null);
+  selectedScreenIdentityRef.current = selectedScreenIdentity;
+  const [screenStreams, setScreenStreams] = useState<ChatLiveScreenStream[]>([]);
   const [cameraFacing, setCameraFacing] = useState<CameraFacingMode>('user');
   const cameraFacingRef = useRef<CameraFacingMode>('user');
   cameraFacingRef.current = cameraFacing;
@@ -395,6 +509,25 @@ export function useChatLiveVoice(conversationId: string | null): UseChatLiveVoic
   urgentByIdRef.current = urgentById;
   const lastUrgentSentAtRef = useRef(0);
   const dataHandlersRef = useRef<Map<string, Set<RoomDataHandler>>>(new Map());
+
+  /** Auto-pick sole stream; keep current if still valid; clear when gone / need manual pick. */
+  const reconcileScreenSelection = useCallback((room: Room) => {
+    const streams = listScreenStreams(room);
+    setScreenStreams(streams);
+    let next = selectedScreenIdentityRef.current;
+    if (streams.length === 0) {
+      next = null;
+    } else if (streams.length === 1) {
+      next = streams[0]!.identity;
+    } else if (!next || !streams.some((s) => s.identity === next)) {
+      next = null;
+    }
+    if (next !== selectedScreenIdentityRef.current) {
+      selectedScreenIdentityRef.current = next;
+      setSelectedScreenIdentity(next);
+    }
+    applyScreenShareSubscriptions(room, next);
+  }, []);
 
   const subscribeRoomData = useCallback((topic: string, handler: RoomDataHandler) => {
     const key = topic.trim();
@@ -468,12 +601,18 @@ export function useChatLiveVoice(conversationId: string | null): UseChatLiveVoic
     if (!room) {
       setParticipants([]);
       setCameraOn(false);
+      setScreenShareOn(false);
+      setScreenStreams([]);
+      selectedScreenIdentityRef.current = null;
+      setSelectedScreenIdentity(null);
       return;
     }
+    reconcileScreenSelection(room);
     setParticipants(mapParticipants(room));
     setCameraOn(Boolean(getCameraVideoTrack(room.localParticipant)));
+    setScreenShareOn(hasScreenSharePublication(room.localParticipant));
     setMuted(!room.localParticipant.isMicrophoneEnabled);
-  }, []);
+  }, [reconcileScreenSelection]);
 
   const teardownRoom = useCallback(async (room: Room | null) => {
     clearRemoteAudioElements();
@@ -556,6 +695,10 @@ export function useChatLiveVoice(conversationId: string | null): UseChatLiveVoic
     setMuted(false);
     setDeafened(false);
     setCameraOn(false);
+    setScreenShareOn(false);
+    setScreenStreams([]);
+    selectedScreenIdentityRef.current = null;
+    setSelectedScreenIdentity(null);
     setCameraFacing('user');
     cameraFacingRef.current = 'user';
     setVolumeById({});
@@ -632,6 +775,15 @@ export function useChatLiveVoice(conversationId: string | null): UseChatLiveVoic
           facingMode: 'user',
           resolution: Platform.OS === 'web' ? VideoPresets.h720.resolution : VideoPresets.h540.resolution,
         },
+        // Screen share defaults: 1080p30 ceiling; actual layer set in toggleScreenShare.
+        publishDefaults: {
+          screenShareEncoding: ScreenSharePresets.h1080fps30.encoding,
+          screenShareSimulcastLayers: [
+            ScreenSharePresets.h720fps15,
+            ScreenSharePresets.h1080fps30,
+          ],
+          degradationPreference: 'maintain-resolution',
+        },
       });
       roomRef.current = room;
 
@@ -652,8 +804,37 @@ export function useChatLiveVoice(conversationId: string | null): UseChatLiveVoic
         .on(RoomEvent.LocalTrackPublished, sync)
         .on(RoomEvent.LocalTrackUnpublished, sync)
         .on(
+          RoomEvent.TrackPublished,
+          (publication: RemoteTrackPublication, participant: RemoteParticipant) => {
+            // Don't auto-pull every screen share — only the one the viewer picked.
+            if (
+              publication.source === Track.Source.ScreenShare ||
+              publication.source === Track.Source.ScreenShareAudio
+            ) {
+              const want = selectedScreenIdentityRef.current === participant.identity;
+              if (typeof publication.setSubscribed === 'function') {
+                publication.setSubscribed(want);
+              }
+            }
+            sync();
+          },
+        )
+        .on(RoomEvent.TrackUnpublished, sync)
+        .on(
           RoomEvent.TrackSubscribed,
           (track: RemoteTrack, _pub: RemoteTrackPublication, participant: RemoteParticipant) => {
+            // Race with autoSubscribe: drop screen media until viewer picks this identity.
+            if (
+              (_pub.source === Track.Source.ScreenShare ||
+                _pub.source === Track.Source.ScreenShareAudio) &&
+              selectedScreenIdentityRef.current !== participant.identity
+            ) {
+              if (typeof _pub.setSubscribed === 'function') {
+                _pub.setSubscribed(false);
+              }
+              sync();
+              return;
+            }
             const userVol = clampPlaybackVolume(
               volumeByIdRef.current[participant.identity] ?? 1,
             );
@@ -747,6 +928,7 @@ export function useChatLiveVoice(conversationId: string | null): UseChatLiveVoic
           setMuted(false);
           setDeafened(false);
           setCameraOn(false);
+          setScreenShareOn(false);
           setVolumeById({});
           volumeByIdRef.current = {};
           deafenedRef.current = false;
@@ -852,6 +1034,7 @@ export function useChatLiveVoice(conversationId: string | null): UseChatLiveVoic
       setMuted(!micOn);
       setDeafened(false);
       setCameraOn(false);
+      setScreenShareOn(false);
       setVolumeById({});
       volumeByIdRef.current = {};
       deafenedRef.current = false;
@@ -1030,6 +1213,83 @@ export function useChatLiveVoice(conversationId: string | null): UseChatLiveVoic
     }
   }, [cameraCaptureOptions, cameraOn, refreshParticipants, status]);
 
+  const toggleScreenShare = useCallback(async (quality: ScreenShareQuality = '720') => {
+    const room = roomRef.current;
+    if (!room || (status !== 'connected' && status !== 'connecting')) {
+      return { enabled: false, audioPublished: false };
+    }
+    const next = !screenShareOn;
+    try {
+      if (next) {
+        // Browser picker: monitor / window / tab.
+        // Screen audio must NOT use mic AEC/NS — kills music/system audio fidelity.
+        // Quality is user-picked (480/720/1080); fps always 30.
+        // simulcast off for screen: adaptiveStream otherwise sticks on a soft mid-layer for text.
+        const preset = SCREEN_SHARE_QUALITY_PRESETS[quality] ?? SCREEN_SHARE_QUALITY_PRESETS['720'];
+        const mobileCap = Platform.OS !== 'web' && quality === '1080';
+        const effective = mobileCap ? SCREEN_SHARE_QUALITY_PRESETS['720'] : preset;
+        await room.localParticipant.setScreenShareEnabled(
+          true,
+          {
+            audio: {
+              channelCount: 2,
+              autoGainControl: false,
+              echoCancellation: false,
+              noiseSuppression: false,
+            },
+            resolution: {
+              width: effective.width,
+              height: effective.height,
+              frameRate: 30,
+            },
+            contentHint: 'detail',
+            selfBrowserSurface: 'include',
+            surfaceSwitching: 'include',
+            systemAudio: 'include',
+            // Shared tab audio would otherwise double-play locally.
+            suppressLocalAudioPlayback: true,
+          },
+          {
+            audioPreset: AudioPresets.musicHighQualityStereo,
+            dtx: false,
+            red: false,
+            forceStereo: true,
+            // One high layer — simulcast + adaptiveStream often leaves text on a soft mid layer.
+            simulcast: false,
+            screenShareEncoding: {
+              maxBitrate: effective.maxBitrate,
+              maxFramerate: 30,
+              priority: 'high',
+            },
+            degradationPreference: 'maintain-resolution',
+          },
+        );
+        // Screen share must not steal the camera publish — re-assert if it was on.
+        if (cameraOn && !room.localParticipant.isCameraEnabled) {
+          await room.localParticipant.setCameraEnabled(
+            true,
+            await cameraCaptureOptions(cameraFacingRef.current),
+          );
+        }
+        // Ensure screen-audio pub isn't left muted after capture.
+        const screenAudio = room.localParticipant.getTrackPublication(
+          Track.Source.ScreenShareAudio,
+        );
+        if (screenAudio?.isMuted && screenAudio.track) {
+          await screenAudio.unmute();
+        }
+      } else {
+        await room.localParticipant.setScreenShareEnabled(false);
+      }
+    } catch (error) {
+      throw new Error(localizeErrorMessage(error, 'Не удалось начать демонстрацию экрана'));
+    }
+    refreshParticipants();
+    const audioPub = room.localParticipant.getTrackPublication(Track.Source.ScreenShareAudio);
+    const audioPublished = Boolean(audioPub?.track && !audioPub.isMuted);
+    return { enabled: next, audioPublished: next ? audioPublished : false };
+  }, [cameraCaptureOptions, cameraOn, refreshParticipants, screenShareOn, status]);
+
   const sendUrgentRequest = useCallback(async () => {
     const room = roomRef.current;
     if (!room || status !== 'connected') {
@@ -1172,6 +1432,20 @@ export function useChatLiveVoice(conversationId: string | null): UseChatLiveVoic
     }
   }, [conversationId, leave]);
 
+  const selectScreenShare = useCallback(
+    (identity: string | null) => {
+      selectedScreenIdentityRef.current = identity;
+      setSelectedScreenIdentity(identity);
+      const room = roomRef.current;
+      if (!room) {
+        return;
+      }
+      applyScreenShareSubscriptions(room, identity);
+      refreshParticipants();
+    },
+    [refreshParticipants],
+  );
+
   return {
     status,
     error,
@@ -1179,6 +1453,9 @@ export function useChatLiveVoice(conversationId: string | null): UseChatLiveVoic
     deafened,
     cameraOn,
     cameraFacing,
+    screenShareOn,
+    selectedScreenIdentity,
+    screenStreams,
     participants,
     urgentById,
     volumeById,
@@ -1188,6 +1465,8 @@ export function useChatLiveVoice(conversationId: string | null): UseChatLiveVoic
     toggleDeafen,
     toggleCamera,
     switchCameraFacing,
+    toggleScreenShare,
+    selectScreenShare,
     sendUrgentRequest,
     setParticipantVolume,
     publishRoomData,
