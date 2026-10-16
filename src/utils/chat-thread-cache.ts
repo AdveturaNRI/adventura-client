@@ -10,6 +10,8 @@ export type CachedChatThread = {
   messages: ChatMessage[];
   nextCursor: string | null;
   peerLastReadAt: string | null;
+  /** True after listMessages / prefetch filled this thread (not preview stubs alone). */
+  historyLoaded: boolean;
   updatedAt: number;
 };
 
@@ -100,6 +102,7 @@ export function setCachedThread(
     messages: ChatMessage[];
     nextCursor: string | null;
     peerLastReadAt: string | null;
+    historyLoaded?: boolean;
   },
 ) {
   const prev = threadCache.get(conversationId);
@@ -113,6 +116,7 @@ export function setCachedThread(
     messages: input.messages,
     nextCursor: input.nextCursor,
     peerLastReadAt: input.peerLastReadAt,
+    historyLoaded: input.historyLoaded ?? prev?.historyLoaded ?? false,
     updatedAt: Date.now(),
   });
 
@@ -156,6 +160,7 @@ export function mergeCachedThreadMessages(
     messages,
     nextCursor: page.nextCursor,
     peerLastReadAt: page.peerLastReadAt,
+    historyLoaded: true,
   });
 
   return {
@@ -176,6 +181,7 @@ export function appendCachedThreadMessage(conversationId: string, message: ChatM
       messages: [message],
       nextCursor: null,
       peerLastReadAt: null,
+      historyLoaded: false,
       updatedAt: Date.now(),
     });
     return;
@@ -244,7 +250,7 @@ export type HydratedChatThread = {
   ready: boolean;
 };
 
-/** Синхронный снимок для первого кадра: без лоадера, сразу последние сообщения. */
+/** Синхронный снимок для первого кадра. ready — только после реальной подгрузки истории. */
 export function hydrateChatThread(conversationId?: string): HydratedChatThread {
   if (!conversationId) {
     return {
@@ -260,8 +266,15 @@ export function hydrateChatThread(conversationId?: string): HydratedChatThread {
   const conversation = thread?.conversation ?? getCachedConversation(conversationId);
   let messages = thread?.messages ?? [];
   const preview = conversation?.lastMessage;
+  const historyLoaded = Boolean(thread?.historyLoaded);
 
-  if (conversation && preview && !messages.some((item) => item.id === preview.id)) {
+  // Preview stub only after history is known — otherwise empty UI looks like «нет сообщений».
+  if (
+    historyLoaded &&
+    conversation &&
+    preview &&
+    !messages.some((item) => item.id === preview.id)
+  ) {
     const stub = messageFromConversationPreview(conversation);
     if (stub) {
       appendCachedThreadMessage(conversationId, stub);
@@ -276,7 +289,7 @@ export function hydrateChatThread(conversationId?: string): HydratedChatThread {
     messages,
     nextCursor: thread?.nextCursor ?? null,
     peerLastReadAt: thread?.peerLastReadAt ?? conversation?.peerLastReadAt ?? null,
-    ready: Boolean(conversation) || messages.length > 0,
+    ready: historyLoaded,
   };
 }
 

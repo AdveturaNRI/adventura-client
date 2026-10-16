@@ -1,6 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import type { AuthUser } from '@/services/api/types';
+import { publishAuthSessionSync } from '@/utils/auth-session-sync';
 
 const AUTH_TOKEN_KEY = '@adventura/auth-token';
 const AUTH_REFRESH_TOKEN_KEY = '@adventura/auth-refresh-token';
@@ -50,6 +51,7 @@ export async function saveAuthSession(
     [AUTH_REFRESH_TOKEN_KEY]: refreshToken,
     [AUTH_USER_KEY]: JSON.stringify(user),
   });
+  publishAuthSessionSync('save', user.id);
 }
 
 export async function patchStoredUser(patch: Partial<AuthUser>): Promise<AuthUser | null> {
@@ -69,4 +71,5 @@ export async function clearAuthSession(): Promise<void> {
     AUTH_REFRESH_TOKEN_KEY,
     AUTH_USER_KEY,
   ]);
+  publishAuthSessionSync('clear', null);
 }

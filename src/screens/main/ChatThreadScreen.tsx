@@ -2109,11 +2109,12 @@ export default function ChatThreadScreen() {
         setPeerLastReadAt(snapshot.peerLastReadAt);
         setLoading(false);
       } else {
-        setConversation(null);
-        setMessages([]);
-        setUnreadBoundaryAt(null);
-        setNextCursor(null);
-        setPeerLastReadAt(null);
+        // Keep list metadata for the header; keep loading until history arrives.
+        setConversation(cachedConversation);
+        setMessages(snapshot.messages);
+        setUnreadBoundaryAt(cachedConversation?.myLastReadAt ?? null);
+        setNextCursor(snapshot.nextCursor);
+        setPeerLastReadAt(snapshot.peerLastReadAt);
         setLoading(true);
       }
 
@@ -3873,7 +3874,7 @@ export default function ChatThreadScreen() {
             </View>
           ) : null}
 
-          {loading && !conversation ? (
+          {loading && messages.length === 0 ? (
             <View
               style={{
                 flex: 1,

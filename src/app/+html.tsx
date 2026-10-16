@@ -55,6 +55,87 @@ body {
   border-radius: 999px;
 }
 
+/* Call overlay: always-visible thin scrollbar when the people grid overflows. */
+.call-grid-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.55) rgba(255, 255, 255, 0.1);
+  scrollbar-gutter: stable;
+}
+
+/* Volume slider: browser must not steal the drag into scroll/pan. */
+.call-volume-track,
+[data-volume-track='1'],
+.call-volume-range {
+  touch-action: none !important;
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.call-volume-range {
+  -webkit-appearance: none;
+  appearance: none;
+  background: transparent;
+}
+
+.call-volume-range:focus {
+  outline: none;
+}
+
+.call-volume-range::-webkit-slider-runnable-track {
+  height: 6px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.18);
+}
+
+.call-volume-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  margin-top: -5px;
+  border-radius: 50%;
+  background: #ffffff;
+  border: 2px solid #4b99ff;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
+  cursor: pointer;
+}
+
+.call-volume-range::-moz-range-track {
+  height: 6px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.18);
+}
+
+.call-volume-range::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #ffffff;
+  border: 2px solid #4b99ff;
+  cursor: pointer;
+}
+
+.call-grid-scroll::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+  -webkit-appearance: none;
+}
+
+.call-grid-scroll::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 999px;
+}
+
+.call-grid-scroll::-webkit-scrollbar-thumb {
+  background-color: rgba(255, 255, 255, 0.5);
+  border-radius: 999px;
+}
+
+.call-grid-scroll::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(255, 255, 255, 0.7);
+}
+
 .user-card-photo,
 .user-card-photo img {
   -webkit-user-drag: none !important;

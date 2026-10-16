@@ -2,6 +2,8 @@ import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { type ComponentProps } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
+import { NavbarIcon } from '@/components/ui/navigation/NavbarIcon';
+import type { NavbarIconKey } from '@/components/ui/navigation/navbar-icon-assets';
 import { FontSize, Radius, Sizes, Spacing, type ThemeColors } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { useThemedStyles } from '@/hooks/use-themed-styles';
@@ -12,8 +14,8 @@ type MaterialCommunityIconName = ComponentProps<typeof MaterialCommunityIcons>['
 export type SwitcherOption = {
   key: string;
   label: string;
-  icon?: IoniconName | MaterialCommunityIconName;
-  iconSet?: 'ionicons' | 'material-community';
+  icon?: IoniconName | MaterialCommunityIconName | NavbarIconKey;
+  iconSet?: 'ionicons' | 'material-community' | 'navbar';
   badge?: number;
 };
 
@@ -172,7 +174,9 @@ export function Switcher({
               showLabelOnlyWhenActive && (isActive ? styles.tabExpanded : styles.tabIconOnly),
             ]}>
             {option.icon ? (
-              option.iconSet === 'material-community' ? (
+              option.iconSet === 'navbar' ? (
+                <NavbarIcon name={option.icon as NavbarIconKey} size={iconSize} color={iconColor} />
+              ) : option.iconSet === 'material-community' ? (
                 <MaterialCommunityIcons
                   name={option.icon as MaterialCommunityIconName}
                   size={iconSize}

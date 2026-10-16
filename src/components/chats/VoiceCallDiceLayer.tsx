@@ -21,6 +21,8 @@ type VoiceCallDiceLayerProps = {
   senderNickname: string;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /** Cinema OS fullscreen: portal is outside the FS element — surface first. */
+  onNeedsSurface?: () => void;
 };
 
 /**
@@ -33,6 +35,7 @@ export function VoiceCallDiceLayer({
   senderNickname,
   open,
   onOpenChange,
+  onNeedsSurface,
 }: VoiceCallDiceLayerProps) {
   const { user } = useAuth();
   const { subscribeMessages } = useRealtime();
@@ -175,6 +178,13 @@ export function VoiceCallDiceLayer({
 
   const diceActive = open || busy || Boolean(localRoll) || Boolean(incoming);
 
+  useEffect(() => {
+    if (!diceActive) {
+      return;
+    }
+    onNeedsSurface?.();
+  }, [diceActive, onNeedsSurface]);
+
   const tree = (
     <View
       pointerEvents={diceActive ? 'box-none' : 'none'}
@@ -207,7 +217,7 @@ export function VoiceCallDiceLayer({
 const styles = StyleSheet.create({
   host: {
     ...StyleSheet.absoluteFillObject,
-    zIndex: 11000,
+    zIndex: 120000,
   },
   hostIdle: {
     position: 'absolute',

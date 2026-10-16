@@ -50,6 +50,18 @@ const SCREEN_SHARE_QUALITY_PRESETS: Record<
   '1080': { width: 1920, height: 1080, maxBitrate: 5_000_000 },
 };
 
+/** Camera: web 1080p / native 720p — local preview is raw; remote needs a higher encode ceiling. */
+function cameraVideoPreset() {
+  return Platform.OS === 'web' ? VideoPresets.h1080 : VideoPresets.h720;
+}
+
+/** Simulcast mid layers stay useful without adaptiveStream sticking on soft h180/h360. */
+function cameraSimulcastLayers() {
+  return Platform.OS === 'web'
+    ? [VideoPresets.h360, VideoPresets.h720]
+    : [VideoPresets.h180, VideoPresets.h360];
+}
+
 export const SCREEN_SHARE_QUALITY_OPTIONS: Array<{
   id: ScreenShareQuality;
   label: string;
@@ -751,8 +763,10 @@ export function useChatLiveVoice(conversationId: string | null): UseChatLiveVoic
         return;
       }
 
+      const camPreset = cameraVideoPreset();
       room = new Room({
-        adaptiveStream: true,
+        // pixelDensity 2: prefer sharper layer on mid-size call tiles (CSS px underestimate).
+        adaptiveStream: { pixelDensity: 2 },
         dynacast: true,
         // iOS Safari fires pagehide/freeze on brief background — don't drop the call.
         // LiveKit still registers `freeze`; we strip it after connect (see detachLivekitPageLeaveHandlers).
@@ -773,10 +787,12 @@ export function useChatLiveVoice(conversationId: string | null): UseChatLiveVoic
         },
         videoCaptureDefaults: {
           facingMode: 'user',
-          resolution: Platform.OS === 'web' ? VideoPresets.h720.resolution : VideoPresets.h540.resolution,
+          resolution: camPreset.resolution,
         },
-        // Screen share defaults: 1080p30 ceiling; actual layer set in toggleScreenShare.
+        // Camera + screen share publish ceilings; screen quality also set in toggleScreenShare.
         publishDefaults: {
+          videoEncoding: camPreset.encoding,
+          videoSimulcastLayers: cameraSimulcastLayers(),
           screenShareEncoding: ScreenSharePresets.h1080fps30.encoding,
           screenShareSimulcastLayers: [
             ScreenSharePresets.h720fps15,
@@ -1148,13 +1164,11 @@ export function useChatLiveVoice(conversationId: string | null): UseChatLiveVoic
 
   const cameraCaptureOptions = useCallback(async (facing: CameraFacingMode) => {
     const prefs = await loadVoiceDevicePrefs();
-    const resolution =
-      Platform.OS === 'web' ? VideoPresets.h720.resolution : VideoPresets.h540.resolution;
     // Pin deviceId only for front cam — rear switch must not keep the front device.
     const pinDevice = facing === 'user' && Boolean(prefs.videoDeviceId?.trim());
     return {
       facingMode: facing,
-      resolution,
+      resolution: cameraVideoPreset().resolution,
       ...(pinDevice ? { deviceId: prefs.videoDeviceId!.trim() } : {}),
     };
   }, []);

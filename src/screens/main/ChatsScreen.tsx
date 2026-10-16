@@ -29,7 +29,7 @@ import { useIsDesktopSidebarVisible } from '@/components/navigation/DesktopTheme
 import { PartnersTicker } from '@/components/partners/PartnersTicker';
 import { ScreenTransition } from '@/components/navigation/ScreenTransition';
 import { avatarFrameOuterSize } from '@/components/rewards/AvatarFrame';
-import { toast } from '@/components/ui';
+import { Switcher, toast, type SwitcherOption } from '@/components/ui';
 import { FontSize, Radius, Spacing, type ThemeColors } from '@/constants/theme';
 import { useAuth } from '@/context/AuthContext';
 import { useRealtime } from '@/context/RealtimeContext';
@@ -59,11 +59,58 @@ import {
   removeCachedConversation,
   setCachedConversations,
 } from '@/utils/chat-thread-cache';
+import {
+  getChatsListTabSync,
+  loadChatsListTab,
+  saveChatsListTab,
+  type ChatsListTab,
+} from '@/utils/chats-list-tab-storage';
 import { localizeErrorMessage } from '@/utils/localizeError';
 import { stableAvatarUrl } from '@/utils/stable-avatar-url';
 
 function isGroupChat(item: ConversationListItem) {
   return item.type === 'group';
+}
+
+/** Ниже этой ширины подписи не влезают — оставляем текст только у активной. */
+const CHATS_TABS_COMPACT_MAX_WIDTH = 420;
+
+const CHATS_TAB_OPTIONS: SwitcherOption[] = [
+  { key: 'all', label: 'Все', icon: 'chatbubbles-outline' },
+  {
+    key: 'favorites',
+    label: 'Избранные',
+    icon: 'crown-outline',
+    iconSet: 'material-community',
+  },
+  { key: 'groups', label: 'Группы', icon: 'people-outline' },
+  {
+    key: 'games',
+    label: 'Игры',
+    icon: 'games',
+    iconSet: 'navbar',
+  },
+];
+
+function isFavoriteChat(item: ConversationListItem) {
+  return Boolean(item.isFavorite) && !item.blockedByMe && !item.blockedMe;
+}
+
+function isGameChat(item: ConversationListItem) {
+  return Boolean(item.gameId);
+}
+
+function conversationMatchesTab(item: ConversationListItem, tab: ChatsListTab) {
+  if (tab === 'favorites') {
+    return isFavoriteChat(item);
+  }
+  if (tab === 'groups') {
+    return isGroupChat(item) && !isGameChat(item);
+  }
+  if (tab === 'games') {
+    return isGameChat(item);
+  }
+  return true;
 }
 
 /** Время активности для сортировки списка — превью события/сообщения, не «сырой» updatedAt. */
@@ -202,6 +249,12 @@ function createStyles(colors: ThemeColors, isRail: boolean, isDark: boolean) {
       paddingHorizontal: isRail ? 0 : undefined,
       marginBottom: Spacing.sm,
       flexShrink: 0,
+    },
+    tabsWrap: {
+      width: '100%',
+      marginBottom: Spacing.sm,
+      flexShrink: 0,
+      paddingHorizontal: isRail ? 0 : undefined,
     },
     searchWrap: {
       flexDirection: 'row',
@@ -660,15 +713,68 @@ export default function ChatsScreen({ variant = 'page' }: ChatsScreenProps) {
     null,
   );
   const [searchQuery, setSearchQuery] = useState('');
+  const [listTab, setListTab] = useState<ChatsListTab>(getChatsListTabSync);
+  const [tabsCompact, setTabsCompact] = useState(isRail);
   const menuTriggerRefs = useRef<Record<string, View | null>>({});
   const itemsRef = useRef<ConversationListItem[]>([]);
   itemsRef.current = items;
 
+  const handleTabsLayout = useCallback((width: number) => {
+    const next = width > 0 && width < CHATS_TABS_COMPACT_MAX_WIDTH;
+    setTabsCompact((prev) => (prev === next ? prev : next));
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    void loadChatsListTab().then((tab) => {
+      if (!cancelled) {
+        setListTab(tab);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const handleListTabChange = useCallback((key: string) => {
+    const next = key as ChatsListTab;
+    setListTab(next);
+    void saveChatsListTab(next);
+  }, []);
+
+  const tabUnreadCounts = useMemo(
+    () => ({
+      all: items.filter((item) => item.unread).length,
+      favorites: items.filter((item) => isFavoriteChat(item) && item.unread).length,
+      groups: items.filter((item) => isGroupChat(item) && !isGameChat(item) && item.unread)
+        .length,
+      games: items.filter((item) => isGameChat(item) && item.unread).length,
+    }),
+    [items],
+  );
+
+  const tabOptions = useMemo<SwitcherOption[]>(
+    () =>
+      CHATS_TAB_OPTIONS.map((option) => {
+        const unread = tabUnreadCounts[option.key as ChatsListTab] ?? 0;
+        return {
+          ...option,
+          badge: unread > 0 ? unread : undefined,
+        };
+      }),
+    [tabUnreadCounts],
+  );
+
   const filteredItems = useMemo(
-    () => items.filter((item) => conversationMatchesQuery(item, searchQuery)),
-    [items, searchQuery],
+    () =>
+      items.filter(
+        (item) =>
+          conversationMatchesTab(item, listTab) && conversationMatchesQuery(item, searchQuery),
+      ),
+    [items, listTab, searchQuery],
   );
   const searchActive = searchQuery.trim().length > 0;
+  const tabFilterActive = listTab !== 'all';
 
   const load = useCallback(async () => {
     try {
@@ -721,6 +827,18 @@ export default function ChatsScreen({ variant = 'page' }: ChatsScreenProps) {
     }
     void load();
   }, [dataResyncAt, load]);
+
+  // Account switch: drop previous user's list until the new fetch lands.
+  useEffect(() => {
+    setItems(getCachedConversations() ?? []);
+    setLoading(!getCachedConversations());
+    if (user?.id) {
+      void load();
+    } else {
+      setItems([]);
+      setLoading(false);
+    }
+  }, [load, user?.id]);
 
   useEffect(() => {
     if (!lastConversationUpdate) {
@@ -998,7 +1116,7 @@ export default function ChatsScreen({ variant = 'page' }: ChatsScreenProps) {
 
   const handlePinnedReorder = useCallback(
     (data: ConversationListItem[]) => {
-      if (searchQuery.trim()) {
+      if (searchQuery.trim() || listTab !== 'all') {
         return;
       }
       const pinned = data.filter((item) => item.isPinned);
@@ -1034,7 +1152,7 @@ export default function ChatsScreen({ variant = 'page' }: ChatsScreenProps) {
           void load();
         });
     },
-    [load, searchQuery],
+    [listTab, load, searchQuery],
   );
 
   const handleLeaveGroup = useCallback(
@@ -1305,6 +1423,21 @@ export default function ChatsScreen({ variant = 'page' }: ChatsScreenProps) {
 
         {!isRail ? <PartnersTicker /> : null}
 
+        {items.length > 0 ? (
+          <View
+            style={localStyles.tabsWrap}
+            onLayout={(event) => handleTabsLayout(event.nativeEvent.layout.width)}>
+            <Switcher
+              options={tabOptions}
+              value={listTab}
+              onChange={handleListTabChange}
+              size="compact"
+              stretch
+              showLabelOnlyWhenActive={tabsCompact}
+            />
+          </View>
+        ) : null}
+
         {items.length > 0 || searchActive ? (
           <View style={localStyles.searchWrap}>
             <Ionicons name="search" size={16} color={colors.textMuted} />
@@ -1345,14 +1478,32 @@ export default function ChatsScreen({ variant = 'page' }: ChatsScreenProps) {
           </View>
         ) : filteredItems.length === 0 ? (
           <View style={localStyles.empty}>
-            <Text style={localStyles.emptyTitle}>Ничего не нашли</Text>
+            <Text style={localStyles.emptyTitle}>
+              {searchActive
+                ? 'Ничего не нашли'
+                : listTab === 'favorites'
+                  ? 'Пока нет избранных'
+                  : listTab === 'groups'
+                    ? 'Пока нет групп'
+                    : listTab === 'games'
+                      ? 'Нет игровых чатов'
+                      : 'Ничего не нашли'}
+            </Text>
             <Text style={localStyles.emptyHint}>
-              Попробуйте другой ник, название группы или фрагмент сообщения.
+              {searchActive
+                ? 'Попробуйте другой ник, название группы или фрагмент сообщения.'
+                : listTab === 'favorites'
+                  ? 'Отметьте чат звёздочкой — он появится здесь.'
+                  : listTab === 'groups'
+                    ? 'Соберите группу кнопкой сверху — она появится здесь.'
+                    : listTab === 'games'
+                      ? 'Чаты привязанных игр покажутся на этой вкладке.'
+                      : 'Попробуйте другой ник, название группы или фрагмент сообщения.'}
             </Text>
           </View>
         ) : (
           <GestureHandlerRootView style={localStyles.listWrap}>
-            {Platform.OS === 'web' || searchActive ? (
+            {Platform.OS === 'web' || searchActive || tabFilterActive ? (
               <FlatList
                 style={localStyles.list}
                 contentContainerStyle={localStyles.listContent}

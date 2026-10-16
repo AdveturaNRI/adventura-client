@@ -9,6 +9,8 @@ type NavbarIconProps = {
   active?: boolean;
   /** White icon for blue menu tiles. */
   inverted?: boolean;
+  /** Override theme colors (e.g. Switcher tabs). */
+  color?: string;
 };
 
 function tintSvg(xml: string, color: string) {
@@ -20,9 +22,16 @@ function tintSvg(xml: string, color: string) {
     .replace(/stroke="white"/gi, `stroke="${color}"`);
 }
 
-export function NavbarIcon({ name, size = 22, active = false, inverted = false }: NavbarIconProps) {
+export function NavbarIcon({
+  name,
+  size = 22,
+  active = false,
+  inverted = false,
+  color: colorOverride,
+}: NavbarIconProps) {
   const colors = useTheme();
-  const color = inverted ? colors.onPrimary : active ? colors.primary : colors.textMuted;
+  const color =
+    colorOverride ?? (inverted ? colors.onPrimary : active ? colors.primary : colors.textMuted);
   const xml = tintSvg(NAVBAR_ICON_SVGS[name], color);
 
   return <SvgXml xml={xml} width={size} height={size} />;

@@ -275,12 +275,19 @@ export function useChatLiveVoice(conversationId) {
                 return;
             }
             room = new Room({
-                adaptiveStream: true,
+                adaptiveStream: { pixelDensity: 2 },
                 dynacast: true,
                 disconnectOnPageLeave: true,
                 videoCaptureDefaults: {
                     facingMode: 'user',
-                    resolution: Platform.OS === 'web' ? VideoPresets.h720.resolution : VideoPresets.h540.resolution,
+                    resolution: Platform.OS === 'web' ? VideoPresets.h1080.resolution : VideoPresets.h720.resolution,
+                },
+                publishDefaults: {
+                    videoEncoding: Platform.OS === 'web' ? VideoPresets.h1080.encoding : VideoPresets.h720.encoding,
+                    videoSimulcastLayers: Platform.OS === 'web'
+                        ? [VideoPresets.h360, VideoPresets.h720]
+                        : [VideoPresets.h180, VideoPresets.h360],
+                    degradationPreference: 'maintain-resolution',
                 },
             });
             roomRef.current = room;
@@ -521,7 +528,7 @@ export function useChatLiveVoice(conversationId) {
         try {
             await room.localParticipant.setCameraEnabled(next, {
                 facingMode: 'user',
-                resolution: Platform.OS === 'web' ? VideoPresets.h720.resolution : VideoPresets.h540.resolution,
+                resolution: Platform.OS === 'web' ? VideoPresets.h1080.resolution : VideoPresets.h720.resolution,
                 ...(prefs.videoDeviceId?.trim() ? { deviceId: prefs.videoDeviceId.trim() } : {}),
             });
         }

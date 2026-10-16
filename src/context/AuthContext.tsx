@@ -4,6 +4,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from 'react';
@@ -41,6 +42,8 @@ import {
   patchStoredUser,
   saveAuthSession,
 } from '@/utils/auth-storage';
+import { subscribeAuthSessionSync } from '@/utils/auth-session-sync';
+import { clearChatCaches } from '@/utils/chat-thread-cache';
 import { localizeErrorMessage } from '@/utils/localizeError';
 import { ensureUploadLimits } from '@/utils/upload-limits';
 import { trackUserSessionStarted } from '@/services/analytics/analytics';
@@ -104,11 +107,65 @@ export function AuthProvider({
   const [oauthIdsReady, setOauthIdsReady] = useState(
     () => Boolean(getVkAppId() || getYandexClientId()),
   );
+  const authUserIdRef = useRef<string | null | undefined>(undefined);
 
   useEffect(() => {
     if (!enabled) return;
     return onAccessTokenRefreshed((accessToken) => {
       setToken(accessToken);
+    });
+  }, [enabled]);
+
+  // Drop in-memory chats when identity changes (login / logout / account switch).
+  useEffect(() => {
+    if (!enabled) {
+      return;
+    }
+    const nextId = user?.id ?? null;
+    if (authUserIdRef.current === undefined) {
+      authUserIdRef.current = nextId;
+      return;
+    }
+    if (authUserIdRef.current === nextId) {
+      return;
+    }
+    authUserIdRef.current = nextId;
+    clearChatCaches();
+  }, [enabled, user?.id]);
+
+  // Other tab signed in / out — IndexedDB won't fire `storage`, so we ping explicitly.
+  useEffect(() => {
+    if (!enabled || Platform.OS !== 'web') {
+      return;
+    }
+
+    let cancelled = false;
+
+    const applyStoredSession = async () => {
+      const [storedToken, storedRefreshToken, storedUser] = await Promise.all([
+        getStoredToken(),
+        getStoredRefreshToken(),
+        getStoredUser(),
+      ]);
+      if (cancelled) {
+        return;
+      }
+
+      if (!storedToken || !storedRefreshToken || !storedUser) {
+        setToken(null);
+        setUser(null);
+        setRedirectToQuestionnaire(false);
+        setIsLoading(false);
+        return;
+      }
+
+      setToken(storedToken);
+      setUser(storedUser);
+      setIsLoading(false);
+    };
+
+    return subscribeAuthSessionSync(() => {
+      void applyStoredSession();
     });
   }, [enabled]);
 
@@ -403,6 +460,7 @@ export function AuthProvider({
     }
     const refreshToken = await getStoredRefreshToken();
     await logoutUser(refreshToken);
+    clearChatCaches();
     await clearAuthSession();
     setToken(null);
     setUser(null);
