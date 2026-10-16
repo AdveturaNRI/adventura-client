@@ -3296,19 +3296,6 @@ export function VoiceCallOverlay({
     streamCinema,
   ]);
 
-  // Cinema: urgent peer must stay visible — expand rail + keep dock up.
-  useEffect(() => {
-    if (!cinemaActive) {
-      return;
-    }
-    const hasUrgent = tiles.some((t) => t.urgent && !t.isBard);
-    if (!hasUrgent) {
-      return;
-    }
-    setCinemaRailCollapsed(false);
-    revealCinemaControls({ hold: true });
-  }, [cinemaActive, revealCinemaControls, tiles]);
-
   useEffect(() => {
     if (!bardPresent) {
       setBardSheetOpen(false);
@@ -3504,6 +3491,20 @@ export function VoiceCallOverlay({
     volumeById,
     waitingPeers,
   ]);
+
+  // Cinema: urgent peer must stay visible — expand rail + keep dock up.
+  // Must sit after `tiles` — deps array reads it during render.
+  useEffect(() => {
+    if (!cinemaActive) {
+      return;
+    }
+    const hasUrgent = tiles.some((t) => t.urgent && !t.isBard);
+    if (!hasUrgent) {
+      return;
+    }
+    setCinemaRailCollapsed(false);
+    revealCinemaControls({ hold: true });
+  }, [cinemaActive, revealCinemaControls, tiles]);
 
   const bardTile = useMemo(
     () => tiles.find((t) => t.isBard) ?? null,
