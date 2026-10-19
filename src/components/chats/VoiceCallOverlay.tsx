@@ -270,7 +270,8 @@ function mobileStackFilmLayout(
 
 /** Voice tile height used for scroll/peek math on mobile. */
 function estimateVoiceTileHeight(tileWidth: number, avatarSize: number): number {
-  return Math.max(Math.round(tileWidth * 1.08), avatarSize + 76);
+  // +18: reserved badge row under the name (even when empty).
+  return Math.max(Math.round(tileWidth * 1.08), avatarSize + 94);
 }
 
 /**
@@ -1534,7 +1535,7 @@ function CinemaRailPersonTile({
   const showPinBtn = canPin && (hovered || Platform.OS !== 'web');
   const showCam = Boolean(tile.cameraOn && (tile.videoTrack || tile.mock));
   const name = tile.isLocal ? `${tile.name} (вы)` : tile.name;
-  const canPromote = Boolean(onPress && tile.cameraOn);
+  const canPromote = Boolean(onPress && tileHasPriorityVideo(tile));
   const avatarSize = Math.max(
     28,
     Math.min(48, Math.round(Math.min(width, height) * 0.5)),
@@ -1612,11 +1613,15 @@ function CinemaRailPersonTile({
                   : tile.avatarUrl
               }
               size={avatarSize}
-              badges={tile.badges}
               frameId={tile.frameId}
             />
           </View>
         )}
+        {showCam && tile.badges && tile.badges.length > 0 ? (
+          <View style={styles.cinemaPersonBadges} pointerEvents="box-none">
+            <RewardBadgeRow badges={tile.badges} size={11} wrap align="center" />
+          </View>
+        ) : null}
         {showPinBtn && onTogglePin ? (
           <Pressable
             accessibilityRole="button"
@@ -1714,7 +1719,7 @@ function CinemaDockPersonTile({
   const showPinBtn = canPin && showChromeBtns;
   const showCam = Boolean(tile.cameraOn && (tile.videoTrack || tile.mock));
   const name = tile.isLocal ? `${tile.name} (вы)` : tile.name;
-  const canPromote = Boolean(onPress && tile.cameraOn);
+  const canPromote = Boolean(onPress && tileHasPriorityVideo(tile));
   const frame = resolveCinemaPipLayout(
     layout,
     stageSize.width,
@@ -1932,11 +1937,15 @@ function CinemaDockPersonTile({
                 : tile.avatarUrl
             }
             size={avatarSize}
-            badges={tile.badges}
             frameId={tile.frameId}
           />
         </View>
       )}
+      {showCam && tile.badges && tile.badges.length > 0 ? (
+        <View style={styles.cinemaPersonBadges} pointerEvents="box-none">
+          <RewardBadgeRow badges={tile.badges} size={11} wrap align="center" />
+        </View>
+      ) : null}
       {showPinBtn && onTogglePin ? (
         <Pressable
           accessibilityRole="button"
@@ -2213,7 +2222,8 @@ function ParticipantTile({
 
   const displayName = tile.isLocal ? `${tile.name} (вы)` : tile.name;
   const tileBadges = tile.badges ?? [];
-  const badgesAboveCard = showVideo && !tile.isBard && tileBadges.length > 0;
+  // Video: badges overlay the frame (not a shelf above the card) so tiles stay level.
+  const badgesOnVideo = showVideo && !tile.isBard && tileBadges.length > 0;
   const statusBorderColor = tile.urgent
     ? '#ED4245'
     : tile.speaking
@@ -2245,11 +2255,6 @@ function ParticipantTile({
             },
           } as object)
         : null)}>
-      {badgesAboveCard ? (
-        <View style={styles.tileBadgesAbove} pointerEvents="box-none">
-          <RewardBadgeRow badges={tileBadges} size={13} wrap align="center" />
-        </View>
-      ) : null}
       {dragEnabled && onGridPointerDown && tileWidth >= 160 ? (
         <Pressable
           accessibilityRole="button"
@@ -2338,6 +2343,16 @@ function ParticipantTile({
                       objectFit={showingScreenShare ? 'contain' : 'cover'}
                     />
                   )}
+                  {badgesOnVideo ? (
+                    <View style={styles.videoBadgesOverlay} pointerEvents="box-none">
+                      <RewardBadgeRow
+                        badges={tileBadges}
+                        size={13}
+                        wrap
+                        align="center"
+                      />
+                    </View>
+                  ) : null}
                   {showingScreenShare ? (
                     <View style={styles.videoScreenBadge} pointerEvents="none">
                       <Ionicons name="desktop-outline" size={12} color="#FFFFFF" />
@@ -2615,7 +2630,7 @@ function ParticipantTile({
               styles.tileCaption,
               (showVideo || matchVideoSlot) && styles.tileCaptionVideo,
             ]}>
-            {badgesAboveCard ? (
+            {showVideo ? (
               <Text style={[styles.tileName, styles.tileNameUnderVideo]} numberOfLines={1}>
                 {displayName}
               </Text>
@@ -2627,13 +2642,14 @@ function ParticipantTile({
                 badgeSize={12}
                 layout="stack"
                 align="center"
+                reserveBadgeSlot
               />
             )}
             {tile.connecting || (tile.waiting && !tile.urgent) ? (
               <Text style={styles.tileHint} numberOfLines={1}>
                 {tile.connecting ? 'подключение…' : 'ожидание'}
               </Text>
-            ) : showVideo || matchVideoSlot ? null : (
+            ) : (
               <Text style={[styles.tileHint, styles.tileHintSpacer]} numberOfLines={1}>
                 {' '}
               </Text>
@@ -2831,6 +2847,11 @@ export function VoiceCallOverlay({
   const pendingSpotlightRef = useRef<string | null>(null);
   /** Ordinary click chose this stage — keep self on stage even when others are present. */
   const manualSpotlightRef = useRef(false);
+  /**
+   * Click camera while screen is still selected: parent clears screen async.
+   * Until then ignore watchedScreen so priority/cinema don't flash empty black.
+   */
+  const [suppressWatchedScreen, setSuppressWatchedScreen] = useState(false);
   /** Fill the site viewport (call shell). Stream cinema separately uses OS fullscreen. */
   const [fullscreen, setFullscreen] = useState(false);
   /** Screen-share cinema: OS fullscreen + stream fills stage; speaker HUD top-right. */
@@ -3356,7 +3377,7 @@ export function VoiceCallOverlay({
     screenStreams.length >= 2 && !selectedScreenIdentity && Boolean(onSelectScreenShare);
 
   /** Selected remote/local screen track — separate from person tiles (they stay in the rail). */
-  const watchedScreen = useMemo(() => {
+  const watchedScreenRaw = useMemo(() => {
     if (!selectedScreenIdentity) {
       return null;
     }
@@ -3371,6 +3392,14 @@ export function VoiceCallOverlay({
       isLocal: p.isLocal,
     };
   }, [participants, selectedScreenIdentity]);
+
+  useEffect(() => {
+    if (!selectedScreenIdentity && suppressWatchedScreen) {
+      setSuppressWatchedScreen(false);
+    }
+  }, [selectedScreenIdentity, suppressWatchedScreen]);
+
+  const watchedScreen = suppressWatchedScreen ? null : watchedScreenRaw;
 
   const tiles = useMemo<OverlayTile[]>(() => {
     const live: OverlayTile[] = [];
@@ -3668,9 +3697,10 @@ export function VoiceCallOverlay({
     }
 
     // Stream on stage — don't promote the sharer out of the people rail.
+    // (suppressWatchedScreen already nulls watchedScreen during camera switch.)
     if (watchedScreen || needsScreenPick) {
       clearHold();
-      if (spotlightKeyRef.current != null) {
+      if (!manualSpotlightRef.current && spotlightKeyRef.current != null) {
         setSpotlightKey(null);
       }
       return;
@@ -3926,6 +3956,12 @@ export function VoiceCallOverlay({
       : null;
   const priorityCinemaMock =
     Boolean(spotlightTile?.mock && spotlightTile.cameraOn) && !priorityCinemaTrack;
+  const cinemaStageReady = Boolean(
+    (streamCinema && streamCinemaTrack) ||
+      (priorityCinema &&
+        spotlightTile &&
+        (priorityCinemaTrack || priorityCinemaMock)),
+  );
 
   useEffect(() => {
     if (!watchedScreen) {
@@ -3938,13 +3974,22 @@ export function VoiceCallOverlay({
   }, [watchedScreen]);
 
   useEffect(() => {
-    if (!spotlightTile?.cameraOn) {
+    if (!spotlightTile || !tileHasPriorityVideo(spotlightTile)) {
       setPriorityCinema(false);
       if (!streamCinemaRef.current) {
         void exitOsFullscreen();
       }
     }
   }, [spotlightTile]);
+
+  // Empty cinema chrome (black void + tiny stream) — drop cinema flags.
+  useEffect(() => {
+    if (!cinemaActive || cinemaStageReady) {
+      return;
+    }
+    setStreamCinema(false);
+    setPriorityCinema(false);
+  }, [cinemaActive, cinemaStageReady]);
 
   // Keep pinned screen selected while the share is live.
   useEffect(() => {
@@ -4663,11 +4708,13 @@ export function VoiceCallOverlay({
       setPinnedSpotlightKey(null);
       setPinnedScreenIdentity(null);
       setFullscreen(true);
+      setSpotlightKey(tile.key);
       if (selectedScreenIdentity) {
+        // Drop screen immediately in UI — parent clears selectedScreenIdentity async.
+        setSuppressWatchedScreen(true);
         onSelectScreenShare?.(null);
       }
-      setSpotlightKey(tile.key);
-      // From cinema PIPs (incl. self): keep / enter priority cinema for that camera.
+      // From cinema PIPs / stream cinema: show this camera full-bleed.
       if (streamCinemaRef.current || priorityCinemaRef.current) {
         setStreamCinema(false);
         setPriorityCinema(true);
@@ -5507,18 +5554,18 @@ export function VoiceCallOverlay({
           style={[
             styles.root,
             fullscreen && styles.rootFullscreen,
-            cinemaActive && styles.rootStreamCinema,
+            cinemaStageReady && styles.rootStreamCinema,
             {
               paddingTop:
-                fullscreen || cinemaActive || !isDesktop
+                fullscreen || cinemaStageReady || !isDesktop
                   ? 0
                   : Math.max(insets.top, Spacing.md),
               paddingBottom:
-                fullscreen || cinemaActive || !isDesktop
+                fullscreen || cinemaStageReady || !isDesktop
                   ? 0
                   : Math.max(insets.bottom, Spacing.md),
               paddingHorizontal: !isDesktop ? 0 : undefined,
-              ...(cinemaActive || !isDesktop
+              ...(cinemaStageReady || !isDesktop
                 ? { alignItems: 'stretch' as const, justifyContent: 'flex-start' as const }
                 : null),
             },
@@ -5536,10 +5583,10 @@ export function VoiceCallOverlay({
             styles.shell,
             isDesktop && styles.shellDesktop,
             !isDesktop && styles.shellMobile,
-            (fullscreen || cinemaActive || !isDesktop) && styles.shellFullscreen,
-            cinemaActive && styles.shellStreamCinema,
+            (fullscreen || cinemaStageReady || !isDesktop) && styles.shellFullscreen,
+            cinemaStageReady && styles.shellStreamCinema,
           ]}>
-          {!cinemaActive ? (
+          {!cinemaStageReady ? (
             <View
               style={[
                 styles.header,
@@ -5691,17 +5738,17 @@ export function VoiceCallOverlay({
           <View
             style={[
               styles.stage,
-              fullscreen || cinemaActive || !isDesktop
+              fullscreen || cinemaStageReady || !isDesktop
                 ? { alignItems: 'stretch', justifyContent: 'flex-start' }
                 : null,
               // Leave room for the absolute mobile dock.
-              !isDesktop && !cinemaActive
+              !isDesktop && !cinemaStageReady
                 ? {
                     paddingBottom:
                       CONTROL_BTN_SIZE + Math.max(insets.bottom, 12) + 28,
                   }
                 : null,
-              cinemaActive ? styles.stageCinema : null,
+              cinemaStageReady ? styles.stageCinema : null,
             ]}>
             {streamCinema && streamCinemaTrack ? (
               <View
@@ -5710,7 +5757,8 @@ export function VoiceCallOverlay({
                 <CallVideoView
                   track={streamCinemaTrack}
                   mirror={false}
-                  objectFit="cover"
+                  // Screen share: contain — cover crops desktop UI (crooked bg).
+                  objectFit="contain"
                   style={styles.cinemaVideoFill}
                 />
                 {!isDesktop && !cinemaControlsRevealed ? (
@@ -7424,6 +7472,14 @@ const styles = StyleSheet.create({
     opacity: 1,
     borderWidth: 3,
   },
+  cinemaPersonBadges: {
+    position: 'absolute',
+    top: 4,
+    left: 4,
+    right: 4,
+    zIndex: 4,
+    alignItems: 'center',
+  },
   cinemaPersonUrgentChip: {
     position: 'absolute',
     top: 4,
@@ -8079,12 +8135,14 @@ const styles = StyleSheet.create({
   bardChipVolumeInOpen: {
     backgroundColor: 'rgba(88, 101, 242, 0.55)',
   },
-  tileBadgesAbove: {
-    width: '100%',
+  videoBadgesOverlay: {
+    position: 'absolute',
+    top: 6,
+    left: 6,
+    right: 6,
+    zIndex: 3,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: 4,
-    zIndex: 2,
   },
   tile: {
     alignItems: 'center',

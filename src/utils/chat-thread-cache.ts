@@ -4,6 +4,16 @@ import type {
   MessagesPage,
 } from '@/services/chats/chatsApi';
 import { listMessages } from '@/services/chats/chatsApi';
+import { parseDiceRollPayload } from '@/utils/chat-dice-roll';
+
+/** Preview stub has kind dice_roll but human text body — not a real card payload. */
+function isDicePreviewStub(message: ChatMessage): boolean {
+  return message.kind === 'dice_roll' && !parseDiceRollPayload(message.body);
+}
+
+function shouldUpgradeCachedMessage(existing: ChatMessage, incoming: ChatMessage): boolean {
+  return isDicePreviewStub(existing) && !isDicePreviewStub(incoming);
+}
 
 export type CachedChatThread = {
   conversation: ConversationListItem | null;
@@ -172,6 +182,10 @@ export function mergeCachedThreadMessages(
 }
 
 export function appendCachedThreadMessage(conversationId: string, message: ChatMessage) {
+  // Never cache conversation-preview stubs for dice — body is human text, not JSON.
+  if (isDicePreviewStub(message)) {
+    return;
+  }
   const prev = threadCache.get(conversationId);
   if (!prev) {
     // Пользователь на сайте, тред ещё не открывал — всё равно копим входящие,
@@ -186,7 +200,19 @@ export function appendCachedThreadMessage(conversationId: string, message: ChatM
     });
     return;
   }
-  if (prev.messages.some((item) => item.id === message.id)) {
+  const existingIdx = prev.messages.findIndex((item) => item.id === message.id);
+  if (existingIdx >= 0) {
+    const existing = prev.messages[existingIdx]!;
+    if (!shouldUpgradeCachedMessage(existing, message)) {
+      return;
+    }
+    const messages = [...prev.messages];
+    messages[existingIdx] = message;
+    touchThread(conversationId, {
+      ...prev,
+      messages,
+      updatedAt: Date.now(),
+    });
     return;
   }
   const messages = [...prev.messages, message].sort((left, right) =>
@@ -269,10 +295,12 @@ export function hydrateChatThread(conversationId?: string): HydratedChatThread {
   const historyLoaded = Boolean(thread?.historyLoaded);
 
   // Preview stub only after history is known — otherwise empty UI looks like «нет сообщений».
+  // Skip dice_roll: preview body is human text, not JSON → plain bubble instead of card.
   if (
     historyLoaded &&
     conversation &&
     preview &&
+    preview.kind !== 'dice_roll' &&
     !messages.some((item) => item.id === preview.id)
   ) {
     const stub = messageFromConversationPreview(conversation);

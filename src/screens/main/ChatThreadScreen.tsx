@@ -1811,15 +1811,34 @@ export default function ChatThreadScreen() {
 
   const appendMessage = useCallback(
     (message: ChatMessage) => {
+      // conversation:updated preview for dice is human text — wait for message:new JSON.
+      if (message.kind === 'dice_roll' && !parseDiceRollPayload(message.body)) {
+        return;
+      }
       if (conversationId && message.conversationId === conversationId) {
         appendCachedThreadMessage(conversationId, message);
       }
       setMessages((prev) => {
-        if (prev.some((item) => item.id === message.id)) {
+        const existingIdx = prev.findIndex((item) => item.id === message.id);
+        if (existingIdx >= 0) {
+          const existing = prev[existingIdx]!;
+          // Upgrade preview stub → real dice card when full DTO arrives.
+          if (
+            message.kind === 'dice_roll' &&
+            parseDiceRollPayload(message.body) &&
+            !parseDiceRollPayload(existing.body)
+          ) {
+            const next = [...prev];
+            next[existingIdx] = message;
+            return next;
+          }
           return prev;
         }
         // Убираем optimistic pending того же отправителя — иначе прыжок pending→real.
-        const withoutPending = myId && message.senderId === myId ? prev.filter((item) => !item.id.startsWith('pending-')) : prev;
+        const withoutPending =
+          myId && message.senderId === myId
+            ? prev.filter((item) => !item.id.startsWith('pending-'))
+            : prev;
         return [...withoutPending, message];
       });
     },
@@ -2351,7 +2370,14 @@ export default function ChatThreadScreen() {
     });
     setPeerLastReadAt(lastConversationUpdate.peerLastReadAt);
     const preview = lastConversationUpdate.lastMessage;
-    if (preview && !messagesRef.current.some((item) => item.id === preview.id)) {
+    // Dice preview body is list text ("1d20 = 16"), not JSON — don't stub into the thread
+    // or it wins the race over held message:new and stays a plain bubble after reveal.
+    if (
+      preview &&
+      preview.kind !== 'dice_roll' &&
+      !heldDiceMessagesRef.current.has(preview.id) &&
+      !messagesRef.current.some((item) => item.id === preview.id)
+    ) {
       const stub = messageFromConversationPreview(lastConversationUpdate);
       if (stub) {
         appendMessage(stub);

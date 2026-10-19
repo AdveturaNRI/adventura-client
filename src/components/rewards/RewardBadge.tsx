@@ -329,6 +329,8 @@ export function NameWithBadges({
   badgeSize = 13,
   layout = 'inline',
   align = 'start',
+  /** Stack: keep badge-row height even when empty (call tiles stay level). */
+  reserveBadgeSlot = false,
 }: {
   name: string;
   badges?: RewardBadgeType[] | null;
@@ -337,6 +339,7 @@ export function NameWithBadges({
   badgeSize?: number;
   layout?: 'inline' | 'stack';
   align?: 'start' | 'center';
+  reserveBadgeSlot?: boolean;
 }) {
   const row = (
     <RewardBadgeRow
@@ -348,12 +351,24 @@ export function NameWithBadges({
   );
 
   if (layout === 'stack') {
+    const badgeSlot = reserveBadgeSlot ? (
+      <View
+        style={[
+          styles.badgeSlot,
+          align === 'center' && styles.badgeSlotCenter,
+          { minHeight: badgeSize },
+        ]}>
+        {row}
+      </View>
+    ) : (
+      row
+    );
     return (
       <View style={[styles.nameStack, align === 'center' && styles.nameStackCenter]}>
         <Text style={[textStyle, styles.stackName]} numberOfLines={1}>
           {name}
         </Text>
-        {row}
+        {badgeSlot}
         {suffix}
       </View>
     );
@@ -428,6 +443,13 @@ const styles = StyleSheet.create({
     minWidth: 0,
   },
   nameStackCenter: {
+    alignItems: 'center',
+  },
+  badgeSlot: {
+    width: '100%',
+    justifyContent: 'center',
+  },
+  badgeSlotCenter: {
     alignItems: 'center',
   },
   stackName: {
