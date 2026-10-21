@@ -25,6 +25,28 @@ import { applyPreferredMicToAudioRecorder, clearAudioRecorderMicOverride } from 
 type Phase = 'idle' | 'holding' | 'locked' | 'paused';
 type Segment = { uri: string; durationSec: number };
 
+/** expo-audio SharedObject is often already released on unmount — never throw from cleanup. */
+function safelyStopRecorder(recorder: {
+  isRecording: boolean;
+  stop: () => Promise<void> | void;
+}) {
+  try {
+    if (!recorder.isRecording) {
+      return;
+    }
+  } catch {
+    return;
+  }
+  try {
+    const result = recorder.stop();
+    if (result && typeof (result as Promise<void>).catch === 'function') {
+      void (result as Promise<void>).catch(() => undefined);
+    }
+  } catch {
+    // native object already gone
+  }
+}
+
 const MIN_VOICE_SEC = 1;
 // The lock is immediately above the microphone; crossing its centre fixes
 // the recording, so the gesture matches the visual target.
@@ -201,12 +223,22 @@ export function ChatVoiceComposer({
 
   const stopCurrent = useCallback(async (): Promise<Segment | null> => {
     const began = startedAtRef.current;
-    if (recorder.isRecording) {
-      await recorder.stop();
+    try {
+      if (recorder.isRecording) {
+        await recorder.stop();
+      }
+    } catch {
+      // Native shared object may already be released (e.g. screen unmount).
     }
-    const uri = recorder.uri;
+    let uri: string | null = null;
+    let recordedSec = 0;
+    try {
+      uri = recorder.uri;
+      recordedSec = Number(recorder.currentTime) || 0;
+    } catch {
+      uri = null;
+    }
     const elapsedSec = began ? (Date.now() - began) / 1000 : 0;
-    const recordedSec = Number(recorder.currentTime) || 0;
     const durationSec = Math.max(recordedSec, elapsedSec);
     startedAtRef.current = null;
     setStartedAt(null);
@@ -258,8 +290,8 @@ export function ChatVoiceComposer({
         setStartedAt(at);
         setNow(at);
         recorder.record({ forDuration: 900 });
-        if (!pressingRef.current && phaseRef.current !== 'locked' && recorder.isRecording) {
-          await recorder.stop();
+        if (!pressingRef.current && phaseRef.current !== 'locked') {
+          safelyStopRecorder(recorder);
           reset();
         }
       } catch {
@@ -273,8 +305,12 @@ export function ChatVoiceComposer({
   const discard = useCallback(async () => {
     busyRef.current = true;
     try {
-      if (recorder.isRecording) {
-        await recorder.stop();
+      try {
+        if (recorder.isRecording) {
+          await recorder.stop();
+        }
+      } catch {
+        // ignore released recorder
       }
     } finally {
       busyRef.current = false;
@@ -481,9 +517,7 @@ export function ChatVoiceComposer({
 
   useEffect(() => {
     return () => {
-      if (recorder.isRecording) {
-        void recorder.stop();
-      }
+      safelyStopRecorder(recorder);
     };
   }, [recorder]);
 

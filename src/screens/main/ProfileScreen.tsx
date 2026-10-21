@@ -1,3 +1,4 @@
+import { Ionicons } from '@expo/vector-icons';
 import { useCallback, useMemo } from 'react';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { Linking, Pressable, ScrollView, Text, View } from 'react-native';
@@ -14,7 +15,9 @@ import { useAuth } from '@/context/AuthContext';
 import { useProfile, useMyAvatarUrl } from '@/context/ProfileContext';
 import { usePushPrompt } from '@/context/PushPromptContext';
 import { useRealtimeOptional } from '@/context/RealtimeContext';
+import { useTheme } from '@/hooks/use-theme';
 import { getQuestionnaireCompletion } from '@/utils/questionnaire-completion';
+import { shareAppLink } from '@/utils/share-link';
 import { formatUnreadBadge } from '@/utils/unread-badge';
 
 import { useProfileScreenStyles } from './profile-screen.styles';
@@ -70,6 +73,7 @@ export default function ProfileScreen() {
   const { user, signOut } = useAuth();
   const { profile, refreshProfile } = useProfile();
   const avatarUrl = useMyAvatarUrl();
+  const colors = useTheme();
   const isDesktopWeb = useIsDesktopWeb();
   const hasDesktopSidebar = useIsDesktopSidebarVisible();
   const showCompactNav = !hasDesktopSidebar;
@@ -86,6 +90,20 @@ export default function ProfileScreen() {
       refreshPushAttention();
     }, [refreshProfile, refreshPushAttention]),
   );
+
+  const openPublicProfile = useCallback(() => {
+    if (!user?.id) return;
+    router.push(`/users/${user.id}`);
+  }, [router, user?.id]);
+
+  const sharePublicProfile = useCallback(() => {
+    if (!user?.id) return;
+    void shareAppLink({
+      title: user.nickname,
+      message: `Профиль ${user.nickname} в Adventura`,
+      path: `/users/${user.id}`,
+    });
+  }, [user?.id, user?.nickname]);
 
   const handleSignOut = async () => {
     await signOut();
@@ -129,6 +147,31 @@ export default function ProfileScreen() {
           badges={profile?.perks?.visibleBadges ?? profile?.perks?.badges}
           frameId={profile?.perks ? profile.perks.avatarFrameId : undefined}
         />
+
+        <View style={styles.profileActions}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Открыть мой публичный профиль"
+            onPress={openPublicProfile}
+            style={({ pressed }) => [
+              styles.profileActionChip,
+              pressed && styles.profileActionChipPressed,
+            ]}>
+            <Ionicons name="person-outline" size={16} color={colors.primary} />
+            <Text style={styles.profileActionLabel}>Мой профиль</Text>
+          </Pressable>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Поделиться профилем"
+            onPress={sharePublicProfile}
+            style={({ pressed }) => [
+              styles.profileActionChip,
+              pressed && styles.profileActionChipPressed,
+            ]}>
+            <Ionicons name="share-outline" size={16} color={colors.primary} />
+            <Text style={styles.profileActionLabel}>Поделиться</Text>
+          </Pressable>
+        </View>
 
         <EmailVerificationBanner />
 

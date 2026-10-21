@@ -1,5 +1,7 @@
+import { createAudioPlayer, setAudioModeAsync, type AudioPlayer } from 'expo-audio';
 import { Platform } from 'react-native';
 
+import { API_ORIGIN } from '@/constants/api.config';
 import type { PortalNotification } from '@/services/notifications/notificationsApi';
 import {
   getEffectiveNotificationSoundUrl,
@@ -23,7 +25,22 @@ let lastPreviewAt = 0;
 let focusedConversationId: string | null = null;
 /** Один HTMLAudioElement на вкладку — иначе new Audio(url)+preload даёт 2× GET. */
 let sharedAudio: HTMLAudioElement | null = null;
+/** Native one-shot player for settings preview + in-app notify beeps. */
+let nativePlayer: AudioPlayer | null = null;
+let nativeAudioModeArmed = false;
+let nativeLastSourceKey: string | null = null;
 const PREVIEW_GUARD_MS = 350;
+
+/** public/sounds — on native Metro must bundle them; relative /sounds/* is web-only. */
+const BUNDLED_SOUNDS: Record<string, number> = {
+  '/sounds/notify-magic.mp3': require('../../public/sounds/notify-magic.mp3'),
+  '/sounds/notify-bell.mp3': require('../../public/sounds/notify-bell.mp3'),
+  '/sounds/notify-dice.mp3': require('../../public/sounds/notify-dice.mp3'),
+  '/sounds/notify-fun.mp3': require('../../public/sounds/notify-fun.mp3'),
+  '/sounds/notify-wood.mp3': require('../../public/sounds/notify-wood.mp3'),
+  '/sounds/notify.mp3': require('../../public/sounds/notify.mp3'),
+  '/sounds/call-ringtone.mp3': require('../../public/sounds/call-ringtone.mp3'),
+};
 
 function canUseWebAlerts() {
   return Platform.OS === 'web' && typeof window !== 'undefined' && typeof document !== 'undefined';
@@ -33,7 +50,11 @@ function resolveAudioUrl(url: string): string {
   if (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('blob:')) {
     return url;
   }
-  return new URL(url, window.location.origin).href;
+  if (canUseWebAlerts()) {
+    return new URL(url, window.location.origin).href;
+  }
+  const path = url.startsWith('/') ? url : `/${url}`;
+  return `${API_ORIGIN}${path}`;
 }
 
 function getSharedAudio(): HTMLAudioElement {
@@ -84,6 +105,79 @@ function playHtmlAudio(url: string) {
   } catch (error) {
     console.warn('[chat-alerts] play error', error);
   }
+}
+
+async function armNativeAudioMode() {
+  if (nativeAudioModeArmed) {
+    return;
+  }
+  nativeAudioModeArmed = true;
+  try {
+    await setAudioModeAsync({
+      playsInSilentMode: true,
+      interruptionMode: 'mixWithOthers',
+    });
+  } catch {
+    nativeAudioModeArmed = false;
+  }
+}
+
+function getNativePlayer(): AudioPlayer {
+  if (!nativePlayer) {
+    nativePlayer = createAudioPlayer(null, {
+      updateInterval: 500,
+      keepAudioSessionActive: true,
+    });
+  }
+  return nativePlayer;
+}
+
+function playNativeAudio(url: string) {
+  if (!url || Platform.OS === 'web') {
+    return;
+  }
+  void (async () => {
+    try {
+      await armNativeAudioMode();
+      const player = getNativePlayer();
+      const bundled = BUNDLED_SOUNDS[url] ?? BUNDLED_SOUNDS[url.split('?')[0] ?? url];
+      const sourceKey = bundled != null ? `asset:${url}` : `uri:${resolveAudioUrl(url)}`;
+      const source =
+        bundled != null ? bundled : ({ uri: resolveAudioUrl(url) } as const);
+
+      try {
+        player.pause();
+      } catch {
+        // ignore
+      }
+
+      if (nativeLastSourceKey !== sourceKey) {
+        player.replace(source);
+        nativeLastSourceKey = sourceKey;
+      } else {
+        void player.seekTo(0).catch(() => {
+          // ignore
+        });
+      }
+
+      player.volume = 1;
+      player.muted = false;
+      player.play();
+    } catch (error) {
+      console.warn('[chat-alerts] native play error', url, error);
+    }
+  })();
+}
+
+function playAlertAudio(url: string) {
+  if (!url) {
+    return;
+  }
+  if (canUseWebAlerts()) {
+    playHtmlAudio(url);
+    return;
+  }
+  playNativeAudio(url);
 }
 
 export function setFocusedChatConversation(conversationId: string | null) {
@@ -160,10 +254,6 @@ type PlaySoundOptions = {
 };
 
 export function playIncomingMessageSound(options?: PlaySoundOptions) {
-  if (!canUseWebAlerts()) {
-    return;
-  }
-
   const settings = getNotificationSoundSettingsSync();
   if (!options?.force && !settings.enabled) {
     return;
@@ -181,7 +271,7 @@ export function playIncomingMessageSound(options?: PlaySoundOptions) {
   if (!url) {
     return;
   }
-  playHtmlAudio(url);
+  playAlertAudio(url);
 }
 
 export function previewNotificationSound(url: string) {

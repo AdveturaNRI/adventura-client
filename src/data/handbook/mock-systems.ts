@@ -1,74 +1,41 @@
 import type { HandbookSystem } from './types';
 
-const cover = (seed: string) => `https://picsum.photos/seed/${seed}/960/1200`;
+/** Старый id до разделения редакций — ведём на 2014. */
+export const LEGACY_HANDBOOK_SYSTEM_IDS: Record<string, string> = {
+  dnd5e: 'dnd5e-2014',
+};
 
-/** Мок систем для хаба справочника. Позже подтянем с API + обложки. */
+/** Мок систем для хаба справочника. Обложки — `assets/handbook/systems`. */
 export const MOCK_HANDBOOK_SYSTEMS: HandbookSystem[] = [
   {
-    id: 'dnd5e',
-    name: 'Dungeons & Dragons 5e',
-    shortName: 'D&D 5e',
-    tagline: 'Классика подземелий и драконов',
+    id: 'dnd5e-2014',
+    name: 'D&D 5e (2014)',
+    shortName: 'D&D 2014',
+    tagline: 'Классическая пятая редакция',
     description:
-      'Расы, классы, заклинания и бестиарий пятой редакции — всё, что нужно за столом.',
-    coverUrl: cover('handbook-dnd5e'),
+      'Расы, классы, заклинания и бестиарий по правилам 2014 — PHB, DMG и дополнения эпохи.',
+    coverSource: require('../../../assets/handbook/systems/a8j2np.png'),
     accent: '#C45C26',
     isOfficial: true,
   },
   {
-    id: 'pf2e',
-    name: 'Pathfinder 2e',
-    shortName: 'Pathfinder 2e',
-    tagline: 'Глубокая тактика и кастомизация',
+    id: 'dnd5e-2024',
+    name: 'D&D 5e (2024)',
+    shortName: 'D&D 2024',
+    tagline: 'Обновлённые правила пятой редакции',
     description:
-      'Предыстории, архетипы, навыки и монстры — справочник под вторую редакцию.',
-    coverUrl: cover('handbook-pf2e'),
-    accent: '#2F6B4F',
-    isOfficial: true,
-  },
-  {
-    id: 'coc',
-    name: 'Зов Ктулху',
-    shortName: 'Зов Ктулху',
-    tagline: 'Ужас, расследования и безумие',
-    description:
-      'Профессии, мифы, артефакты и правила Sanity для игр в духе Лавкрафта.',
-    coverUrl: cover('handbook-coc'),
-    accent: '#5B3A8C',
-    isOfficial: true,
-  },
-  {
-    id: 'vtm',
-    name: 'Vampire: The Masquerade',
-    shortName: 'Vampire',
-    tagline: 'Политика ночи и кровь кланов',
-    description: 'Кланы, дисциплины, маскарад и охотники — шпаргалка по World of Darkness.',
-    coverUrl: cover('handbook-vtm'),
-    accent: '#8B1E2D',
-    isOfficial: true,
-  },
-  {
-    id: 'blades',
-    name: 'Blades in the Dark',
-    shortName: 'Blades',
-    tagline: 'Банды, налёты и город теней',
-    description: 'Плейбуки, фракции, стресс и entanglements для криминальных историй.',
-    coverUrl: cover('handbook-blades'),
-    accent: '#3D5A80',
-    isOfficial: true,
-  },
-  {
-    id: 'cyberpunk',
-    name: 'Cyberpunk RED',
-    shortName: 'Cyberpunk',
-    tagline: 'Неон, хром и уличный жаргон',
-    description: 'Роли, импланты, оружие и Night City — быстрый доступ к RED.',
-    coverUrl: cover('handbook-cyber'),
-    accent: '#D4A017',
+      'Виды, классы, заклинания и снаряжение по правилам 2024 — Книга игрока и связанные книги.',
+    coverSource: require('../../../assets/handbook/systems/b5k9wm.png'),
+    accent: '#B45309',
     isOfficial: true,
   },
 ];
 
+export function resolveHandbookSystemId(systemId: string): string {
+  return LEGACY_HANDBOOK_SYSTEM_IDS[systemId] ?? systemId;
+}
+
 export function getHandbookSystem(systemId: string): HandbookSystem | undefined {
-  return MOCK_HANDBOOK_SYSTEMS.find((system) => system.id === systemId);
+  const resolved = resolveHandbookSystemId(systemId);
+  return MOCK_HANDBOOK_SYSTEMS.find((system) => system.id === resolved);
 }

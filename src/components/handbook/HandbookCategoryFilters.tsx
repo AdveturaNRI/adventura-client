@@ -2,8 +2,8 @@ import { Ionicons } from '@expo/vector-icons';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import {
-  HANDBOOK_CATEGORY_FILTER_LABELS,
   HANDBOOK_CATEGORY_ICONS,
+  getHandbookCategoryFilterLabel,
 } from '@/data/handbook/labels';
 import type { HandbookCategory, HandbookCategoryFilter } from '@/data/handbook/types';
 import { FontSize, Radius, Spacing, type ThemeColors } from '@/constants/theme';
@@ -17,12 +17,13 @@ const FILTER_ORDER: HandbookCategoryFilter[] = [
   'spells',
   'equipment',
   'bestiary',
-  'rules',
+  // 'rules' — временно скрыт
 ];
 
 type HandbookCategoryFiltersProps = {
   value: HandbookCategoryFilter;
   onChange: (next: HandbookCategoryFilter) => void;
+  systemId?: string;
   counts?: Partial<Record<HandbookCategoryFilter, number>>;
 };
 
@@ -72,6 +73,7 @@ function createStyles(colors: ThemeColors) {
 export function HandbookCategoryFilters({
   value,
   onChange,
+  systemId,
   counts,
 }: HandbookCategoryFiltersProps) {
   const colors = useTheme();
@@ -103,7 +105,9 @@ export function HandbookCategoryFilters({
               pressed && styles.chipPressed,
             ]}>
             <Ionicons name={iconName} size={14} color={colors.primary} />
-            <Text style={styles.label}>{HANDBOOK_CATEGORY_FILTER_LABELS[key]}</Text>
+            <Text style={styles.label}>
+              {getHandbookCategoryFilterLabel(key, systemId)}
+            </Text>
             {typeof count === 'number' ? (
               <Text style={styles.count}>{count}</Text>
             ) : null}

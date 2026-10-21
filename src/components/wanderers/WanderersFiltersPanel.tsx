@@ -55,6 +55,7 @@ import {
   QUESTIONNAIRE_AGE_MAX,
   QUESTIONNAIRE_AGE_MIN,
 } from '@/screens/questionnaire/questionnaire-validation';
+import { WANDERERS_SCREEN } from '@/screens/main/profile.config';
 
 const MODAL_SWITCH_DELAY_MS = 280;
 
@@ -806,7 +807,7 @@ export function WanderersFiltersPanel({
       <TextInput
         value={nicknameQuery}
         onChangeText={onNicknameQueryChange}
-        placeholder="Поиск по нику"
+        placeholder={WANDERERS_SCREEN.searchPlaceholder}
         placeholderTextColor={colors.textMuted}
         style={styles.searchInput}
         autoCapitalize="none"

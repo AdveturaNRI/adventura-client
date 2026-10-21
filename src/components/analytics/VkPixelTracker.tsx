@@ -17,7 +17,10 @@ const SAFE_QUERY_PARAMS = new Set([
 
 function safeCurrentUrl(pathname: string, params: Record<string, unknown>): string {
   const search = new URLSearchParams();
-  const source = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null;
+  const source =
+    Platform.OS === 'web' && typeof window !== 'undefined' && window.location?.search
+      ? new URLSearchParams(window.location.search)
+      : null;
 
   if (source) {
     for (const [key, value] of source.entries()) {

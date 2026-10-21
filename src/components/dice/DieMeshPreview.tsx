@@ -3,6 +3,7 @@ import { Platform, StyleSheet, Text, View } from 'react-native';
 import { Image } from 'expo-image';
 
 import type { DieGlyphSides } from '@/components/dice/DieGlyph';
+import { DICE_PREVIEW_MODULES } from '@/components/dice/dice-preview-modules';
 import { FontSize } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { coerceDiceAccent, DICE_ACCENT_PALETTE } from '@/utils/dice-color-storage';
@@ -47,10 +48,13 @@ function nearestPaletteHex(accent: string): string {
   return best;
 }
 
-function previewSrc(sides: DieGlyphSides, accent: string): string {
-  const hex = nearestPaletteHex(accent);
+function previewKey(sides: DieGlyphSides, accent: string): string {
+  return `${nearestPaletteHex(accent)}/${dieLabel(sides)}`;
+}
+
+function previewWebUri(sides: DieGlyphSides, accent: string): string {
   // v=even1 — одинаковый размер/центр + ручной twist.
-  return `/dice-previews/${hex}/${dieLabel(sides)}.png?v=even1`;
+  return `/dice-previews/${previewKey(sides, accent)}.png?v=even1`;
 }
 
 function DieTextFallback({
@@ -103,20 +107,25 @@ export function DieMeshPreview({
 }: DieMeshPreviewProps) {
   const colors = useTheme();
   const accent = themeColor?.trim() || colors.primary;
-  const src = useMemo(() => previewSrc(sides, accent), [accent, sides]);
+  const key = useMemo(() => previewKey(sides, accent), [accent, sides]);
+  const webUri = useMemo(() => previewWebUri(sides, accent), [accent, sides]);
+  const nativeModule = DICE_PREVIEW_MODULES[key];
 
-  if (Platform.OS !== 'web' || !src) {
+  if (Platform.OS !== 'web' && nativeModule == null) {
     return <DieTextFallback sides={sides} size={size} active={active} themeColor={accent} />;
   }
+
+  const source =
+    Platform.OS === 'web' ? { uri: webUri } : nativeModule;
 
   return (
     <View style={{ width: size, height: size, opacity: active ? 1 : 0.45 }}>
       <Image
-        source={{ uri: src }}
+        source={source}
         style={{ width: size, height: size, borderRadius: 8 }}
         contentFit="contain"
         cachePolicy="memory-disk"
-        recyclingKey={src}
+        recyclingKey={key}
         transition={0}
       />
     </View>

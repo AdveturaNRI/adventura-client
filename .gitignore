@@ -18,6 +18,12 @@ expo-env.d.ts
 *.key
 *.mobileprovision
 
+# Local Xcode / IPA artifacts
+/build/
+ios/build/
+*.xcarchive
+*.ipa
+
 # Metro
 .metro-health-check*
 

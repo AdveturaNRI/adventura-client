@@ -1,70 +1,106 @@
+import { DND_HANDBOOK_CLASS_ENTRIES } from './dnd-classes';
+import { resolveHandbookSystemId } from './mock-systems';
 import type { HandbookCategory, HandbookCategoryFilter, HandbookEntry } from './types';
 
 export const MOCK_HANDBOOK_ENTRIES: HandbookEntry[] = [
-  // D&D 5e
+  // D&D 5e (2014) — классы из dnd-classes.ts
   {
-    id: 'dnd-race-elf',
-    systemId: 'dnd5e',
+    id: 'dnd2014-race-elf',
+    systemId: 'dnd5e-2014',
     category: 'races',
     title: 'Эльф',
     summary: 'Долгожители лесов и городов. Темновидение, Fey Ancestry, бонус к ловкости.',
-    tags: ['PHB', 'Humanoid'],
+    tags: ['PHB 2014', 'Humanoid'],
   },
   {
-    id: 'dnd-race-dwarf',
-    systemId: 'dnd5e',
+    id: 'dnd2014-race-dwarf',
+    systemId: 'dnd5e-2014',
     category: 'races',
     title: 'Дварф',
     summary: 'Стойкие горцы. Сопротивление яду, владение топорами, бонус к телосложению.',
-    tags: ['PHB'],
+    tags: ['PHB 2014'],
   },
   {
-    id: 'dnd-class-fighter',
-    systemId: 'dnd5e',
-    category: 'classes',
-    title: 'Воин',
-    summary: 'Боевой стиль, Second Wind, Action Surge. Архетипы от Champion до Eldritch Knight.',
-    tags: ['PHB', 'Martial'],
-  },
-  {
-    id: 'dnd-class-wizard',
-    systemId: 'dnd5e',
-    category: 'classes',
-    title: 'Волшебник',
-    summary: 'Книга заклинаний, ритуалы, школы магии. Arcane Recovery на коротком отдыхе.',
-    tags: ['PHB', 'Caster'],
-  },
-  {
-    id: 'dnd-spell-fireball',
-    systemId: 'dnd5e',
+    id: 'dnd2014-spell-fireball',
+    systemId: 'dnd5e-2014',
     category: 'spells',
     title: 'Огненный шар',
     summary: '3-й круг, эвокация. Сфера 20 футов, 8d6 огня, спасбросок Ловкости.',
     tags: ['Evocation', '3'],
   },
   {
-    id: 'dnd-eq-bag',
-    systemId: 'dnd5e',
+    id: 'dnd2014-eq-bag',
+    systemId: 'dnd5e-2014',
     category: 'equipment',
     title: 'Сумка хранения',
     summary: 'Экстрамерное пространство ~64 куб. фута. Вес содержимого не учитывается.',
     tags: ['Wondrous', 'Rare'],
   },
   {
-    id: 'dnd-beast-owlbear',
-    systemId: 'dnd5e',
+    id: 'dnd2014-beast-owlbear',
+    systemId: 'dnd5e-2014',
     category: 'bestiary',
     title: 'Совомедведь',
     summary: 'CR 3. Мультиатака клювом и когтями, большой размер, тёмновидение.',
     tags: ['Monstrosity', 'CR 3'],
   },
   {
-    id: 'dnd-rule-advantage',
-    systemId: 'dnd5e',
+    id: 'dnd2014-rule-advantage',
+    systemId: 'dnd5e-2014',
     category: 'rules',
     title: 'Преимущество и помеха',
     summary: 'Бросаешь 2d20, берёшь больший или меньший. Не стакаются между собой.',
     tags: ['Core'],
+  },
+
+  // D&D 5e (2024) — классы из dnd-classes.ts
+  {
+    id: 'dnd2024-race-elf',
+    systemId: 'dnd5e-2024',
+    category: 'races',
+    title: 'Эльф',
+    summary: 'Вид (species): тёмновидение, Fey Ancestry, Trance. Черты вида без привязки к подрасе как раньше.',
+    tags: ['PHB 2024', 'Species'],
+  },
+  {
+    id: 'dnd2024-race-human',
+    systemId: 'dnd5e-2024',
+    category: 'races',
+    title: 'Человек',
+    summary: 'Гибкий вид: Origin feat, ресурсный Skill, Heroic Inspiration после долгого отдыха.',
+    tags: ['PHB 2024', 'Species'],
+  },
+  {
+    id: 'dnd2024-spell-fireball',
+    systemId: 'dnd5e-2024',
+    category: 'spells',
+    title: 'Огненный шар',
+    summary: '3-й круг, эвокация. Сфера 20 футов, 8d6 огня — формулировки под правила 2024.',
+    tags: ['Evocation', '3'],
+  },
+  {
+    id: 'dnd2024-eq-longsword',
+    systemId: 'dnd5e-2024',
+    category: 'equipment',
+    title: 'Длинный меч',
+    summary: 'Воинское оружие. Свойство Mastery: Sap — цель получает помеху на следующую атаку.',
+    tags: ['Weapon', 'Mastery'],
+  },
+  {
+    id: 'dnd2024-beast-owlbear',
+    systemId: 'dnd5e-2024',
+    category: 'bestiary',
+    title: 'Совомедведь',
+    summary: 'CR 3. Мультиатака и обновлённые блоки характеристик под формат 2024.',
+    tags: ['Monstrosity', 'CR 3'],
+  },
+  {
+    id: 'dnd2024-rule-influence',
+    systemId: 'dnd5e-2024',
+    category: 'rules',
+    title: 'Влияние (Influence)',
+    summary: 'Социальная проверка с DC по отношению цели. Успех / частичный успех / провал.',
+    tags: ['PHB 2024', 'Social'],
   },
 
   // Pathfinder 2e
@@ -318,12 +354,18 @@ export const MOCK_HANDBOOK_ENTRIES: HandbookEntry[] = [
   },
 ];
 
+const ALL_HANDBOOK_ENTRIES: HandbookEntry[] = [
+  ...MOCK_HANDBOOK_ENTRIES,
+  ...DND_HANDBOOK_CLASS_ENTRIES,
+];
+
 export function getHandbookEntriesForSystem(
   systemId: string,
   category: HandbookCategoryFilter = 'all',
 ): HandbookEntry[] {
-  return MOCK_HANDBOOK_ENTRIES.filter((entry) => {
-    if (entry.systemId !== systemId) return false;
+  const resolved = resolveHandbookSystemId(systemId);
+  return ALL_HANDBOOK_ENTRIES.filter((entry) => {
+    if (entry.systemId !== resolved) return false;
     if (category === 'all') return true;
     return entry.category === category;
   });
@@ -332,6 +374,7 @@ export function getHandbookEntriesForSystem(
 export function countEntriesByCategory(
   systemId: string,
 ): Record<HandbookCategory, number> {
+  const resolved = resolveHandbookSystemId(systemId);
   const counts: Record<HandbookCategory, number> = {
     races: 0,
     classes: 0,
@@ -341,8 +384,8 @@ export function countEntriesByCategory(
     rules: 0,
   };
 
-  for (const entry of MOCK_HANDBOOK_ENTRIES) {
-    if (entry.systemId === systemId) {
+  for (const entry of ALL_HANDBOOK_ENTRIES) {
+    if (entry.systemId === resolved) {
       counts[entry.category] += 1;
     }
   }

@@ -793,7 +793,9 @@ export default function SettingsScreen() {
                 <Text style={styles.rowTitle}>Звук и микрофон</Text>
               </View>
               <Text style={styles.rowSubtitle}>
-                Микрофон и динамики для звонков, плюс проверка перед входом в голос
+                {Platform.OS === 'web'
+                  ? 'Микрофон и динамики для звонков, плюс проверка перед входом в голос'
+                  : 'Проверка микрофона перед звонком'}
               </Text>
             </View>
           </View>

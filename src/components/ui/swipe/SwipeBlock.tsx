@@ -536,7 +536,12 @@ function CornerSwipeBlock({
 
   const onWebMouseDown = useCallback(
     (event: GestureResponderEvent) => {
-      if (webSawTouchRef.current || typeof window === 'undefined') {
+      if (
+        webSawTouchRef.current ||
+        Platform.OS !== 'web' ||
+        typeof window === 'undefined' ||
+        typeof window.addEventListener !== 'function'
+      ) {
         return;
       }
       const native = event.nativeEvent as unknown as {

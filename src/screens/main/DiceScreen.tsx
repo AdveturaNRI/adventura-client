@@ -1755,6 +1755,8 @@ export default function DiceScreen() {
                 accent={stageAccent}
                 skin={activeSkinId}
                 animationSpeed={animationSpeed === 'off' ? 'normal' : animationSpeed}
+                centerSpawn
+                scale={compact ? 4.5 : 5.5}
                 onReady={() => setStageReady(true)}
                 onDone={handleDone}
               />

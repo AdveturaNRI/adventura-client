@@ -333,7 +333,9 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
   }, [isAuthenticated, isLoading, token]);
 
   useEffect(() => {
-    if (typeof window === 'undefined') {
+    // Web-only: unlock autoplay + clear title blink. On RN, `window` exists but
+    // addEventListener with options is not a real DOM API → "undefined is not a function".
+    if (Platform.OS !== 'web' || typeof window === 'undefined') {
       return;
     }
 

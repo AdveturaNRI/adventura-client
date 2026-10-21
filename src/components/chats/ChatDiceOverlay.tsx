@@ -692,6 +692,7 @@ export function ChatDiceOverlay({
             skin={activeSkin}
             transparent
             animationSpeed={animationSpeed === 'off' ? 'normal' : animationSpeed}
+            centerSpawn
             onReady={handleStageReady}
           />
         ) : null}

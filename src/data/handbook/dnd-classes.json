@@ -1,0 +1,355 @@
+{
+  "version": 1,
+  "source": "run-2026-10-12T08-18-07-224Z-0f2e957b",
+  "note": "Классы dnd.su, сайдкики Tasha’s исключены. Бандлится в приложение — офлайн.",
+  "entries": [
+    {
+      "id": "dndsu-5e2014-class-88",
+      "systemId": "dnd5e-2014",
+      "category": "classes",
+      "title": "Бард",
+      "summary": "Кость хитов d8. Спасброски: Ловкость, Харизма",
+      "tags": [
+        "Книга игрока",
+        "Официальный"
+      ],
+      "coverUrl": "https://picsum.photos/seed/handbook-dnd5e-2014-bard/800/1200",
+      "accent": "#7C3AED"
+    },
+    {
+      "id": "dndsu-5e2014-class-91",
+      "systemId": "dnd5e-2014",
+      "category": "classes",
+      "title": "Воин",
+      "summary": "Кость хитов d10. Спасброски: Сила, Телосложение",
+      "tags": [
+        "Книга игрока",
+        "Официальный"
+      ],
+      "coverUrl": "https://picsum.photos/seed/handbook-dnd5e-2014-fighter/800/1200",
+      "accent": "#9F1239"
+    },
+    {
+      "id": "dndsu-5e2014-class-105",
+      "systemId": "dnd5e-2014",
+      "category": "classes",
+      "title": "Волшебник",
+      "summary": "Кость хитов d6. Спасброски: Интеллект, Мудрость",
+      "tags": [
+        "Книга игрока",
+        "Официальный"
+      ],
+      "coverUrl": "https://picsum.photos/seed/handbook-dnd5e-2014-wizard/800/1200",
+      "accent": "#1E40AF"
+    },
+    {
+      "id": "dndsu-5e2014-class-89",
+      "systemId": "dnd5e-2014",
+      "category": "classes",
+      "title": "Жрец",
+      "summary": "Кость хитов d8. Спасброски: Мудрость, Харизма",
+      "tags": [
+        "Книга игрока",
+        "Официальный"
+      ],
+      "coverUrl": "https://picsum.photos/seed/handbook-dnd5e-2014-cleric/800/1200",
+      "accent": "#CA8A04"
+    },
+    {
+      "id": "dndsu-5e2014-class-104",
+      "systemId": "dnd5e-2014",
+      "category": "classes",
+      "title": "Колдун",
+      "summary": "Кость хитов d8. Спасброски: : Мудрость, Харизма",
+      "tags": [
+        "Книга игрока",
+        "Официальный"
+      ],
+      "coverUrl": "https://picsum.photos/seed/handbook-dnd5e-2014-warlock/800/1200",
+      "accent": "#6D28D9"
+    },
+    {
+      "id": "dndsu-5e2014-class-93",
+      "systemId": "dnd5e-2014",
+      "category": "classes",
+      "title": "Монах",
+      "summary": "Кость хитов d8. Спасброски: Сила, Ловкость",
+      "tags": [
+        "Книга игрока",
+        "Официальный"
+      ],
+      "coverUrl": "https://picsum.photos/seed/handbook-dnd5e-2014-monk/800/1200",
+      "accent": "#0F766E"
+    },
+    {
+      "id": "dndsu-5e2014-class-94",
+      "systemId": "dnd5e-2014",
+      "category": "classes",
+      "title": "Паладин",
+      "summary": "Кость хитов d10. Спасброски: Мудрость, Харизма",
+      "tags": [
+        "Книга игрока",
+        "Официальный"
+      ],
+      "coverUrl": "https://picsum.photos/seed/handbook-dnd5e-2014-paladin/800/1200",
+      "accent": "#1D4ED8"
+    },
+    {
+      "id": "dndsu-5e2014-class-99",
+      "systemId": "dnd5e-2014",
+      "category": "classes",
+      "title": "Плут",
+      "summary": "Кость хитов d8. Спасброски: Ловкость, Интеллект",
+      "tags": [
+        "Книга игрока",
+        "Официальный"
+      ],
+      "coverUrl": "https://picsum.photos/seed/handbook-dnd5e-2014-rogue/800/1200",
+      "accent": "#334155"
+    },
+    {
+      "id": "dndsu-5e2014-class-101",
+      "systemId": "dnd5e-2014",
+      "category": "classes",
+      "title": "Чародей",
+      "summary": "Кость хитов d6. Спасброски: Телосложение, Харизма",
+      "tags": [
+        "Книга игрока",
+        "Официальный"
+      ],
+      "coverUrl": "https://picsum.photos/seed/handbook-dnd5e-2014-sorcerer/800/1200",
+      "accent": "#BE185D"
+    },
+    {
+      "id": "dndsu-5e2014-class-87",
+      "systemId": "dnd5e-2014",
+      "category": "classes",
+      "title": "Варвар",
+      "summary": "Кость хитов d12. Спасброски: Сила, Телосложение",
+      "tags": [
+        "Homebrew",
+        "Homebrew"
+      ],
+      "coverUrl": "https://picsum.photos/seed/handbook-dnd5e-2014-barbarian/800/1200",
+      "accent": "#9A3412"
+    },
+    {
+      "id": "dndsu-5e2014-class-90",
+      "systemId": "dnd5e-2014",
+      "category": "classes",
+      "title": "Друид",
+      "summary": "Кость хитов d8. Спасброски: Интеллект, Мудрость",
+      "tags": [
+        "Unearthed Arcana",
+        "Homebrew"
+      ],
+      "coverUrl": "https://picsum.photos/seed/handbook-dnd5e-2014-druid/800/1200",
+      "accent": "#3F6212"
+    },
+    {
+      "id": "dndsu-5e2014-class-137",
+      "systemId": "dnd5e-2014",
+      "category": "classes",
+      "title": "Изобретатель",
+      "summary": "Кость хитов d8. Спасброски: Телосложение, Интеллект",
+      "tags": [
+        "Tasha's Cauldron of Everything"
+      ],
+      "coverUrl": "https://picsum.photos/seed/handbook-dnd5e-2014-artificer/800/1200",
+      "accent": "#B45309"
+    },
+    {
+      "id": "dndsu-5e2014-class-97",
+      "systemId": "dnd5e-2014",
+      "category": "classes",
+      "title": "Следопыт",
+      "summary": "Кость хитов d10. Спасброски: Сила, Ловкость",
+      "tags": [
+        "Homebrew",
+        "Homebrew"
+      ],
+      "coverUrl": "https://picsum.photos/seed/handbook-dnd5e-2014-ranger/800/1200",
+      "accent": "#166534"
+    },
+    {
+      "id": "dndsu-5e2024-class-bard",
+      "systemId": "dnd5e-2024",
+      "category": "classes",
+      "title": "Бард",
+      "summary": "Bard",
+      "tags": [
+        "Книга игрока",
+        "Официальный"
+      ],
+      "coverUrl": "https://picsum.photos/seed/handbook-dnd5e-2024-bard/800/1200",
+      "accent": "#7C3AED"
+    },
+    {
+      "id": "dndsu-5e2024-class-barbarian",
+      "systemId": "dnd5e-2024",
+      "category": "classes",
+      "title": "Варвар",
+      "summary": "Barbarian",
+      "tags": [
+        "Книга игрока",
+        "Официальный"
+      ],
+      "coverUrl": "https://picsum.photos/seed/handbook-dnd5e-2024-barbarian/800/1200",
+      "accent": "#9A3412"
+    },
+    {
+      "id": "dndsu-5e2024-class-fighter",
+      "systemId": "dnd5e-2024",
+      "category": "classes",
+      "title": "Воин",
+      "summary": "Fighter",
+      "tags": [
+        "Книга игрока",
+        "Официальный"
+      ],
+      "coverUrl": "https://picsum.photos/seed/handbook-dnd5e-2024-fighter/800/1200",
+      "accent": "#9F1239"
+    },
+    {
+      "id": "dndsu-5e2024-class-wizard",
+      "systemId": "dnd5e-2024",
+      "category": "classes",
+      "title": "Волшебник",
+      "summary": "Wizard",
+      "tags": [
+        "Книга игрока",
+        "Официальный"
+      ],
+      "coverUrl": "https://picsum.photos/seed/handbook-dnd5e-2024-wizard/800/1200",
+      "accent": "#1E40AF"
+    },
+    {
+      "id": "dndsu-5e2024-class-druid",
+      "systemId": "dnd5e-2024",
+      "category": "classes",
+      "title": "Друид",
+      "summary": "Druid",
+      "tags": [
+        "Книга игрока",
+        "Официальный"
+      ],
+      "coverUrl": "https://picsum.photos/seed/handbook-dnd5e-2024-druid/800/1200",
+      "accent": "#3F6212"
+    },
+    {
+      "id": "dndsu-5e2024-class-cleric",
+      "systemId": "dnd5e-2024",
+      "category": "classes",
+      "title": "Жрец",
+      "summary": "Cleric",
+      "tags": [
+        "Книга игрока",
+        "Официальный"
+      ],
+      "coverUrl": "https://picsum.photos/seed/handbook-dnd5e-2024-cleric/800/1200",
+      "accent": "#CA8A04"
+    },
+    {
+      "id": "dndsu-5e2024-class-warlock",
+      "systemId": "dnd5e-2024",
+      "category": "classes",
+      "title": "Колдун",
+      "summary": "Warlock",
+      "tags": [
+        "Книга игрока",
+        "Официальный"
+      ],
+      "coverUrl": "https://picsum.photos/seed/handbook-dnd5e-2024-warlock/800/1200",
+      "accent": "#6D28D9"
+    },
+    {
+      "id": "dndsu-5e2024-class-monk",
+      "systemId": "dnd5e-2024",
+      "category": "classes",
+      "title": "Монах",
+      "summary": "Monk",
+      "tags": [
+        "Книга игрока",
+        "Официальный"
+      ],
+      "coverUrl": "https://picsum.photos/seed/handbook-dnd5e-2024-monk/800/1200",
+      "accent": "#0F766E"
+    },
+    {
+      "id": "dndsu-5e2024-class-paladin",
+      "systemId": "dnd5e-2024",
+      "category": "classes",
+      "title": "Паладин",
+      "summary": "Paladin",
+      "tags": [
+        "Книга игрока",
+        "Официальный"
+      ],
+      "coverUrl": "https://picsum.photos/seed/handbook-dnd5e-2024-paladin/800/1200",
+      "accent": "#1D4ED8"
+    },
+    {
+      "id": "dndsu-5e2024-class-rogue",
+      "systemId": "dnd5e-2024",
+      "category": "classes",
+      "title": "Плут",
+      "summary": "Rogue",
+      "tags": [
+        "Книга игрока",
+        "Официальный"
+      ],
+      "coverUrl": "https://picsum.photos/seed/handbook-dnd5e-2024-rogue/800/1200",
+      "accent": "#334155"
+    },
+    {
+      "id": "dndsu-5e2024-class-ranger",
+      "systemId": "dnd5e-2024",
+      "category": "classes",
+      "title": "Следопыт",
+      "summary": "Ranger",
+      "tags": [
+        "Книга игрока",
+        "Официальный"
+      ],
+      "coverUrl": "https://picsum.photos/seed/handbook-dnd5e-2024-ranger/800/1200",
+      "accent": "#166534"
+    },
+    {
+      "id": "dndsu-5e2024-class-sorcerer",
+      "systemId": "dnd5e-2024",
+      "category": "classes",
+      "title": "Чародей",
+      "summary": "Sorcerer",
+      "tags": [
+        "Книга игрока",
+        "Официальный"
+      ],
+      "coverUrl": "https://picsum.photos/seed/handbook-dnd5e-2024-sorcerer/800/1200",
+      "accent": "#BE185D"
+    },
+    {
+      "id": "dndsu-5e2024-class-artificer",
+      "systemId": "dnd5e-2024",
+      "category": "classes",
+      "title": "Артефактор",
+      "summary": "Artificer",
+      "tags": [
+        "Eberron: Forge of the Artificer"
+      ],
+      "coverUrl": "https://picsum.photos/seed/handbook-dnd5e-2024-artificer/800/1200",
+      "accent": "#B45309"
+    },
+    {
+      "id": "dndsu-5e2024-class-pugilist",
+      "systemId": "dnd5e-2024",
+      "category": "classes",
+      "title": "Кулачник",
+      "summary": "Pugilist",
+      "tags": [
+        "The Pugilist Class"
+      ],
+      "coverUrl": "https://picsum.photos/seed/handbook-dnd5e-2024-pugilist/800/1200",
+      "accent": "#C2410C"
+    }
+  ]
+}

@@ -36,7 +36,8 @@ export const DiceStage = forwardRef<DiceStageHandle, DiceStageProps>(function Di
     skin,
     animationSpeed = 'normal',
     scale,
-    centerSpawn = false,
+    // Match native: edge toss leaves compact trays / chat overlays.
+    centerSpawn = true,
   },
   ref,
 ) {

@@ -31,7 +31,7 @@ export function YandexMetrikaTracker() {
 
       const search = (() => {
         try {
-          if (typeof window !== 'undefined' && window.location?.search) {
+          if (Platform.OS === 'web' && typeof window !== 'undefined' && window.location?.search) {
             return window.location.search;
           }
         } catch {

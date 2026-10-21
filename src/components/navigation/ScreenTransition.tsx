@@ -1,5 +1,6 @@
 import { useIsFocused } from 'expo-router';
 import { useEffect, type ReactNode } from 'react';
+import { StyleSheet } from 'react-native';
 import Animated, {
   cancelAnimation,
   Easing,
@@ -46,6 +47,20 @@ function runEnterAnimation(
   opacity.value = withTiming(1, { duration, easing: transitionEasing });
   translateY.value = withTiming(0, { duration, easing: transitionEasing });
 }
+
+/**
+ * flex/minHeight must stay in a static StyleSheet — on Fabric, flex from
+ * useAnimatedStyle alone often fails Yoga layout (chat composer sticks under header).
+ */
+const layoutStyle = StyleSheet.create({
+  root: {
+    flex: 1,
+    width: '100%',
+    minHeight: 0,
+    minWidth: 0,
+    overflow: 'hidden',
+  },
+});
 
 export function ScreenTransition({
   children,
@@ -94,11 +109,6 @@ export function ScreenTransition({
   const animatedStyle = useAnimatedStyle(() => {
     const visible = !animateOnFocus || opacity.value > 0.05;
     return {
-      flex: 1,
-      width: '100%',
-      minHeight: 0,
-      minWidth: 0,
-      overflow: 'hidden',
       opacity: opacity.value,
       transform: [{ translateY: translateY.value }],
       // Web tabs keep screens mounted — opacity alone won't hide Leaflet/map layers.
@@ -107,5 +117,5 @@ export function ScreenTransition({
     };
   });
 
-  return <Animated.View style={animatedStyle}>{children}</Animated.View>;
+  return <Animated.View style={[layoutStyle.root, animatedStyle]}>{children}</Animated.View>;
 }

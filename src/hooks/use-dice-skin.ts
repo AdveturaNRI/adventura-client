@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { DeviceEventEmitter } from 'react-native';
 
 import { useProfile } from '@/context/ProfileContext';
 import {
@@ -12,6 +13,7 @@ import {
   loadDiceSkinId,
   saveDiceSkinId,
 } from '@/utils/dice-skin-storage';
+import { canUseDomWindow } from '@/utils/dom-window';
 
 const SKIN_CHANGED_EVENT = 'adventura:dice-skin-changed';
 
@@ -32,20 +34,28 @@ export function useDiceSkin() {
         setSkinState(value);
       }
     });
-    const onChanged = (event: Event) => {
-      const detail = (event as CustomEvent<string>).detail;
+
+    const applyDetail = (detail: unknown) => {
       if (isDiceSkinId(detail)) {
         setSkinState(detail);
       }
     };
-    if (typeof window !== 'undefined') {
+
+    if (canUseDomWindow()) {
+      const onChanged = (event: Event) => {
+        applyDetail((event as CustomEvent<string>).detail);
+      };
       window.addEventListener(SKIN_CHANGED_EVENT, onChanged);
+      return () => {
+        cancelled = true;
+        window.removeEventListener(SKIN_CHANGED_EVENT, onChanged);
+      };
     }
+
+    const sub = DeviceEventEmitter.addListener(SKIN_CHANGED_EVENT, applyDetail);
     return () => {
       cancelled = true;
-      if (typeof window !== 'undefined') {
-        window.removeEventListener(SKIN_CHANGED_EVENT, onChanged);
-      }
+      sub.remove();
     };
   }, []);
 
@@ -56,9 +66,11 @@ export function useDiceSkin() {
     userSetRef.current = true;
     setSkinState(next);
     await saveDiceSkinId(next);
-    if (typeof window !== 'undefined') {
+    if (canUseDomWindow()) {
       window.dispatchEvent(new CustomEvent(SKIN_CHANGED_EVENT, { detail: next }));
+      return;
     }
+    DeviceEventEmitter.emit(SKIN_CHANGED_EVENT, next);
   }, []);
 
   return {

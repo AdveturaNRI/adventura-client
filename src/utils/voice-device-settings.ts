@@ -1,4 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { Platform } from 'react-native';
 
 const INPUT_KEY = '@adventura/voice-input-device-id';
 const OUTPUT_KEY = '@adventura/voice-output-device-id';
@@ -137,6 +138,7 @@ export async function saveVoiceNoiseSuppression(enabled: boolean): Promise<void>
 
 // Prefetch only in the browser — AsyncStorage touches window.localStorage and
 // crashes Node SSR / static export if we load prefs at module evaluate time.
-if (typeof window !== 'undefined') {
+// On RN `window` exists but is not a real DOM; skip module-time prefetch there.
+if (Platform.OS === 'web' && typeof window !== 'undefined') {
   void loadVoiceDevicePrefs();
 }

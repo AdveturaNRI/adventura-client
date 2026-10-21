@@ -14,7 +14,10 @@ export type HandbookSystem = {
   shortName: string;
   tagline: string;
   description: string;
-  coverUrl: string;
+  /** CDN/URL обложки (если нет локального ассета). */
+  coverUrl?: string;
+  /** Локальный require из `assets/handbook/systems`. */
+  coverSource?: number;
   /** Акцент для градиента плитки (hex) */
   accent: string;
   isOfficial: boolean;
@@ -27,4 +30,10 @@ export type HandbookEntry = {
   title: string;
   summary: string;
   tags: string[];
+  /** Панорамная обложка для плитки (CDN). */
+  coverUrl?: string;
+  /** Локальный require из `assets/handbook/classes`. */
+  coverSource?: number;
+  /** Акцент нижней полоски на карточке. */
+  accent?: string;
 };

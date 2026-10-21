@@ -12,7 +12,10 @@ import Animated, {
 import { useTheme } from '@/hooks/use-theme';
 
 type FadeInImageProps = {
-  uri: string;
+  /** Remote URL. Ignored when `source` is set (локальный require). */
+  uri?: string;
+  /** Локальный ассет: `require('…/cover.png')`. */
+  source?: ComponentProps<typeof Image>['source'];
   style?: StyleProp<ViewStyle>;
   contentFit?: ComponentProps<typeof Image>['contentFit'];
   /** Cross-fade duration once the image is ready. */
@@ -25,11 +28,12 @@ type FadeInImageProps = {
 >;
 
 /**
- * Remote image with a soft pulse skeleton while loading and a fade-in on ready.
- * Keeps the muted frame visible until the first paint so covers don't flash solid gray.
+ * Image with a soft pulse skeleton while loading and a fade-in on ready.
+ * Remote (`uri`) or bundled (`source` / require). Muted frame until first paint.
  */
 export function FadeInImage({
   uri,
+  source,
   style,
   contentFit = 'cover',
   transitionMs = 320,
@@ -42,10 +46,12 @@ export function FadeInImage({
   const colors = useTheme();
   const [ready, setReady] = useState(false);
   const pulse = useSharedValue(0.55);
+  const imageSource = source ?? (uri ? { uri } : undefined);
+  const cacheKey = recyclingKey ?? uri ?? String(source);
 
   useEffect(() => {
     setReady(false);
-  }, [uri]);
+  }, [cacheKey]);
 
   useEffect(() => {
     if (ready) {
@@ -75,24 +81,26 @@ export function FadeInImage({
           ]}
         />
       ) : null}
-      <Image
-        {...imageProps}
-        key={recyclingKey ?? uri}
-        source={{ uri }}
-        style={styles.image}
-        contentFit={contentFit}
-        transition={transitionMs}
-        recyclingKey={recyclingKey ?? uri}
-        cachePolicy={cachePolicy}
-        onLoad={(event) => {
-          setReady(true);
-          onLoad?.(event);
-        }}
-        onError={(event) => {
-          setReady(true);
-          onError?.(event);
-        }}
-      />
+      {imageSource ? (
+        <Image
+          {...imageProps}
+          key={cacheKey}
+          source={imageSource}
+          style={styles.image}
+          contentFit={contentFit}
+          transition={transitionMs}
+          recyclingKey={cacheKey}
+          cachePolicy={cachePolicy}
+          onLoad={(event) => {
+            setReady(true);
+            onLoad?.(event);
+          }}
+          onError={(event) => {
+            setReady(true);
+            onError?.(event);
+          }}
+        />
+      ) : null}
     </View>
   );
 }

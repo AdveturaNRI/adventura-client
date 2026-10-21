@@ -28,6 +28,7 @@ import {
 } from '@/services/profile/wanderersApi';
 import { localizeErrorMessage } from '@/utils/localizeError';
 import { trackEntityTransition } from '@/services/analytics/analytics';
+import { shareAppLink } from '@/utils/share-link';
 import { wandererCardToUserCardProps } from '@/utils/wanderer-card';
 import { QUESTIONNAIRE_ENTRY } from '@/screens/questionnaire/questionnaire.config';
 
@@ -282,6 +283,18 @@ export default function UserProfileScreen() {
                     style={styles.actionButton}
                     onPress={() =>
                       router.push({ pathname: QUESTIONNAIRE_ENTRY, params: { edit: '1' } })
+                    }
+                  />
+                  <Button
+                    label="Поделиться"
+                    variant="outline"
+                    style={styles.actionButton}
+                    onPress={() =>
+                      void shareAppLink({
+                        title: item.nickname,
+                        message: `Профиль ${item.nickname} в Adventura`,
+                        path: `/users/${item.id}`,
+                      })
                     }
                   />
                 </View>

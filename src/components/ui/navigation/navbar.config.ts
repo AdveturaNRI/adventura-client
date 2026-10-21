@@ -12,14 +12,14 @@ export type NavbarSpec = {
   icon: NavbarIconKey;
 };
 
-const HIDDEN_NAV_KEYS = new Set<NavbarIconKey>(['characters', 'handbook']);
+const HIDDEN_NAV_KEYS = new Set<NavbarIconKey>(['characters']);
 
 export const NAVBAR_ITEMS: NavbarItem[] = [
   { key: 'wanderers', label: 'Странники', icon: 'wanderers' },
   { key: 'games', label: 'Игры', icon: 'games' },
   { key: 'characters', label: 'Персонажи', icon: 'characters' },
   { key: 'authors', label: 'Публикации', icon: 'authors' },
-  { key: 'handbook', label: 'Справочник', icon: 'handbook' },
+  { key: 'handbook', label: 'Библиотека', icon: 'handbook' },
   { key: 'clubs', label: 'Клубы', icon: 'clubs' },
   { key: 'dice', label: 'Дайсы', icon: 'dice' },
   { key: 'generators', label: 'Генераторы', icon: 'generators' },
@@ -66,7 +66,7 @@ export const MOBILE_APP_MENU_ITEMS: MobileAppMenuItem[] = [
   },
   {
     key: 'handbook',
-    label: 'Справочник',
+    label: 'Библиотека',
     icon: 'handbook',
     subtitle: 'Расы, классы и правила по системам',
   },

@@ -7,7 +7,6 @@ import {
   ActivityIndicator,
   AppState,
   Keyboard,
-  KeyboardAvoidingView,
   Linking,
   Modal,
   Platform,
@@ -507,6 +506,7 @@ function createStyles(colors: ThemeColors, bottomPad: number, isDark: boolean) {
       borderBottomColor: colors.borderLight,
       backgroundColor: colors.surface,
       zIndex: 2,
+      flexShrink: 0,
     },
     headerAvatarWrap: {
       width: avatarFrameOuterSize(36),
@@ -625,6 +625,7 @@ function createStyles(colors: ThemeColors, bottomPad: number, isDark: boolean) {
       borderWidth: 1,
       borderColor: 'rgba(21, 122, 254, 0.28)',
       backgroundColor: 'rgba(21, 122, 254, 0.1)',
+      flexShrink: 0,
     },
     voiceJoinIcon: {
       width: 36,
@@ -681,6 +682,7 @@ function createStyles(colors: ThemeColors, bottomPad: number, isDark: boolean) {
       borderWidth: 1,
       borderColor: isDark ? 'rgba(240, 215, 140, 0.45)' : 'rgba(201, 162, 39, 0.28)',
       backgroundColor: isDark ? '#3A3018' : 'rgba(255, 248, 225, 0.95)',
+      flexShrink: 0,
     },
     favoriteInviteIcon: {
       width: 36,
@@ -935,10 +937,14 @@ function createStyles(colors: ThemeColors, bottomPad: number, isDark: boolean) {
       color: colors.textMuted,
       textAlign: 'center',
     },
-    list: {
+    listPane: {
       flex: 1,
       minHeight: 0,
       zIndex: 1,
+    },
+    list: {
+      flex: 1,
+      minHeight: 0,
       backgroundColor: 'transparent',
       ...(Platform.OS === 'web'
         ? ({
@@ -1132,6 +1138,7 @@ function createStyles(colors: ThemeColors, bottomPad: number, isDark: boolean) {
       position: 'relative',
       overflow: 'visible',
       zIndex: 2,
+      flexShrink: 0,
       borderTopWidth: StyleSheet.hairlineWidth,
       borderTopColor: colors.borderLight,
       backgroundColor: colors.background,
@@ -3576,7 +3583,7 @@ export default function ChatThreadScreen() {
 
   return (
     <ScreenTransition animateOnFocus>
-      <KeyboardAvoidingView style={styles.root} behavior={Platform.OS === 'ios' ? 'padding' : undefined} keyboardVerticalOffset={0}>
+      <View style={styles.root}>
         <View ref={dropZoneRef} style={styles.dropZone} collapsable={false}>
           <ChatBackgroundLayer
             isDark={isDark}
@@ -3900,6 +3907,7 @@ export default function ChatThreadScreen() {
             </View>
           ) : null}
 
+          <View style={styles.listPane}>
           {loading && messages.length === 0 ? (
             <View
               style={{
@@ -4375,6 +4383,7 @@ export default function ChatThreadScreen() {
               }}
             />
           )}
+          </View>
 
           <ChatImageLightbox uris={lightbox?.uris ?? null} index={lightbox?.index ?? 0} onClose={() => setLightbox(null)} />
 
@@ -4583,7 +4592,7 @@ export default function ChatThreadScreen() {
             </View>
           )}
         </View>
-      </KeyboardAvoidingView>
+      </View>
 
       <Modal visible={menuOpen} transparent animationType="fade" onRequestClose={handleCloseMenu}>
         <View style={styles.menuRoot}>

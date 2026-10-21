@@ -15,6 +15,7 @@ import Animated, {
 } from 'react-native-reanimated';
 
 import type { MarketingLandingBlock } from '@/components/marketing/types';
+import { canUseDomWindow } from '@/utils/dom-window';
 
 export type LandingMotionPreset =
   | 'hero'
@@ -164,7 +165,7 @@ function WebScrollReveal({
     }
 
     if (
-      typeof window !== 'undefined' &&
+      canUseDomWindow() &&
       window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
     ) {
       setActive(true);
@@ -178,7 +179,7 @@ function WebScrollReveal({
       if (cancelled || !hostRef.current) return;
       hostRef.current.measureInWindow((_x, y, _w, h) => {
         if (cancelled) return;
-        const viewport = typeof window !== 'undefined' ? window.innerHeight : 800;
+        const viewport = canUseDomWindow() ? window.innerHeight : 800;
         const visible = y < viewport * 0.9 && y + h > viewport * 0.05;
         if (visible) {
           setActive(true);
@@ -192,6 +193,14 @@ function WebScrollReveal({
     };
 
     checkVisibility();
+
+    if (!canUseDomWindow()) {
+      return () => {
+        cancelled = true;
+        cancelAnimationFrame(framed);
+      };
+    }
+
     window.addEventListener('scroll', onScrollOrResize, { passive: true, capture: true });
     window.addEventListener('resize', onScrollOrResize, { passive: true });
 
@@ -207,8 +216,8 @@ function WebScrollReveal({
     if (!active) return;
 
     const reduced =
-      typeof window !== 'undefined' &&
-      window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+      canUseDomWindow() &&
+      Boolean(window.matchMedia?.('(prefers-reduced-motion: reduce)').matches);
 
     if (reduced) {
       opacity.value = 1;

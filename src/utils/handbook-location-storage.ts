@@ -1,6 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
 
+import { resolveHandbookSystemId } from '@/data/handbook/mock-systems';
 import type { HandbookCategoryFilter } from '@/data/handbook/types';
 
 const KEY = '@adventura/handbook-location';
@@ -25,7 +26,7 @@ const CATEGORY_SET = new Set<HandbookCategoryFilter>([
   'rules',
 ]);
 
-/** Разовый пропуск restore: клик по крошке «Справочник» открывает хаб, а не прошлую систему. */
+/** Разовый пропуск restore: клик по крошке «Библиотека» открывает хаб, а не прошлую систему. */
 let skipNextRestore = false;
 
 export function markHandbookHubIntent() {
@@ -44,7 +45,7 @@ function parseLocation(raw: string | null | undefined): HandbookLocation | null 
     const data = JSON.parse(raw) as Partial<HandbookLocation>;
     const systemId =
       typeof data.systemId === 'string' && data.systemId.trim()
-        ? data.systemId.trim()
+        ? resolveHandbookSystemId(data.systemId.trim())
         : null;
     const category =
       typeof data.category === 'string' && CATEGORY_SET.has(data.category as HandbookCategoryFilter)

@@ -1,5 +1,5 @@
 import { Redirect, Stack, useLocalSearchParams, usePathname, useRootNavigationState } from 'expo-router';
-import { ActivityIndicator, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, Platform, StyleSheet, View } from 'react-native';
 
 import { AuthHeader } from '@/components/navigation/header';
 import { stackScreenOptions } from '@/constants/navigation.config';
@@ -29,7 +29,7 @@ function isOauthCallbackPath(path: string) {
 /** Prefer window path on web — usePathname can lag on first paint / static hydrate. */
 function useIsPassthroughAuthRoute() {
   const pathname = usePathname();
-  if (typeof window !== 'undefined') {
+  if (Platform.OS === 'web' && typeof window !== 'undefined' && window.location?.pathname) {
     const winPath = window.location.pathname;
     if (isEmailTokenPath(winPath) || isOauthCallbackPath(winPath)) {
       return true;

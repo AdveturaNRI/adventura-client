@@ -8,10 +8,12 @@ import { useThemedStyles } from '@/hooks/use-themed-styles';
 
 type HandbookSystemTileProps = {
   system: HandbookSystem;
-  entryCount: number;
   onPress: () => void;
-  /** Крупнее на десктопе в сетке из 3 колонок */
-  compact?: boolean;
+  /**
+   * `portrait` — сетка на десктопе.
+   * `banner` — полноширинная карточка на телефоне.
+   */
+  layout?: 'portrait' | 'banner';
 };
 
 function hexToRgba(hex: string, alpha: number): string {
@@ -31,16 +33,39 @@ function hexToRgba(hex: string, alpha: number): string {
   return `rgba(${r},${g},${b},${alpha})`;
 }
 
-function createStyles(colors: ThemeColors, compact: boolean) {
+function createStyles(colors: ThemeColors, layout: 'portrait' | 'banner') {
+  const banner = layout === 'banner';
+
   return StyleSheet.create({
     card: {
-      flex: 1,
+      flex: banner ? undefined : 1,
+      width: banner ? '100%' : undefined,
       minWidth: 0,
-      borderRadius: compact ? 18 : 20,
+      borderRadius: banner ? 22 : 18,
       overflow: 'hidden',
       borderWidth: 1,
       borderColor: colors.borderLight,
       backgroundColor: colors.surface,
+      ...Platform.select({
+        web: {
+          cursor: 'pointer',
+          transitionProperty: 'transform, box-shadow, border-color',
+          transitionDuration: '160ms',
+          transitionTimingFunction: 'ease-out',
+        } as object,
+        default: {},
+      }),
+    },
+    cardHovered: {
+      transform: [{ scale: banner ? 1.01 : 1.025 }],
+      borderColor: 'rgba(21, 122, 254, 0.5)',
+      ...Platform.select({
+        web: {
+          boxShadow: '0 12px 28px rgba(15, 23, 42, 0.24)',
+          zIndex: 2,
+        } as object,
+        default: {},
+      }),
     },
     cardPressed: {
       opacity: 0.92,
@@ -48,7 +73,8 @@ function createStyles(colors: ThemeColors, compact: boolean) {
     },
     cover: {
       width: '100%',
-      aspectRatio: compact ? 3 / 4 : 4 / 5,
+      // Ассеты ~4:5; широкий баннер обрезал логотип D&D сверху.
+      aspectRatio: banner ? 4 / 5 : 3 / 4,
       overflow: 'hidden',
       backgroundColor: colors.surfaceMuted,
       position: 'relative',
@@ -58,14 +84,15 @@ function createStyles(colors: ThemeColors, compact: boolean) {
     },
     coverShield: {
       ...StyleSheet.absoluteFillObject,
-      backgroundColor: 'rgba(0,0,0,0.12)',
+      backgroundColor: banner ? 'rgba(0,0,0,0.08)' : 'rgba(0,0,0,0.12)',
     },
     coverGradient: {
       ...StyleSheet.absoluteFillObject,
       ...Platform.select({
         web: {
-          backgroundImage:
-            'linear-gradient(to top, rgba(0,0,0,0.78) 0%, rgba(0,0,0,0.28) 42%, rgba(0,0,0,0) 72%)',
+          backgroundImage: banner
+            ? 'linear-gradient(to top, rgba(0,0,0,0.82) 0%, rgba(0,0,0,0.32) 48%, rgba(0,0,0,0.08) 78%)'
+            : 'linear-gradient(to top, rgba(0,0,0,0.78) 0%, rgba(0,0,0,0.28) 42%, rgba(0,0,0,0) 72%)',
         } as object,
         default: {
           backgroundColor: 'rgba(0,0,0,0.22)',
@@ -74,12 +101,12 @@ function createStyles(colors: ThemeColors, compact: boolean) {
     },
     coverGradientNativeBase: {
       ...StyleSheet.absoluteFillObject,
-      top: '50%',
-      backgroundColor: 'rgba(0,0,0,0.55)',
+      top: '45%',
+      backgroundColor: 'rgba(0,0,0,0.58)',
     },
     coverGradientNativeMid: {
       ...StyleSheet.absoluteFillObject,
-      top: '32%',
+      top: '28%',
       height: '28%',
       backgroundColor: 'rgba(0,0,0,0.22)',
     },
@@ -88,12 +115,12 @@ function createStyles(colors: ThemeColors, compact: boolean) {
       left: 0,
       right: 0,
       bottom: 0,
-      height: 3,
+      height: banner ? 4 : 3,
     },
     badge: {
       position: 'absolute',
-      top: Spacing.sm + 2,
-      left: Spacing.sm + 2,
+      top: banner ? Spacing.md : Spacing.sm + 2,
+      left: banner ? Spacing.md : Spacing.sm + 2,
       paddingHorizontal: 10,
       minHeight: 26,
       borderRadius: Radius.pill,
@@ -111,55 +138,55 @@ function createStyles(colors: ThemeColors, compact: boolean) {
       left: 0,
       right: 0,
       bottom: 0,
-      paddingHorizontal: compact ? 14 : 16,
-      paddingBottom: compact ? 14 : 16,
-      paddingTop: 24,
-      gap: 4,
+      paddingHorizontal: banner ? Spacing.md + 2 : 14,
+      paddingBottom: banner ? Spacing.md + 2 : 14,
+      paddingTop: banner ? 28 : 24,
+      gap: banner ? 6 : 4,
     },
     name: {
-      fontSize: compact ? FontSize.button : 18,
+      fontSize: banner ? 22 : FontSize.button,
       fontWeight: '700',
       color: '#FFFFFF',
-      letterSpacing: -0.3,
-      lineHeight: (compact ? FontSize.button : 18) * 1.25,
+      letterSpacing: -0.4,
+      lineHeight: (banner ? 22 : FontSize.button) * 1.2,
     },
     tagline: {
-      fontSize: FontSize.caption,
+      fontSize: banner ? FontSize.label : FontSize.caption,
       fontWeight: '500',
-      color: 'rgba(255,255,255,0.82)',
-      lineHeight: FontSize.caption * 1.4,
-    },
-    meta: {
-      marginTop: 6,
-      fontSize: 11,
-      fontWeight: '600',
-      color: 'rgba(255,255,255,0.7)',
+      color: 'rgba(255,255,255,0.88)',
+      lineHeight: (banner ? FontSize.label : FontSize.caption) * 1.4,
+      maxWidth: banner ? '92%' : undefined,
     },
   });
 }
 
 export function HandbookSystemTile({
   system,
-  entryCount,
   onPress,
-  compact = false,
+  layout = 'portrait',
 }: HandbookSystemTileProps) {
   const colors = useTheme();
-  const styles = useThemedStyles((theme) => createStyles(theme, compact));
+  const styles = useThemedStyles((theme) => createStyles(theme, layout));
   const badgeBg = hexToRgba(system.accent, 0.92);
   const badgeBorder = hexToRgba(system.accent, 1);
 
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={`Справочник ${system.name}`}
+      accessibilityLabel={`Библиотека ${system.name}`}
       onPress={onPress}
-      style={({ pressed }) => [styles.card, pressed && styles.cardPressed]}>
+      style={({ pressed, hovered }: { pressed: boolean; hovered?: boolean }) => [
+        styles.card,
+        hovered && !pressed && styles.cardHovered,
+        pressed && styles.cardPressed,
+      ]}>
       <View style={styles.cover}>
         <FadeInImage
+          source={system.coverSource}
           uri={system.coverUrl}
           style={styles.coverImage}
           contentFit="cover"
+          contentPosition="top"
           pointerEvents="none"
         />
         <View pointerEvents="none" style={styles.coverShield} />
@@ -191,9 +218,6 @@ export function HandbookSystemTile({
           </Text>
           <Text style={styles.tagline} numberOfLines={2}>
             {system.tagline}
-          </Text>
-          <Text style={styles.meta}>
-            {entryCount} {entryCount === 1 ? 'статья' : entryCount < 5 ? 'статьи' : 'статей'}
           </Text>
         </View>
 

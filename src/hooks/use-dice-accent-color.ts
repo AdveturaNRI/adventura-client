@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { DeviceEventEmitter } from 'react-native';
 
 import {
   coerceDiceAccent,
@@ -6,6 +7,7 @@ import {
   loadDiceAccentColor,
   saveDiceAccentColor,
 } from '@/utils/dice-color-storage';
+import { canUseDomWindow } from '@/utils/dom-window';
 
 const ACCENT_CHANGED_EVENT = 'adventura:dice-accent-changed';
 
@@ -22,22 +24,27 @@ export function useDiceAccentColor() {
       }
     });
 
-    const onAccentChanged = (event: Event) => {
-      const detail = (event as CustomEvent<string>).detail;
+    const applyDetail = (detail: unknown) => {
       if (typeof detail === 'string') {
         setAccentState(coerceDiceAccent(detail));
       }
     };
 
-    if (typeof window !== 'undefined') {
+    if (canUseDomWindow()) {
+      const onAccentChanged = (event: Event) => {
+        applyDetail((event as CustomEvent<string>).detail);
+      };
       window.addEventListener(ACCENT_CHANGED_EVENT, onAccentChanged);
+      return () => {
+        cancelled = true;
+        window.removeEventListener(ACCENT_CHANGED_EVENT, onAccentChanged);
+      };
     }
 
+    const sub = DeviceEventEmitter.addListener(ACCENT_CHANGED_EVENT, applyDetail);
     return () => {
       cancelled = true;
-      if (typeof window !== 'undefined') {
-        window.removeEventListener(ACCENT_CHANGED_EVENT, onAccentChanged);
-      }
+      sub.remove();
     };
   }, []);
 
@@ -46,9 +53,11 @@ export function useDiceAccentColor() {
     userSetRef.current = true;
     setAccentState(next);
     await saveDiceAccentColor(next);
-    if (typeof window !== 'undefined') {
+    if (canUseDomWindow()) {
       window.dispatchEvent(new CustomEvent(ACCENT_CHANGED_EVENT, { detail: next }));
+      return;
     }
+    DeviceEventEmitter.emit(ACCENT_CHANGED_EVENT, next);
   }, []);
 
   return { accent, setAccent };

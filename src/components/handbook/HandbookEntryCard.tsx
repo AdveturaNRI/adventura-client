@@ -1,7 +1,10 @@
 import { Ionicons } from '@expo/vector-icons';
 import { StyleSheet, Text, View } from 'react-native';
 
-import { HANDBOOK_CATEGORY_ICONS, HANDBOOK_CATEGORY_LABELS } from '@/data/handbook/labels';
+import {
+  HANDBOOK_CATEGORY_ICONS,
+  getHandbookCategoryLabel,
+} from '@/data/handbook/labels';
 import type { HandbookEntry } from '@/data/handbook/types';
 import { FontSize, Radius, Spacing, type ThemeColors } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
@@ -99,14 +102,14 @@ export function HandbookEntryCard({ entry }: HandbookEntryCardProps) {
         <View style={styles.categoryBadge}>
           <Ionicons name={icon} size={12} color={colors.primary} />
           <Text style={styles.categoryLabel}>
-            {HANDBOOK_CATEGORY_LABELS[entry.category]}
+            {getHandbookCategoryLabel(entry.category, entry.systemId)}
           </Text>
         </View>
       </View>
       {entry.tags.length > 0 ? (
         <View style={styles.tags}>
-          {entry.tags.map((tag) => (
-            <View key={tag} style={styles.tag}>
+          {entry.tags.map((tag, index) => (
+            <View key={`${entry.id}-tag-${index}`} style={styles.tag}>
               <Text style={styles.tagText}>{tag}</Text>
             </View>
           ))}

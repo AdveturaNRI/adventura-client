@@ -1376,14 +1376,25 @@ export default function ChatsScreen({ variant = 'page' }: ChatsScreenProps) {
           </View>
       );
 
-      // ScaleDecorator requires DraggableFlatList CellProvider — skip on web FlatList.
-      if (Platform.OS === 'web') {
+      // ScaleDecorator needs DraggableFlatList CellProvider — not used with FlatList
+      // (web, search, or tab filter).
+      if (Platform.OS === 'web' || searchActive || tabFilterActive) {
         return row;
       }
 
       return <ScaleDecorator>{row}</ScaleDecorator>;
     },
-    [colors.primary, colors.textMuted, colors.textSubtle, localStyles, openMenu, pathname, router],
+    [
+      colors.primary,
+      colors.textMuted,
+      colors.textSubtle,
+      localStyles,
+      openMenu,
+      pathname,
+      router,
+      searchActive,
+      tabFilterActive,
+    ],
   );
 
   const content = (

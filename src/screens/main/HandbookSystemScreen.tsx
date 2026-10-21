@@ -1,4 +1,4 @@
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useLocalSearchParams, useNavigation, useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   type NativeScrollEvent,
@@ -12,6 +12,7 @@ import {
 import { HandbookBreadcrumbs } from '@/components/handbook/HandbookBreadcrumbs';
 import { HandbookCategoryTile } from '@/components/handbook/HandbookCategoryTile';
 import { HandbookEntryCard } from '@/components/handbook/HandbookEntryCard';
+import { HandbookEntryTile } from '@/components/handbook/HandbookEntryTile';
 import { useIsDesktopWeb } from '@/components/navigation/DesktopThemeToggle';
 import { MobileScreenHeader } from '@/components/navigation/MobileScreenHeader';
 import { ScreenTransition } from '@/components/navigation/ScreenTransition';
@@ -22,14 +23,11 @@ import {
 import { FontSize, Spacing, type ThemeColors } from '@/constants/theme';
 import {
   HANDBOOK_CATEGORY_ACCENTS,
-  HANDBOOK_CATEGORY_FILTER_LABELS,
   HANDBOOK_CATEGORY_ORDER,
+  getHandbookCategoryFilterLabel,
 } from '@/data/handbook/labels';
-import {
-  countEntriesByCategory,
-  getHandbookEntriesForSystem,
-} from '@/data/handbook/mock-entries';
-import { getHandbookSystem } from '@/data/handbook/mock-systems';
+import { getHandbookEntriesForSystem } from '@/data/handbook/mock-entries';
+import { getHandbookSystem, resolveHandbookSystemId } from '@/data/handbook/mock-systems';
 import type { HandbookCategory, HandbookCategoryFilter } from '@/data/handbook/types';
 import { useThemedStyles } from '@/hooks/use-themed-styles';
 import {
@@ -76,7 +74,13 @@ function createLocalStyles(colors: ThemeColors, isDesktopWeb: boolean) {
       flexBasis: isDesktopWeb ? '31.5%' : '47.5%',
       flexGrow: 1,
       maxWidth: isDesktopWeb ? '32.5%' : '49%',
-      minWidth: isDesktopWeb ? 200 : 140,
+      minWidth: isDesktopWeb ? 160 : 120,
+    },
+    classTileWrap: {
+      flexBasis: isDesktopWeb ? '23%' : '47.5%',
+      flexGrow: 1,
+      maxWidth: isDesktopWeb ? '24.5%' : '49%',
+      minWidth: isDesktopWeb ? 140 : 108,
     },
     list: {
       gap: Spacing.md,
@@ -113,8 +117,10 @@ function paramToString(value: string | string[] | undefined): string {
 
 export default function HandbookSystemScreen() {
   const router = useRouter();
+  const navigation = useNavigation();
   const params = useLocalSearchParams<{ systemId?: string | string[] }>();
-  const systemId = paramToString(params.systemId);
+  const rawSystemId = paramToString(params.systemId);
+  const systemId = resolveHandbookSystemId(rawSystemId);
   const system = getHandbookSystem(systemId);
 
   const isDesktopWeb = useIsDesktopWeb();
@@ -125,6 +131,14 @@ export default function HandbookSystemScreen() {
   const [hydrated, setHydrated] = useState(false);
   const scrollRef = useRef<ScrollView>(null);
   const [showScrollTop, setShowScrollTop] = useState(false);
+  const categoryRef = useRef(category);
+  categoryRef.current = category;
+
+  useEffect(() => {
+    if (rawSystemId && rawSystemId !== systemId) {
+      router.replace(`/handbook/${systemId}`);
+    }
+  }, [rawSystemId, router, systemId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -132,7 +146,7 @@ export default function HandbookSystemScreen() {
 
     void loadHandbookLocation().then((loc) => {
       if (cancelled) return;
-      if (loc.systemId === systemId) {
+      if (loc.systemId === systemId && loc.category !== 'rules') {
         setCategory(loc.category);
       } else {
         setCategory('all');
@@ -150,13 +164,6 @@ export default function HandbookSystemScreen() {
     void saveHandbookLocation({ systemId: system.id, category });
   }, [hydrated, system, category]);
 
-  const categoryCounts = useMemo(() => {
-    if (!system) {
-      return null;
-    }
-    return countEntriesByCategory(system.id);
-  }, [system]);
-
   const entries = useMemo(() => {
     if (!system || category === 'all') return [];
     return getHandbookEntriesForSystem(system.id, category);
@@ -164,10 +171,18 @@ export default function HandbookSystemScreen() {
 
   const showCategoryTiles = category === 'all';
 
-  const goToHub = useCallback(() => {
+  const leaveToHub = useCallback(() => {
     markHandbookHubIntent();
+    void saveHandbookLocation({ systemId: null, category: 'all' });
+    const stackIndex = navigation.getState()?.index ?? 0;
+    if (stackIndex > 0) {
+      router.back();
+      return;
+    }
     router.replace('/handbook');
-  }, [router]);
+  }, [navigation, router]);
+
+  const goToHub = leaveToHub;
 
   const resetCategory = useCallback(() => {
     setCategory('all');
@@ -179,28 +194,59 @@ export default function HandbookSystemScreen() {
   }, []);
 
   const onBack = useCallback(() => {
-    if (!showCategoryTiles) {
+    if (categoryRef.current !== 'all') {
       resetCategory();
+      scrollRef.current?.scrollTo({ y: 0, animated: false });
       return;
     }
-    goToHub();
-  }, [showCategoryTiles, resetCategory, goToHub]);
+    leaveToHub();
+  }, [resetCategory, leaveToHub]);
+
+  // Свайп/кнопка «назад»: сначала раздел → обзор системы → хаб, не выход из Библиотеки.
+  useEffect(() => {
+    const unsub = navigation.addListener('beforeRemove', (event) => {
+      const actionType = event.data.action.type;
+      if (actionType !== 'GO_BACK' && actionType !== 'POP' && actionType !== 'POP_TO_TOP') {
+        return;
+      }
+
+      if (categoryRef.current !== 'all') {
+        event.preventDefault();
+        setCategory('all');
+        scrollRef.current?.scrollTo({ y: 0, animated: false });
+        return;
+      }
+
+      markHandbookHubIntent();
+      void saveHandbookLocation({ systemId: null, category: 'all' });
+
+      const stackIndex = navigation.getState()?.index ?? 0;
+      if (stackIndex > 0) {
+        return;
+      }
+
+      event.preventDefault();
+      router.replace('/handbook');
+    });
+
+    return unsub;
+  }, [navigation, router]);
 
   const breadcrumbItems = useMemo(() => {
     if (!system) {
       return [
-        { label: 'Справочник', onPress: goToHub },
+        { label: 'Библиотека', onPress: goToHub },
         { label: 'Не найдено' },
       ];
     }
 
     const items: { label: string; onPress?: () => void }[] = [
-      { label: 'Справочник', onPress: goToHub },
+      { label: 'Библиотека', onPress: goToHub },
     ];
 
     if (!showCategoryTiles) {
       items.push({ label: system.shortName, onPress: resetCategory });
-      items.push({ label: HANDBOOK_CATEGORY_FILTER_LABELS[category] });
+      items.push({ label: getHandbookCategoryFilterLabel(category, system.id) });
     } else {
       items.push({ label: system.shortName });
     }
@@ -216,7 +262,7 @@ export default function HandbookSystemScreen() {
     return (
       <ScreenTransition>
         <View style={mainStyles.container}>
-          <MobileScreenHeader title="Справочник" showBack onBackPress={goToHub} />
+          <MobileScreenHeader title="Библиотека" showBack onBackPress={goToHub} />
           <View style={[mainStyles.content, { paddingTop: Spacing.sm }]}>
             <HandbookBreadcrumbs items={breadcrumbItems} />
             <View style={styles.missing}>
@@ -233,7 +279,7 @@ export default function HandbookSystemScreen() {
 
   const headerTitle = showCategoryTiles
     ? system.shortName
-    : HANDBOOK_CATEGORY_FILTER_LABELS[category];
+    : getHandbookCategoryFilterLabel(category, system.id);
 
   return (
     <ScreenTransition>
@@ -262,7 +308,7 @@ export default function HandbookSystemScreen() {
                     <View key={key} style={styles.tileWrap}>
                       <HandbookCategoryTile
                         category={key}
-                        entryCount={categoryCounts?.[key] ?? 0}
+                        systemId={system.id}
                         accent={HANDBOOK_CATEGORY_ACCENTS[key]}
                         onPress={() => openCategory(key)}
                       />
@@ -270,21 +316,27 @@ export default function HandbookSystemScreen() {
                   ))}
                 </View>
               </>
+            ) : entries.length === 0 ? (
+              <View style={styles.empty}>
+                <Text style={styles.emptyTitle}>Пока пусто</Text>
+                <Text style={styles.emptyText}>
+                  В разделе «{getHandbookCategoryFilterLabel(category, system.id)}» ещё нет
+                  статей для {system.shortName}.
+                </Text>
+              </View>
+            ) : category === 'classes' ? (
+              <View style={styles.grid}>
+                {entries.map((entry) => (
+                  <View key={entry.id} style={styles.classTileWrap}>
+                    <HandbookEntryTile entry={entry} />
+                  </View>
+                ))}
+              </View>
             ) : (
               <View style={styles.list}>
-                {entries.length === 0 ? (
-                  <View style={styles.empty}>
-                    <Text style={styles.emptyTitle}>Пока пусто</Text>
-                    <Text style={styles.emptyText}>
-                      В разделе «{HANDBOOK_CATEGORY_FILTER_LABELS[category]}» ещё нет
-                      статей для {system.shortName}.
-                    </Text>
-                  </View>
-                ) : (
-                  entries.map((entry) => (
-                    <HandbookEntryCard key={entry.id} entry={entry} />
-                  ))
-                )}
+                {entries.map((entry) => (
+                  <HandbookEntryCard key={entry.id} entry={entry} />
+                ))}
               </View>
             )}
           </View>

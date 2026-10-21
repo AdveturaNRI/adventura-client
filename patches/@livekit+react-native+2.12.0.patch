@@ -1,0 +1,394 @@
+diff --git a/node_modules/@livekit/react-native/ios/Headers/LKAudioProcessingAdapter.h b/node_modules/@livekit/react-native/ios/Headers/LKAudioProcessingAdapter.h
+index f732708..12bbfb1 100644
+--- a/node_modules/@livekit/react-native/ios/Headers/LKAudioProcessingAdapter.h
++++ b/node_modules/@livekit/react-native/ios/Headers/LKAudioProcessingAdapter.h
+@@ -1,17 +1,17 @@
+ #import <Foundation/Foundation.h>
+-#import <WebRTC/WebRTC.h>
++#import <LiveKitWebRTC/LiveKitWebRTC.h>
+ 
+ @protocol LKExternalAudioProcessingDelegate
+ 
+ - (void)audioProcessingInitializeWithSampleRate:(size_t)sampleRateHz channels:(size_t)channels;
+ 
+-- (void)audioProcessingProcess:(RTC_OBJC_TYPE(RTCAudioBuffer) * _Nonnull)audioBuffer;
++- (void)audioProcessingProcess:(LKRTCAudioBuffer * _Nonnull)audioBuffer;
+ 
+ - (void)audioProcessingRelease;
+ 
+ @end
+ 
+-@interface LKAudioProcessingAdapter : NSObject <RTCAudioCustomProcessingDelegate>
++@interface LKAudioProcessingAdapter : NSObject <LKRTCAudioCustomProcessingDelegate>
+ 
+ - (nonnull instancetype)init;
+ 
+@@ -19,8 +19,8 @@
+ 
+ - (void)removeProcessing:(id<LKExternalAudioProcessingDelegate> _Nonnull)processor;
+ 
+-- (void)addAudioRenderer:(nonnull id<RTCAudioRenderer>)renderer;
++- (void)addAudioRenderer:(nonnull id<LKRTCAudioRenderer>)renderer;
+ 
+-- (void)removeAudioRenderer:(nonnull id<RTCAudioRenderer>)renderer;
++- (void)removeAudioRenderer:(nonnull id<LKRTCAudioRenderer>)renderer;
+ 
+ @end
+\ No newline at end of file
+diff --git a/node_modules/@livekit/react-native/ios/Headers/LKAudioProcessingManager.h b/node_modules/@livekit/react-native/ios/Headers/LKAudioProcessingManager.h
+index 332b85c..e86a5c2 100644
+--- a/node_modules/@livekit/react-native/ios/Headers/LKAudioProcessingManager.h
++++ b/node_modules/@livekit/react-native/ios/Headers/LKAudioProcessingManager.h
+@@ -1,10 +1,10 @@
+ #import <Foundation/Foundation.h>
+-#import <WebRTC/WebRTC.h>
++#import <LiveKitWebRTC/LiveKitWebRTC.h>
+ #import "LKAudioProcessingAdapter.h"
+ 
+ @interface LKAudioProcessingManager : NSObject
+ 
+-@property(nonatomic, strong) RTCDefaultAudioProcessingModule* _Nonnull audioProcessingModule;
++@property(nonatomic, strong) LKRTCDefaultAudioProcessingModule* _Nonnull audioProcessingModule;
+ 
+ @property(nonatomic, strong) LKAudioProcessingAdapter* _Nonnull capturePostProcessingAdapter;
+ 
+@@ -13,13 +13,13 @@
+ + (_Nonnull instancetype)sharedInstance;
+ 
+ 
+-- (void)addLocalAudioRenderer:(nonnull id<RTCAudioRenderer>)renderer;
++- (void)addLocalAudioRenderer:(nonnull id<LKRTCAudioRenderer>)renderer;
+ 
+-- (void)removeLocalAudioRenderer:(nonnull id<RTCAudioRenderer>)renderer;
++- (void)removeLocalAudioRenderer:(nonnull id<LKRTCAudioRenderer>)renderer;
+ 
+-- (void)addRemoteAudioRenderer:(nonnull id<RTCAudioRenderer>)renderer;
++- (void)addRemoteAudioRenderer:(nonnull id<LKRTCAudioRenderer>)renderer;
+ 
+-- (void)removeRemoteAudioRenderer:(nonnull id<RTCAudioRenderer>)renderer;
++- (void)removeRemoteAudioRenderer:(nonnull id<LKRTCAudioRenderer>)renderer;
+ 
+ - (void)addCapturePostProcessor:(nonnull id<LKExternalAudioProcessingDelegate>)processor;
+ 
+diff --git a/node_modules/@livekit/react-native/ios/LKAudioProcessingAdapter.m b/node_modules/@livekit/react-native/ios/LKAudioProcessingAdapter.m
+index 1d63824..e80b423 100644
+--- a/node_modules/@livekit/react-native/ios/LKAudioProcessingAdapter.m
++++ b/node_modules/@livekit/react-native/ios/LKAudioProcessingAdapter.m
+@@ -1,9 +1,9 @@
+ #import "LKAudioProcessingAdapter.h"
+-#import <WebRTC/RTCAudioRenderer.h>
++#import <LiveKitWebRTC/RTCAudioRenderer.h>
+ #import <os/lock.h>
+ 
+ @implementation LKAudioProcessingAdapter {
+-  NSMutableArray<id<RTCAudioRenderer>>* _renderers;
++  NSMutableArray<id<LKRTCAudioRenderer>>* _renderers;
+   NSMutableArray<id<LKExternalAudioProcessingDelegate>>* _processors;
+   os_unfair_lock _lock;
+   BOOL _isAudioProcessingInitialized;
+@@ -16,7 +16,7 @@ - (instancetype)init {
+   if (self) {
+     _isAudioProcessingInitialized = NO;
+     _lock = OS_UNFAIR_LOCK_INIT;
+-    _renderers = [[NSMutableArray<id<RTCAudioRenderer>> alloc] init];
++    _renderers = [[NSMutableArray<id<LKRTCAudioRenderer>> alloc] init];
+     _processors = [[NSMutableArray<id<LKExternalAudioProcessingDelegate>> alloc] init];
+   }
+   return self;
+@@ -41,13 +41,13 @@ - (void)removeProcessing:(id<LKExternalAudioProcessingDelegate> _Nonnull)process
+   os_unfair_lock_unlock(&_lock);
+ }
+ 
+-- (void)addAudioRenderer:(nonnull id<RTCAudioRenderer>)renderer {
++- (void)addAudioRenderer:(nonnull id<LKRTCAudioRenderer>)renderer {
+   os_unfair_lock_lock(&_lock);
+   [_renderers addObject:renderer];
+   os_unfair_lock_unlock(&_lock);
+ }
+ 
+-- (void)removeAudioRenderer:(nonnull id<RTCAudioRenderer>)renderer {
++- (void)removeAudioRenderer:(nonnull id<LKRTCAudioRenderer>)renderer {
+   os_unfair_lock_lock(&_lock);
+   _renderers = [[_renderers
+       filteredArrayUsingPredicate:[NSPredicate predicateWithBlock:^BOOL(id evaluatedObject,
+@@ -69,7 +69,7 @@ - (void)audioProcessingInitializeWithSampleRate:(size_t)sampleRateHz channels:(s
+   os_unfair_lock_unlock(&_lock);
+ }
+ 
+-- (AVAudioPCMBuffer*)toPCMBuffer:(RTC_OBJC_TYPE(RTCAudioBuffer) *)audioBuffer {
++- (AVAudioPCMBuffer*)toPCMBuffer:(LKRTCAudioBuffer *)audioBuffer {
+   AVAudioFormat* format =
+       [[AVAudioFormat alloc] initWithCommonFormat:AVAudioPCMFormatInt16
+                                        sampleRate:audioBuffer.frames * 100.0
+@@ -93,13 +93,13 @@ - (AVAudioPCMBuffer*)toPCMBuffer:(RTC_OBJC_TYPE(RTCAudioBuffer) *)audioBuffer {
+   return pcmBuffer;
+ }
+ 
+-- (void)audioProcessingProcess:(RTC_OBJC_TYPE(RTCAudioBuffer) *)audioBuffer {
++- (void)audioProcessingProcess:(LKRTCAudioBuffer *)audioBuffer {
+   os_unfair_lock_lock(&_lock);
+   for (id<LKExternalAudioProcessingDelegate> processor in _processors) {
+     [processor audioProcessingProcess:audioBuffer];
+   }
+ 
+-  for (id<RTCAudioRenderer> renderer in _renderers) {
++  for (id<LKRTCAudioRenderer> renderer in _renderers) {
+     [renderer renderPCMBuffer:[self toPCMBuffer:audioBuffer]];
+   }
+   os_unfair_lock_unlock(&_lock);
+diff --git a/node_modules/@livekit/react-native/ios/LKAudioProcessingManager.m b/node_modules/@livekit/react-native/ios/LKAudioProcessingManager.m
+index 083fa77..cd20309 100644
+--- a/node_modules/@livekit/react-native/ios/LKAudioProcessingManager.m
++++ b/node_modules/@livekit/react-native/ios/LKAudioProcessingManager.m
+@@ -14,7 +14,7 @@ + (instancetype)sharedInstance {
+ 
+ - (instancetype)init {
+     if (self = [super init]) {
+-        _audioProcessingModule = [[RTCDefaultAudioProcessingModule alloc] init];
++        _audioProcessingModule = [[LKRTCDefaultAudioProcessingModule alloc] init];
+         _capturePostProcessingAdapter = [[LKAudioProcessingAdapter alloc] init];
+         _renderPreProcessingAdapter = [[LKAudioProcessingAdapter alloc] init];
+         _audioProcessingModule.capturePostProcessingDelegate = _capturePostProcessingAdapter;
+@@ -23,19 +23,19 @@ - (instancetype)init {
+     return self;
+ }
+ 
+-- (void)addLocalAudioRenderer:(nonnull id<RTCAudioRenderer>)renderer {
++- (void)addLocalAudioRenderer:(nonnull id<LKRTCAudioRenderer>)renderer {
+   [_capturePostProcessingAdapter addAudioRenderer:renderer];
+ }
+ 
+-- (void)removeLocalAudioRenderer:(nonnull id<RTCAudioRenderer>)renderer {
++- (void)removeLocalAudioRenderer:(nonnull id<LKRTCAudioRenderer>)renderer {
+   [_capturePostProcessingAdapter removeAudioRenderer:renderer];
+ }
+ 
+-- (void)addRemoteAudioRenderer:(nonnull id<RTCAudioRenderer>)renderer {
++- (void)addRemoteAudioRenderer:(nonnull id<LKRTCAudioRenderer>)renderer {
+   [_renderPreProcessingAdapter addAudioRenderer:renderer];
+ }
+ 
+-- (void)removeRemoteAudioRenderer:(nonnull id<RTCAudioRenderer>)renderer {
++- (void)removeRemoteAudioRenderer:(nonnull id<LKRTCAudioRenderer>)renderer {
+   [_renderPreProcessingAdapter removeAudioRenderer:renderer];
+ }
+ 
+diff --git a/node_modules/@livekit/react-native/ios/LiveKitReactNativeModule.swift b/node_modules/@livekit/react-native/ios/LiveKitReactNativeModule.swift
+index e85be6e..435b339 100644
+--- a/node_modules/@livekit/react-native/ios/LiveKitReactNativeModule.swift
++++ b/node_modules/@livekit/react-native/ios/LiveKitReactNativeModule.swift
+@@ -27,7 +27,7 @@ public class LivekitReactNativeModule: RCTEventEmitter {
+     @objc
+     public override init() {
+         super.init()
+-        let config = RTCAudioSessionConfiguration()
++        let config = LKRTCAudioSessionConfiguration()
+         config.category = AVAudioSession.Category.playAndRecord.rawValue
+         // Gated on compiler version (not iOS deploy target): .allowBluetoothHFP
+         // is only declared in the Xcode 26 / Swift 6.2 SDK, which replaces the
+@@ -39,7 +39,7 @@ public class LivekitReactNativeModule: RCTEventEmitter {
+         #endif
+         config.mode = AVAudioSession.Mode.videoChat.rawValue
+ 
+-        RTCAudioSessionConfiguration.setWebRTC(config)
++        LKRTCAudioSessionConfiguration.setWebRTC(config)
+     }
+ 
+     @objc
+@@ -49,8 +49,8 @@ public class LivekitReactNativeModule: RCTEventEmitter {
+ 
+     @objc
+     public static func setup() {
+-        let videoEncoderFactory = RTCDefaultVideoEncoderFactory()
+-        let simulcastVideoEncoderFactory = RTCVideoEncoderFactorySimulcast(primary: videoEncoderFactory, fallback: videoEncoderFactory)
++        let videoEncoderFactory = LKRTCDefaultVideoEncoderFactory()
++        let simulcastVideoEncoderFactory = LKRTCVideoEncoderFactorySimulcast(primary: videoEncoderFactory, fallback: videoEncoderFactory)
+         let options = WebRTCModuleOptions.sharedInstance()
+         options.videoEncoderFactory = simulcastVideoEncoderFactory
+         options.audioProcessingModule = LKAudioProcessingManager.sharedInstance().audioProcessingModule
+@@ -65,7 +65,7 @@ public class LivekitReactNativeModule: RCTEventEmitter {
+ 
+         let defaultOutput = iOSConfig["defaultOutput"] as? String ?? "speaker"
+ 
+-        let rtcConfig = RTCAudioSessionConfiguration()
++        let rtcConfig = LKRTCAudioSessionConfiguration()
+         rtcConfig.category = AVAudioSession.Category.playAndRecord.rawValue
+ 
+         if (defaultOutput == "earpiece") {
+@@ -75,12 +75,12 @@ public class LivekitReactNativeModule: RCTEventEmitter {
+             rtcConfig.categoryOptions = [.allowAirPlay, .allowBluetooth, .allowBluetoothA2DP, .defaultToSpeaker]
+             rtcConfig.mode = AVAudioSession.Mode.videoChat.rawValue
+         }
+-        RTCAudioSessionConfiguration.setWebRTC(rtcConfig)
++        LKRTCAudioSessionConfiguration.setWebRTC(rtcConfig)
+     }
+ 
+     @objc(startAudioSession:withRejecter:)
+     public func startAudioSession(resolve: RCTPromiseResolveBlock, reject: RCTPromiseRejectBlock) {
+-        let session = RTCAudioSession.sharedInstance()
++        let session = LKRTCAudioSession.sharedInstance()
+         session.lockForConfiguration()
+         defer {
+             session.unlockForConfiguration()
+@@ -96,7 +96,7 @@ public class LivekitReactNativeModule: RCTEventEmitter {
+ 
+     @objc(stopAudioSession:withRejecter:)
+     public func stopAudioSession(resolve: RCTPromiseResolveBlock, reject: RCTPromiseRejectBlock) {
+-        let session = RTCAudioSession.sharedInstance()
++        let session = LKRTCAudioSession.sharedInstance()
+         session.lockForConfiguration()
+         defer {
+             session.unlockForConfiguration()
+@@ -149,8 +149,8 @@ public class LivekitReactNativeModule: RCTEventEmitter {
+ 
+     @objc(setAppleAudioConfiguration:withResolver:withRejecter:)
+     public func setAppleAudioConfiguration(_ configuration: NSDictionary, resolve: RCTPromiseResolveBlock, reject: RCTPromiseRejectBlock) {
+-        let session = RTCAudioSession.sharedInstance()
+-        let config = RTCAudioSessionConfiguration.webRTC()
++        let session = LKRTCAudioSession.sharedInstance()
++        let config = LKRTCAudioSessionConfiguration.webRTC()
+ 
+         let appleAudioCategory = configuration["audioCategory"] as? String
+         let appleAudioCategoryOptions = configuration["audioCategoryOptions"] as? [String]
+diff --git a/node_modules/@livekit/react-native/ios/LivekitReactNative.m b/node_modules/@livekit/react-native/ios/LivekitReactNative.m
+index b857eca..fc855a7 100644
+--- a/node_modules/@livekit/react-native/ios/LivekitReactNative.m
++++ b/node_modules/@livekit/react-native/ios/LivekitReactNative.m
+@@ -6,11 +6,20 @@
+ @implementation LivekitReactNative
+ 
+ +(void)setup {
+-    RTCDefaultVideoEncoderFactory *videoEncoderFactory = [[RTCDefaultVideoEncoderFactory alloc] init];
+-    RTCVideoEncoderFactorySimulcast *simulcastVideoEncoderFactory = [[RTCVideoEncoderFactorySimulcast alloc] initWithPrimary:videoEncoderFactory fallback:videoEncoderFactory];
++    LKRTCDefaultVideoEncoderFactory *videoEncoderFactory = [[LKRTCDefaultVideoEncoderFactory alloc] init];
++    LKRTCVideoEncoderFactorySimulcast *simulcastVideoEncoderFactory = [[LKRTCVideoEncoderFactorySimulcast alloc] initWithPrimary:videoEncoderFactory fallback:videoEncoderFactory];
+     WebRTCModuleOptions *options = [WebRTCModuleOptions sharedInstance];
+     options.videoEncoderFactory = simulcastVideoEncoderFactory;
+     options.audioProcessingModule = LKAudioProcessingManager.sharedInstance.audioProcessingModule;
++
++    // WebRTCModule only applies its own default field trials when fieldTrials is
++    // nil, so carry the dual-sim fix over ourselves.
++    // https://bugs.chromium.org/p/webrtc/issues/detail?id=10966
++    options.fieldTrials = @{
++        kLKRTCFieldTrialUseNWPathMonitor : kLKRTCFieldTrialEnabledValue,
++        // WARP: fold the DTLS handshake into the ICE handshake.
++        kLKRTCFieldTrialIceHandshakeDtlsKey : kLKRTCFieldTrialEnabledValue,
++    };
+ }
+ 
+ @end
+diff --git a/node_modules/@livekit/react-native/ios/audio/AudioProcessing.swift b/node_modules/@livekit/react-native/ios/audio/AudioProcessing.swift
+index f5cc4ed..19910d8 100644
+--- a/node_modules/@livekit/react-native/ios/audio/AudioProcessing.swift
++++ b/node_modules/@livekit/react-native/ios/audio/AudioProcessing.swift
+@@ -25,7 +25,7 @@ public struct AudioLevel {
+     public let peak: Float
+ }
+ 
+-public extension RTCAudioBuffer {
++public extension LKRTCAudioBuffer {
+     /// Convert to AVAudioPCMBuffer Int16 format.
+     @objc
+     func toAVAudioPCMBuffer() -> AVAudioPCMBuffer? {
+diff --git a/node_modules/@livekit/react-native/ios/audio/AudioRendererManager.swift b/node_modules/@livekit/react-native/ios/audio/AudioRendererManager.swift
+index fc7bab4..8ee80a5 100644
+--- a/node_modules/@livekit/react-native/ios/audio/AudioRendererManager.swift
++++ b/node_modules/@livekit/react-native/ios/audio/AudioRendererManager.swift
+@@ -3,14 +3,14 @@ import livekit_react_native_webrtc
+ @objc
+ public class AudioRendererManager: NSObject {
+     private let bridge: RCTBridge
+-    public private(set) var renderers: [String: RTCAudioRenderer] = [:]
++    public private(set) var renderers: [String: LKRTCAudioRenderer] = [:]
+     
+     init(bridge: RCTBridge) {
+         self.bridge = bridge
+     }
+     
+     @objc
+-    public func registerRenderer(_ audioRenderer: RTCAudioRenderer) -> String {
++    public func registerRenderer(_ audioRenderer: LKRTCAudioRenderer) -> String {
+         let reactTag = NSUUID().uuidString
+         self.renderers[reactTag] = audioRenderer
+         return reactTag
+@@ -22,14 +22,14 @@ public class AudioRendererManager: NSObject {
+     }
+     
+     @objc
+-    public func unregisterRenderer(_ audioRenderer: RTCAudioRenderer) {
++    public func unregisterRenderer(_ audioRenderer: LKRTCAudioRenderer) {
+         self.renderers = self.renderers.filter({ $0.value !== audioRenderer })
+     }
+     
+     @objc
+-    public func attach(renderer: RTCAudioRenderer, pcId: NSNumber, trackId: String) {
++    public func attach(renderer: LKRTCAudioRenderer, pcId: NSNumber, trackId: String) {
+         let webrtcModule = self.bridge.module(for: WebRTCModule.self) as! WebRTCModule
+-        guard let track = webrtcModule.track(forId: trackId, pcId: pcId) as? RTCAudioTrack
++        guard let track = webrtcModule.track(forId: trackId, pcId: pcId) as? LKRTCAudioTrack
+         else {
+             lklog("couldn't find audio track: pcId: \(pcId), trackId: \(trackId)")
+             return
+@@ -54,9 +54,9 @@ public class AudioRendererManager: NSObject {
+     }
+     
+     @objc
+-    public func detach(renderer: RTCAudioRenderer, pcId: NSNumber, trackId: String) {
++    public func detach(renderer: LKRTCAudioRenderer, pcId: NSNumber, trackId: String) {
+         let webrtcModule = self.bridge.module(for: WebRTCModule.self) as! WebRTCModule
+-        guard let track = webrtcModule.track(forId: trackId, pcId: pcId) as? RTCAudioTrack
++        guard let track = webrtcModule.track(forId: trackId, pcId: pcId) as? LKRTCAudioTrack
+         else {
+             lklog("couldn't find audio track: pcId: \(pcId), trackId: \(trackId)")
+             return
+diff --git a/node_modules/@livekit/react-native/ios/audio/AudioSinkRenderer.swift b/node_modules/@livekit/react-native/ios/audio/AudioSinkRenderer.swift
+index e3dbc65..ded72d8 100644
+--- a/node_modules/@livekit/react-native/ios/audio/AudioSinkRenderer.swift
++++ b/node_modules/@livekit/react-native/ios/audio/AudioSinkRenderer.swift
+@@ -24,11 +24,6 @@ public class AudioSinkRenderer: BaseAudioSinkRenderer {
+         let length = Int(pcmBuffer.frameCapacity * pcmBuffer.format.streamDescription.pointee.mBytesPerFrame)
+         let data = NSData(bytes: channels[0], length: length)
+         let base64 = data.base64EncodedString()
+-        NSLog("AUDIO DATA!!!!")
+-        NSLog("\(data.length)")
+-        NSLog(base64)
+-        NSLog("\(base64.count)")
+-        NSLog("\(length)")
+         eventEmitter.sendEvent(withName: LKEvents.kEventAudioData, body: [
+             "data": base64,
+             "id": reactTag
+@@ -36,7 +31,7 @@ public class AudioSinkRenderer: BaseAudioSinkRenderer {
+     }
+ }
+ 
+-public class BaseAudioSinkRenderer: NSObject, RTCAudioRenderer {
++public class BaseAudioSinkRenderer: NSObject, LKRTCAudioRenderer {
+     
+     public override init() {
+         super.init()
+diff --git a/node_modules/@livekit/react-native/ios/audio/MultibandVolumeAudioRenderer.swift b/node_modules/@livekit/react-native/ios/audio/MultibandVolumeAudioRenderer.swift
+index 64f9ccf..8247415 100644
+--- a/node_modules/@livekit/react-native/ios/audio/MultibandVolumeAudioRenderer.swift
++++ b/node_modules/@livekit/react-native/ios/audio/MultibandVolumeAudioRenderer.swift
+@@ -34,7 +34,7 @@ public class MultibandVolumeAudioRenderer: BaseMultibandVolumeAudioRenderer {
+     
+ }
+ 
+-public class BaseMultibandVolumeAudioRenderer: NSObject, RTCAudioRenderer {
++public class BaseMultibandVolumeAudioRenderer: NSObject, LKRTCAudioRenderer {
+     private let frameInterval: Int
+     private var skippedFrames = 0
+     private let audioProcessor: AudioVisualizeProcessor
+diff --git a/node_modules/@livekit/react-native/ios/audio/VolumeAudioRenderer.swift b/node_modules/@livekit/react-native/ios/audio/VolumeAudioRenderer.swift
+index f2506f2..dca4fab 100644
+--- a/node_modules/@livekit/react-native/ios/audio/VolumeAudioRenderer.swift
++++ b/node_modules/@livekit/react-native/ios/audio/VolumeAudioRenderer.swift
+@@ -25,7 +25,7 @@ public class VolumeAudioRenderer: BaseVolumeAudioRenderer {
+     }
+ }
+ 
+-public class BaseVolumeAudioRenderer: NSObject, RTCAudioRenderer {
++public class BaseVolumeAudioRenderer: NSObject, LKRTCAudioRenderer {
+     private let frameInterval: Int
+     private var skippedFrames = 0
+     public init(intervalMs: Double = 30) {

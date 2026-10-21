@@ -10,7 +10,6 @@ import {
   View,
 } from 'react-native';
 
-import { HandbookBreadcrumbs } from '@/components/handbook/HandbookBreadcrumbs';
 import { HandbookSystemTile } from '@/components/handbook/HandbookSystemTile';
 import {
   useIsDesktopSidebarVisible,
@@ -23,7 +22,6 @@ import {
   shouldShowScrollToTop,
 } from '@/components/navigation/ScrollToTopButton';
 import { FontSize, Spacing, type ThemeColors } from '@/constants/theme';
-import { MOCK_HANDBOOK_ENTRIES } from '@/data/handbook/mock-entries';
 import { getHandbookSystem, MOCK_HANDBOOK_SYSTEMS } from '@/data/handbook/mock-systems';
 import { useTheme } from '@/hooks/use-theme';
 import { useThemedStyles } from '@/hooks/use-themed-styles';
@@ -31,6 +29,7 @@ import {
   consumeHandbookHubIntent,
   getHandbookLocationSync,
   loadHandbookLocation,
+  saveHandbookLocation,
 } from '@/utils/handbook-location-storage';
 
 import { useMainScreenStyles } from './main-screen.styles';
@@ -40,15 +39,20 @@ const TILE_GAP = Spacing.md;
 
 function createLocalStyles(colors: ThemeColors, isDesktopWeb: boolean) {
   return StyleSheet.create({
+    root: {
+      flex: 1,
+      backgroundColor: colors.background,
+    },
     shell: {
       width: '100%',
       maxWidth: isDesktopWeb ? DESKTOP_CONTENT_MAX : undefined,
       alignSelf: isDesktopWeb ? 'center' : undefined,
-      gap: isDesktopWeb ? Spacing.lg : Spacing.md,
+      gap: isDesktopWeb ? Spacing.lg : Spacing.md + 4,
       paddingBottom: Spacing.xl,
     },
     headerBlock: {
-      gap: Spacing.xs,
+      gap: isDesktopWeb ? Spacing.xs : Spacing.sm,
+      paddingBottom: isDesktopWeb ? 0 : Spacing.xs,
     },
     pageTitle: {
       fontSize: isDesktopWeb ? 32 : FontSize.h1,
@@ -59,19 +63,25 @@ function createLocalStyles(colors: ThemeColors, isDesktopWeb: boolean) {
     pageSubtitle: {
       fontSize: FontSize.label,
       color: colors.textMuted,
-      lineHeight: FontSize.label * 1.45,
-      maxWidth: 560,
+      lineHeight: FontSize.label * 1.5,
+      maxWidth: isDesktopWeb ? 560 : undefined,
     },
     grid: {
-      flexDirection: 'row',
-      flexWrap: 'wrap',
-      gap: TILE_GAP,
+      flexDirection: isDesktopWeb ? 'row' : 'column',
+      flexWrap: isDesktopWeb ? 'wrap' : 'nowrap',
+      gap: isDesktopWeb ? TILE_GAP : Spacing.md,
     },
     tileWrap: {
-      flexBasis: isDesktopWeb ? '31.5%' : '47.5%',
-      flexGrow: 1,
-      maxWidth: isDesktopWeb ? '32.5%' : '49%',
-      minWidth: isDesktopWeb ? 220 : 140,
+      ...(isDesktopWeb
+        ? {
+            flexBasis: '31.5%',
+            flexGrow: 1,
+            maxWidth: '32.5%',
+            minWidth: 220,
+          }
+        : {
+            width: '100%',
+          }),
     },
     restoring: {
       flex: 1,
@@ -80,10 +90,6 @@ function createLocalStyles(colors: ThemeColors, isDesktopWeb: boolean) {
       paddingVertical: Spacing.section,
     },
   });
-}
-
-function countEntries(systemId: string): number {
-  return MOCK_HANDBOOK_ENTRIES.filter((entry) => entry.systemId === systemId).length;
 }
 
 export default function HandbookScreen() {
@@ -97,6 +103,7 @@ export default function HandbookScreen() {
   const [showScrollTop, setShowScrollTop] = useState(false);
   const [ready, setReady] = useState(false);
   const restoreTried = useRef(false);
+  const showCompactNav = !isDesktopWeb || !showDesktopSidebar;
 
   const systems = useMemo(() => MOCK_HANDBOOK_SYSTEMS, []);
 
@@ -105,19 +112,23 @@ export default function HandbookScreen() {
     restoreTried.current = true;
 
     if (consumeHandbookHubIntent()) {
+      void saveHandbookLocation({ systemId: null, category: 'all' });
       setReady(true);
       return;
     }
 
+    // push, не replace — иначе хаб выпадает из стека и свайп «назад» уходит из Библиотеки.
     const sync = getHandbookLocationSync();
     if (sync?.systemId && getHandbookSystem(sync.systemId)) {
-      router.replace(`/handbook/${sync.systemId}`);
+      setReady(true);
+      router.push(`/handbook/${sync.systemId}`);
       return;
     }
 
     void loadHandbookLocation().then((loc) => {
       if (loc.systemId && getHandbookSystem(loc.systemId)) {
-        router.replace(`/handbook/${loc.systemId}`);
+        setReady(true);
+        router.push(`/handbook/${loc.systemId}`);
         return;
       }
       setReady(true);
@@ -131,12 +142,12 @@ export default function HandbookScreen() {
   if (!ready) {
     return (
       <ScreenTransition>
-        <View style={mainStyles.container}>
-          {!isDesktopWeb || !showDesktopSidebar ? (
-            <MobileScreenHeader title="Справочник" />
-          ) : null}
-          <View style={styles.restoring}>
-            <ActivityIndicator color={colors.primary} />
+        <View style={styles.root}>
+          <View style={[mainStyles.content, { flex: 1 }]}>
+            {showCompactNav ? <MobileScreenHeader title="Библиотека" /> : null}
+            <View style={styles.restoring}>
+              <ActivityIndicator color={colors.primary} />
+            </View>
           </View>
         </View>
       </ScreenTransition>
@@ -145,27 +156,24 @@ export default function HandbookScreen() {
 
   return (
     <ScreenTransition>
-      <View style={mainStyles.container}>
-        {!isDesktopWeb || !showDesktopSidebar ? (
-          <MobileScreenHeader title="Справочник" />
-        ) : null}
-
+      <View style={styles.root}>
         <ScrollView
           ref={scrollRef}
           style={mainStyles.scroll}
-          contentContainerStyle={[mainStyles.content, { paddingTop: Spacing.sm }]}
+          contentContainerStyle={mainStyles.content}
           showsVerticalScrollIndicator={false}
           onScroll={onScroll}
           scrollEventThrottle={16}>
           <View style={styles.shell}>
-            <HandbookBreadcrumbs items={[{ label: 'Справочник' }]} />
-
             <View style={styles.headerBlock}>
-              {isDesktopWeb && showDesktopSidebar ? (
-                <Text style={styles.pageTitle}>Справочник</Text>
-              ) : null}
+              {showCompactNav ? (
+                <MobileScreenHeader title="Библиотека" />
+              ) : (
+                <Text style={styles.pageTitle}>Библиотека</Text>
+              )}
               <Text style={styles.pageSubtitle}>
-                Крупные плитки по системам. Тап — панель только с материалами этой системы.
+                Игровые правила, справочные материалы и механики разных настольных систем в одном
+                месте.
               </Text>
             </View>
 
@@ -174,8 +182,7 @@ export default function HandbookScreen() {
                 <View key={system.id} style={styles.tileWrap}>
                   <HandbookSystemTile
                     system={system}
-                    entryCount={countEntries(system.id)}
-                    compact={isDesktopWeb}
+                    layout={isDesktopWeb ? 'portrait' : 'banner'}
                     onPress={() => router.push(`/handbook/${system.id}`)}
                   />
                 </View>

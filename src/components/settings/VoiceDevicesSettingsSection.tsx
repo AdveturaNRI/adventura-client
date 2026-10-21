@@ -10,12 +10,20 @@ import {
 } from 'react-native';
 import { useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
+import {
+  getRecordingPermissionsAsync,
+  requestRecordingPermissionsAsync,
+} from 'expo-audio';
 
 import { SelectField, toast } from '@/components/ui';
 import { FontSize, Radius, Spacing, type ThemeColors } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { useThemedStyles } from '@/hooks/use-themed-styles';
 import { localizeErrorMessage } from '@/utils/localizeError';
+import {
+  startNativeMicrophoneTest,
+  type NativeMicTestHandle,
+} from '@/utils/native-mic-test';
 import {
   loadVoiceDevicePrefs,
   MIC_GAIN_DEFAULT,
@@ -42,6 +50,174 @@ import {
   type MediaDeviceOption,
   type MicTestHandle,
 } from '@/utils/voice-media-devices';
+
+/** Native: mic gain + audible loopback check (no device pickers). */
+function NativeMicCheckSection() {
+  const colors = useTheme();
+  const styles = useThemedStyles(createStyles);
+  const [testing, setTesting] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [level, setLevel] = useState(0);
+  const [micGain, setMicGain] = useState(MIC_GAIN_DEFAULT);
+  const testingRef = useRef(false);
+  const testRef = useRef<NativeMicTestHandle | null>(null);
+  const gainTrackWidthRef = useRef(1);
+  const levelTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const gainPercent = Math.round(micGain * 100);
+
+  useEffect(() => {
+    let cancelled = false;
+    void loadVoiceDevicePrefs().then((prefs) => {
+      if (!cancelled) {
+        setMicGain(prefs.micGain);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const clearLevelTimer = useCallback(() => {
+    if (levelTimerRef.current) {
+      clearInterval(levelTimerRef.current);
+      levelTimerRef.current = null;
+    }
+  }, []);
+
+  const stopTest = useCallback(() => {
+    testingRef.current = false;
+    setTesting(false);
+    setLevel(0);
+    clearLevelTimer();
+    testRef.current?.stop();
+    testRef.current = null;
+  }, [clearLevelTimer]);
+
+  useEffect(() => {
+    return () => {
+      stopTest();
+    };
+  }, [stopTest]);
+
+  useFocusEffect(
+    useCallback(() => {
+      return () => {
+        stopTest();
+      };
+    }, [stopTest]),
+  );
+
+  const applyMicGainFromX = useCallback((locationX: number) => {
+    const width = Math.max(1, gainTrackWidthRef.current);
+    const next = clampMicGain((locationX / width) * MIC_GAIN_MAX);
+    setMicGain(next);
+    testRef.current?.setMicGain(next);
+    void saveVoiceMicGain(next);
+  }, []);
+
+  const handleToggleTest = useCallback(async () => {
+    if (busy) {
+      return;
+    }
+    if (testingRef.current) {
+      setBusy(true);
+      stopTest();
+      setBusy(false);
+      return;
+    }
+
+    setBusy(true);
+    try {
+      const current = await getRecordingPermissionsAsync();
+      const permission = current.granted
+        ? current
+        : await requestRecordingPermissionsAsync();
+      if (!permission.granted) {
+        toast.error('Нужен доступ к микрофону в настройках системы');
+        return;
+      }
+
+      const handle = await startNativeMicrophoneTest(micGain);
+      testRef.current = handle;
+      testingRef.current = true;
+      setTesting(true);
+      clearLevelTimer();
+      levelTimerRef.current = setInterval(() => {
+        setLevel(testRef.current?.getLevel() ?? 0);
+      }, 80);
+    } catch (error) {
+      stopTest();
+      toast.error(localizeErrorMessage(error, 'Не удалось открыть микрофон'));
+    } finally {
+      setBusy(false);
+    }
+  }, [busy, clearLevelTimer, micGain, stopTest]);
+
+  return (
+    <View style={[styles.block, styles.blockFirst, styles.fieldGap]}>
+      <View style={styles.meterWrap}>
+        <View style={styles.gainHeader}>
+          <Text style={styles.gainLabel}>Громкость микрофона</Text>
+          <Text style={styles.gainValue}>{gainPercent}%</Text>
+        </View>
+        <View
+          accessible
+          accessibilityRole="adjustable"
+          accessibilityLabel="Громкость микрофона"
+          accessibilityValue={{ min: 0, max: 200, now: gainPercent }}
+          onLayout={(event) => {
+            gainTrackWidthRef.current = event.nativeEvent.layout.width;
+          }}
+          onStartShouldSetResponder={() => true}
+          onMoveShouldSetResponder={() => true}
+          onResponderGrant={(event) => {
+            applyMicGainFromX(event.nativeEvent.locationX);
+          }}
+          onResponderMove={(event) => {
+            applyMicGainFromX(event.nativeEvent.locationX);
+          }}
+          style={styles.nativeGainTrack}>
+          <View
+            pointerEvents="none"
+            style={[
+              styles.nativeGainFill,
+              { width: `${Math.min(100, (micGain / MIC_GAIN_MAX) * 100)}%` },
+            ]}
+          />
+        </View>
+      </View>
+
+      <View style={styles.meterWrap}>
+        <Text style={styles.meterHint}>
+          {testing
+            ? 'Говорите — себя слышно тихо. Лучше в наушниках, иначе динамики ловят микрофон.'
+            : 'Проверка микрофона'}
+        </Text>
+        <View style={styles.meterTrack}>
+          <View style={[styles.meterFill, { width: `${Math.round(level * 100)}%` }]} />
+        </View>
+        <View style={styles.testRow}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={testing ? 'Остановить проверку' : 'Проверить микрофон'}
+            disabled={busy}
+            onPress={() => void handleToggleTest()}
+            style={({ pressed }) => [
+              styles.testButton,
+              testing && styles.testButtonActive,
+              pressed && styles.testButtonPressed,
+              busy ? { opacity: 0.6 } : null,
+            ]}>
+            <Text style={[styles.testButtonLabel, testing && styles.testButtonLabelActive]}>
+              {testing ? 'Стоп' : 'Проверить микрофон'}
+            </Text>
+          </Pressable>
+        </View>
+      </View>
+    </View>
+  );
+}
 
 type MicAccessStatus = 'granted' | 'denied' | 'prompt' | 'checking';
 
@@ -170,6 +346,19 @@ function createStyles(colors: ThemeColors) {
       fontSize: FontSize.caption,
       fontWeight: '600',
       color: colors.text,
+    },
+    nativeGainTrack: {
+      height: 28,
+      borderRadius: Radius.pill,
+      backgroundColor: colors.borderLight,
+      overflow: 'hidden',
+      justifyContent: 'center',
+    },
+    nativeGainFill: {
+      height: '100%',
+      borderRadius: Radius.pill,
+      backgroundColor: colors.primary,
+      minWidth: 8,
     },
     gainValue: {
       fontSize: FontSize.caption,
@@ -536,12 +725,7 @@ export function VoiceDevicesSettingsSection() {
   }, [refreshDevices]);
 
   if (Platform.OS !== 'web') {
-    return (
-      <Text style={styles.unavailable}>
-        Выбор устройств и проверка микрофона пока только в браузере. На телефоне
-        камера и микрофон включаются прямо в звонке.
-      </Text>
-    );
+    return <NativeMicCheckSection />;
   }
 
   if (loading && micAccess === 'checking') {

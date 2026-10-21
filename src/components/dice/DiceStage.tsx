@@ -65,7 +65,17 @@ function createStyles(colors: ThemeColors) {
  * Native: WebView wrapper around the same @3d-dice/dice-box engine (CDN assets).
  */
 export const DiceStage = forwardRef<DiceStageHandle, DiceStageProps>(function DiceStage(
-  { onReady, onDone, transparent = false, accent, skin, animationSpeed = 'normal' },
+  {
+    onReady,
+    onDone,
+    transparent = false,
+    accent,
+    skin,
+    animationSpeed = 'normal',
+    scale,
+    // Compact trays (Dice / chat) — always center; edge toss flies out of the form.
+    centerSpawn = true,
+  },
   ref,
 ) {
   const colors = useTheme();
@@ -76,6 +86,8 @@ export const DiceStage = forwardRef<DiceStageHandle, DiceStageProps>(function Di
   speedRef.current = animationSpeed;
   const skinRef = useRef(skin ?? 'standard');
   skinRef.current = skin ?? 'standard';
+  const centerRef = useRef(centerSpawn);
+  centerRef.current = centerSpawn;
   const pendingRef = useRef<{
     resolve: (outcome: DiceRollOutcome) => void;
     reject: (error: Error) => void;
@@ -95,10 +107,21 @@ export const DiceStage = forwardRef<DiceStageHandle, DiceStageProps>(function Di
       roll: (notation: DiceNotation) =>
         new Promise<DiceRollOutcome>((resolve, reject) => {
           pendingRef.current = { resolve, reject };
-          send({ type: 'roll', notation, speed: speedRef.current, skin: skinRef.current });
+          send({
+            type: 'roll',
+            notation,
+            speed: speedRef.current,
+            skin: skinRef.current,
+            center: centerRef.current,
+          });
         }),
       preview: (notation) => {
-        send({ type: 'preview', notation: notation ?? [], speed: speedRef.current, skin: skinRef.current });
+        send({
+          type: 'preview',
+          notation: notation ?? [],
+          speed: speedRef.current,
+          skin: skinRef.current,
+        });
       },
       clear: () => {
         const pending = pendingRef.current;
@@ -114,14 +137,23 @@ export const DiceStage = forwardRef<DiceStageHandle, DiceStageProps>(function Di
   );
 
   const html = useMemo(
-    () => buildDiceBoxNativeHtml({ accent: themeAccent, transparent }),
-    [themeAccent, transparent],
+    () =>
+      buildDiceBoxNativeHtml({
+        accent: themeAccent,
+        transparent,
+        scale,
+        centerSpawn,
+      }),
+    [centerSpawn, scale, themeAccent, transparent],
   );
 
   return (
     <View
       style={[styles.wrap, transparent ? styles.wrapTransparent : null]}
-      pointerEvents="none">
+      pointerEvents="none"
+      onLayout={() => {
+        send({ type: 'resize' });
+      }}>
       {failed ? (
         <View style={styles.fallback}>
           <Text style={styles.fallbackText}>
@@ -130,7 +162,7 @@ export const DiceStage = forwardRef<DiceStageHandle, DiceStageProps>(function Di
         </View>
       ) : (
         <WebView
-          key={themeAccent}
+          key={`${themeAccent}:${scale ?? 'auto'}:${centerSpawn ? 1 : 0}`}
           ref={(node: WebBridge | null) => {
             bridgeRef.current = node;
           }}
@@ -145,6 +177,7 @@ export const DiceStage = forwardRef<DiceStageHandle, DiceStageProps>(function Di
               };
               if (data.type === 'ready') {
                 onReady?.();
+                send({ type: 'resize' });
               }
               if (data.type === 'done' && data.outcome) {
                 pendingRef.current?.resolve(data.outcome);

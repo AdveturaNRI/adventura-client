@@ -1,47 +1,21 @@
-import { Ionicons } from '@expo/vector-icons';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 
+import { FadeInImage } from '@/components/ui/media/FadeInImage';
 import {
-  HANDBOOK_CATEGORY_ICONS,
-  HANDBOOK_CATEGORY_LABELS,
-  HANDBOOK_CATEGORY_HINTS,
+  HANDBOOK_CATEGORY_COVERS,
+  getHandbookCategoryHint,
+  getHandbookCategoryLabel,
 } from '@/data/handbook/labels';
 import type { HandbookCategory } from '@/data/handbook/types';
-import { FontSize, Spacing, type ThemeColors } from '@/constants/theme';
-import { useTheme } from '@/hooks/use-theme';
+import { FontSize, type ThemeColors } from '@/constants/theme';
 import { useThemedStyles } from '@/hooks/use-themed-styles';
 
 type HandbookCategoryTileProps = {
   category: HandbookCategory;
-  entryCount: number;
   accent: string;
+  systemId?: string;
   onPress: () => void;
 };
-
-function hexToRgba(hex: string, alpha: number): string {
-  const raw = hex.replace('#', '');
-  const full =
-    raw.length === 3
-      ? raw
-          .split('')
-          .map((c) => c + c)
-          .join('')
-      : raw;
-  const n = Number.parseInt(full, 16);
-  if (Number.isNaN(n)) return `rgba(21,122,254,${alpha})`;
-  const r = (n >> 16) & 255;
-  const g = (n >> 8) & 255;
-  const b = n & 255;
-  return `rgba(${r},${g},${b},${alpha})`;
-}
-
-function pluralArticles(count: number): string {
-  const mod10 = count % 10;
-  const mod100 = count % 100;
-  if (mod10 === 1 && mod100 !== 11) return 'статья';
-  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return 'статьи';
-  return 'статей';
-}
 
 function createStyles(colors: ThemeColors) {
   return StyleSheet.create({
@@ -51,95 +25,154 @@ function createStyles(colors: ThemeColors) {
       borderRadius: 18,
       overflow: 'hidden',
       borderWidth: 1,
-      minHeight: 148,
+      borderColor: colors.borderLight,
+      backgroundColor: colors.surface,
+      ...Platform.select({
+        web: {
+          cursor: 'pointer',
+          transitionProperty: 'transform, box-shadow, border-color',
+          transitionDuration: '160ms',
+          transitionTimingFunction: 'ease-out',
+        } as object,
+        default: {},
+      }),
+    },
+    cardHovered: {
+      transform: [{ scale: 1.02 }],
+      borderColor: 'rgba(21, 122, 254, 0.5)',
+      ...Platform.select({
+        web: {
+          boxShadow: '0 10px 24px rgba(15, 23, 42, 0.22)',
+          zIndex: 2,
+        } as object,
+        default: {},
+      }),
     },
     cardPressed: {
       opacity: 0.92,
       transform: [{ scale: 0.985 }],
     },
-    inner: {
-      flex: 1,
-      padding: Spacing.md,
-      gap: Spacing.sm,
-      justifyContent: 'space-between',
+    cover: {
+      width: '100%',
+      aspectRatio: 16 / 10,
+      overflow: 'hidden',
+      backgroundColor: colors.surfaceMuted,
+      position: 'relative',
+      minHeight: 148,
     },
-    iconWrap: {
-      width: 44,
-      height: 44,
-      borderRadius: 14,
-      alignItems: 'center',
-      justifyContent: 'center',
-      borderWidth: 1,
+    coverImage: {
+      ...StyleSheet.absoluteFillObject,
+    },
+    coverShield: {
+      ...StyleSheet.absoluteFillObject,
+      backgroundColor: 'rgba(0,0,0,0.14)',
+    },
+    coverGradient: {
+      ...StyleSheet.absoluteFillObject,
+      ...Platform.select({
+        web: {
+          backgroundImage:
+            'linear-gradient(to top, rgba(0,0,0,0.82) 0%, rgba(0,0,0,0.36) 45%, rgba(0,0,0,0.08) 72%, rgba(0,0,0,0) 100%)',
+        } as object,
+        default: {
+          backgroundColor: 'rgba(0,0,0,0.22)',
+        },
+      }),
+    },
+    coverGradientNativeBase: {
+      ...StyleSheet.absoluteFillObject,
+      top: '42%',
+      backgroundColor: 'rgba(0,0,0,0.62)',
+    },
+    coverGradientNativeMid: {
+      ...StyleSheet.absoluteFillObject,
+      top: '28%',
+      height: '22%',
+      backgroundColor: 'rgba(0,0,0,0.28)',
+    },
+    accentBar: {
+      position: 'absolute',
+      left: 0,
+      right: 0,
+      bottom: 0,
+      height: 3,
+    },
+    body: {
+      position: 'absolute',
+      left: 0,
+      right: 0,
+      bottom: 0,
+      paddingHorizontal: 14,
+      paddingBottom: 14,
+      paddingTop: 28,
+      gap: 3,
     },
     title: {
       fontSize: 18,
       fontWeight: '700',
+      color: '#FFFFFF',
       letterSpacing: -0.3,
       lineHeight: 22,
     },
     hint: {
       fontSize: FontSize.caption,
       fontWeight: '500',
+      color: 'rgba(255,255,255,0.82)',
       lineHeight: FontSize.caption * 1.4,
-      marginTop: 2,
-    },
-    meta: {
-      fontSize: 11,
-      fontWeight: '700',
-      letterSpacing: 0.2,
-      marginTop: 8,
-    },
-    accentBar: {
-      height: 3,
-      width: '100%',
     },
   });
 }
 
 export function HandbookCategoryTile({
   category,
-  entryCount,
   accent,
+  systemId,
   onPress,
 }: HandbookCategoryTileProps) {
-  const colors = useTheme();
   const styles = useThemedStyles(createStyles);
-  const icon = HANDBOOK_CATEGORY_ICONS[category];
-  const tintBg = hexToRgba(accent, 0.1);
-  const tintBorder = hexToRgba(accent, 0.28);
-  const iconBg = hexToRgba(accent, 0.16);
-  const iconBorder = hexToRgba(accent, 0.35);
+  const cover = HANDBOOK_CATEGORY_COVERS[category];
+  const label = getHandbookCategoryLabel(category, systemId);
+  const hint = getHandbookCategoryHint(category, systemId);
 
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={`${HANDBOOK_CATEGORY_LABELS[category]}, ${entryCount} ${pluralArticles(entryCount)}`}
+      accessibilityLabel={label}
       onPress={onPress}
-      style={({ pressed }) => [
+      style={({ pressed, hovered }: { pressed: boolean; hovered?: boolean }) => [
         styles.card,
-        {
-          backgroundColor: tintBg,
-          borderColor: tintBorder,
-        },
+        hovered && !pressed && styles.cardHovered,
         pressed && styles.cardPressed,
       ]}>
-      <View style={styles.inner}>
-        <View style={[styles.iconWrap, { backgroundColor: iconBg, borderColor: iconBorder }]}>
-          <Ionicons name={icon} size={22} color={accent} />
+      <View style={styles.cover}>
+        <FadeInImage
+          source={cover.source}
+          uri={cover.uri}
+          style={styles.coverImage}
+          contentFit="cover"
+          pointerEvents="none"
+        />
+        <View pointerEvents="none" style={styles.coverShield} />
+        <View pointerEvents="none" style={styles.coverGradient}>
+          {Platform.OS !== 'web' ? (
+            <>
+              <View style={styles.coverGradientNativeMid} />
+              <View style={styles.coverGradientNativeBase} />
+            </>
+          ) : null}
         </View>
-        <View>
-          <Text style={[styles.title, { color: colors.text }]}>
-            {HANDBOOK_CATEGORY_LABELS[category]}
+
+        <View style={styles.body} pointerEvents="none">
+          <Text style={styles.title} numberOfLines={1}>
+            {label}
           </Text>
-          <Text style={[styles.hint, { color: colors.textSecondary }]} numberOfLines={2}>
-            {HANDBOOK_CATEGORY_HINTS[category]}
-          </Text>
-          <Text style={[styles.meta, { color: accent }]}>
-            {entryCount} {pluralArticles(entryCount)}
+          <Text style={styles.hint} numberOfLines={2}>
+            {hint}
           </Text>
         </View>
+
+        <View pointerEvents="none" style={[styles.accentBar, { backgroundColor: accent }]} />
       </View>
-      <View style={[styles.accentBar, { backgroundColor: accent }]} />
     </Pressable>
   );
 }
