@@ -50,8 +50,14 @@ function fallbackForPath(pathname: string | null | undefined): Href {
   if (pathname.startsWith('/games/') || pathname.startsWith('/games-')) {
     return '/games';
   }
-  if (pathname.startsWith('/clubs/') || pathname === '/clubs-create') {
+  if (pathname.startsWith('/clubs/') || pathname.startsWith('/clubs-')) {
     return '/clubs';
+  }
+  if (pathname.startsWith('/news/')) {
+    return '/news';
+  }
+  if (pathname.startsWith('/authors/')) {
+    return '/authors';
   }
   if (pathname.startsWith('/users/')) {
     return '/wanderers';

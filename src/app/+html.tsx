@@ -151,62 +151,116 @@ body {
 }
 
 /*
- * In-app toasts: theme comes ONLY from .adventura-toast--dark/--light on the card.
- * Do NOT couple fills to html[data-theme] — stale data-theme="light" used to beat
- * --dark (higher specificity) and paint a white card over white React text.
+ * In-app toasts: always paint from CSS variables synced by ThemeContext
+ * (--adventura-toast-*). Class modifiers keep hard fallbacks if vars are missing.
+ * Safari/RN-web still forces white fills without !important.
  */
 .adventura-toast {
   -webkit-appearance: none !important;
   appearance: none !important;
   background-image: none !important;
+  background: var(--adventura-toast-bg, #1c1c1e) !important;
+  background-color: var(--adventura-toast-bg, #1c1c1e) !important;
+  border-color: var(--adventura-toast-border, #38383a) !important;
+  color: var(--adventura-toast-fg, #ffffff) !important;
 }
 
-.adventura-toast.adventura-toast--dark {
-  background: #1c1c1e !important;
-  background-color: #1c1c1e !important;
-  border-color: #38383a !important;
-  color: #ffffff !important;
+.adventura-toast .adventura-toast-title,
+.adventura-toast [class*="css-text"] {
+  color: var(--adventura-toast-fg, #ffffff) !important;
 }
 
-.adventura-toast.adventura-toast--dark .adventura-toast-title {
-  color: #ffffff !important;
+.adventura-toast .adventura-toast-message {
+  color: var(--adventura-toast-muted, #c7c7cc) !important;
 }
 
-.adventura-toast.adventura-toast--dark .adventura-toast-message {
-  color: #c7c7cc !important;
+.adventura-toast .adventura-toast-action {
+  background: var(--adventura-toast-action-bg, rgba(21, 122, 254, 0.28)) !important;
+  background-color: var(--adventura-toast-action-bg, rgba(21, 122, 254, 0.28)) !important;
 }
 
-.adventura-toast.adventura-toast--dark .adventura-toast-action {
-  background: rgba(21, 122, 254, 0.28) !important;
-  background-color: rgba(21, 122, 254, 0.28) !important;
+.adventura-toast .adventura-toast-action-label {
+  color: var(--adventura-toast-action-fg, #84b9ff) !important;
 }
 
-.adventura-toast.adventura-toast--dark .adventura-toast-action-label {
-  color: #84b9ff !important;
-}
-
+html[data-theme="light"] .adventura-toast,
 .adventura-toast.adventura-toast--light {
+  --adventura-toast-bg: #ffffff;
+  --adventura-toast-fg: #000000;
+  --adventura-toast-muted: #4c4c4c;
+  --adventura-toast-border: #e8e8e8;
+  --adventura-toast-action-bg: rgba(21, 122, 254, 0.12);
+  --adventura-toast-action-fg: #157afe;
   background: #ffffff !important;
   background-color: #ffffff !important;
   border-color: #e8e8e8 !important;
   color: #000000 !important;
 }
 
-.adventura-toast.adventura-toast--light .adventura-toast-title {
+html[data-theme="dark"] .adventura-toast,
+.adventura-toast.adventura-toast--dark {
+  --adventura-toast-bg: #1c1c1e;
+  --adventura-toast-fg: #ffffff;
+  --adventura-toast-muted: #c7c7cc;
+  --adventura-toast-border: #38383a;
+  --adventura-toast-action-bg: rgba(21, 122, 254, 0.28);
+  --adventura-toast-action-fg: #84b9ff;
+  background: #1c1c1e !important;
+  background-color: #1c1c1e !important;
+  border-color: #38383a !important;
+  color: #ffffff !important;
+}
+
+html[data-theme="light"] .adventura-toast .adventura-toast-title,
+html[data-theme="light"] .adventura-toast [class*="css-text"],
+.adventura-toast.adventura-toast--light .adventura-toast-title,
+.adventura-toast.adventura-toast--light [class*="css-text"] {
   color: #000000 !important;
 }
 
+html[data-theme="light"] .adventura-toast .adventura-toast-message,
 .adventura-toast.adventura-toast--light .adventura-toast-message {
   color: #4c4c4c !important;
 }
 
-.adventura-toast.adventura-toast--light .adventura-toast-action {
-  background: rgba(21, 122, 254, 0.12) !important;
-  background-color: rgba(21, 122, 254, 0.12) !important;
+html[data-theme="dark"] .adventura-toast .adventura-toast-title,
+html[data-theme="dark"] .adventura-toast [class*="css-text"],
+.adventura-toast.adventura-toast--dark .adventura-toast-title,
+.adventura-toast.adventura-toast--dark [class*="css-text"] {
+  color: #ffffff !important;
 }
 
-.adventura-toast.adventura-toast--light .adventura-toast-action-label {
-  color: #157afe !important;
+html[data-theme="dark"] .adventura-toast .adventura-toast-message,
+.adventura-toast.adventura-toast--dark .adventura-toast-message {
+  color: #c7c7cc !important;
+}
+
+/* Field label hints — same Safari white-fill bug on hover tooltips. */
+.adventura-field-hint {
+  -webkit-appearance: none !important;
+  appearance: none !important;
+  background-image: none !important;
+  background: var(--adventura-hint-bg, #2c2c2e) !important;
+  background-color: var(--adventura-hint-bg, #2c2c2e) !important;
+  border-color: var(--adventura-hint-border, #38383a) !important;
+  color: var(--adventura-hint-fg, #ffffff) !important;
+}
+
+.adventura-field-hint .adventura-field-hint-text,
+.adventura-field-hint [class*="css-text"] {
+  color: var(--adventura-hint-fg, #ffffff) !important;
+}
+
+html[data-theme="light"] .adventura-field-hint {
+  --adventura-hint-bg: #1c1c1e;
+  --adventura-hint-fg: #ffffff;
+  --adventura-hint-border: #38383a;
+}
+
+html[data-theme="dark"] .adventura-field-hint {
+  --adventura-hint-bg: #2c2c2e;
+  --adventura-hint-fg: #ffffff;
+  --adventura-hint-border: #48484a;
 }
 
 /*

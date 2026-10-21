@@ -719,7 +719,12 @@ export function ClubsMapFeed({
         </View>
       </View>
 
-      <View style={{ paddingHorizontal: Spacing.md, paddingBottom: Spacing.sm }}>
+      <View
+        style={{
+          paddingHorizontal: Spacing.md,
+          paddingTop: Spacing.md,
+          paddingBottom: Spacing.sm,
+        }}>
         <PartnersTicker />
       </View>
 

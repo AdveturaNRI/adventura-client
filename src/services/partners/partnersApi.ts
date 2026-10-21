@@ -6,12 +6,15 @@ type PartnerApiDto = {
   name: string;
   href: string;
   mark: string;
+  tagline?: string;
   accent: string;
   logoUrl?: string | null;
 };
 
 let cache: Partner[] | null = null;
 let inflight: Promise<Partner[]> | null = null;
+let sidebarCache: Partner[] | null = null;
+let sidebarInflight: Promise<Partner[]> | null = null;
 
 function mapPartner(dto: PartnerApiDto): Partner {
   return {
@@ -19,6 +22,7 @@ function mapPartner(dto: PartnerApiDto): Partner {
     name: dto.name,
     href: dto.href,
     mark: dto.mark,
+    tagline: dto.tagline?.trim() || undefined,
     accent: dto.accent,
     logoUrl: dto.logoUrl ?? undefined,
   };
@@ -53,6 +57,41 @@ export function listPartners(options?: { force?: boolean }): Promise<Partner[]> 
   return inflight;
 }
 
+/** Партнёры с галкой «В боковом меню» (+ активные). */
+export function listSidebarPartners(options?: {
+  force?: boolean;
+}): Promise<Partner[]> {
+  if (!options?.force && sidebarCache) {
+    return Promise.resolve(sidebarCache);
+  }
+  if (!options?.force && sidebarInflight) {
+    return sidebarInflight;
+  }
+
+  sidebarInflight = apiRequest<PartnerApiDto[]>('/partners?sidebar=1', {
+    skipLoading: true,
+    skipAuthRefresh: true,
+  })
+    .then((rows) => {
+      const next = Array.isArray(rows) ? rows.map(mapPartner) : [];
+      sidebarCache = next;
+      return next;
+    })
+    .catch(() => {
+      sidebarCache = [];
+      return [];
+    })
+    .finally(() => {
+      sidebarInflight = null;
+    });
+
+  return sidebarInflight;
+}
+
 export function getPartnersCache(): Partner[] | null {
   return cache;
+}
+
+export function getSidebarPartnersCache(): Partner[] | null {
+  return sidebarCache;
 }

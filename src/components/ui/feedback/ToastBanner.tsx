@@ -220,6 +220,12 @@ function paintToastNode(node: HTMLElement | null, isDark: boolean) {
   node.style.setProperty('background-color', theme.bg, 'important');
   node.style.setProperty('border-color', theme.border, 'important');
   node.style.setProperty('color', theme.fg, 'important');
+  node.querySelectorAll<HTMLElement>('.adventura-toast-title, [class*="css-text"]').forEach((el) => {
+    el.style.setProperty('color', theme.fg, 'important');
+  });
+  node.querySelectorAll<HTMLElement>('.adventura-toast-message').forEach((el) => {
+    el.style.setProperty('color', theme.muted, 'important');
+  });
 }
 
 export function ToastBanner({ text1, text2, variant, props }: ToastBannerProps) {
@@ -263,25 +269,35 @@ export function ToastBanner({ text1, text2, variant, props }: ToastBannerProps) 
       return;
     }
     // Keep <html data-theme> in sync before paint — stale "light" used to win
-    // over .adventura-toast--dark and force a white card with white text.
+    // over --dark and paint a white card over white React text.
     if (typeof document !== 'undefined') {
       document.documentElement.dataset.theme = colorScheme;
     }
-    paintToastNode(cardRef.current, isDark);
-    if (titleRef.current?.style) {
-      titleRef.current.style.setProperty('color', theme.fg, 'important');
-    }
-    if (messageRef.current?.style) {
-      messageRef.current.style.setProperty('color', theme.muted, 'important');
-    }
-    if (actionRef.current?.style) {
-      actionRef.current.style.setProperty('background', theme.actionBg, 'important');
-      actionRef.current.style.setProperty('background-color', theme.actionBg, 'important');
-    }
-    if (actionLabelRef.current?.style) {
-      actionLabelRef.current.style.setProperty('color', theme.actionFg, 'important');
-    }
-  }, [colorScheme, isDark, theme]);
+    const paint = () => {
+      paintToastNode(cardRef.current, isDark);
+      if (titleRef.current?.style) {
+        titleRef.current.style.setProperty('color', theme.fg, 'important');
+      }
+      if (messageRef.current?.style) {
+        messageRef.current.style.setProperty('color', theme.muted, 'important');
+      }
+      if (actionRef.current?.style) {
+        actionRef.current.style.setProperty('background', theme.actionBg, 'important');
+        actionRef.current.style.setProperty('background-color', theme.actionBg, 'important');
+      }
+      if (actionLabelRef.current?.style) {
+        actionLabelRef.current.style.setProperty('color', theme.actionFg, 'important');
+      }
+    };
+    paint();
+    // RN-web sometimes remounts text nodes one frame later — repaint twice.
+    const raf = requestAnimationFrame(paint);
+    const t = setTimeout(paint, 50);
+    return () => {
+      cancelAnimationFrame(raf);
+      clearTimeout(t);
+    };
+  }, [colorScheme, isDark, theme, text1, text2, variant]);
 
   const leading = showAvatar ? (
     <View style={styles.leading}>

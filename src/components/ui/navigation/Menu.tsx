@@ -9,6 +9,7 @@ import { FontSize, Spacing, type ThemeColors } from '@/constants/theme';
 import { useThemedStyles } from '@/hooks/use-themed-styles';
 
 const ICON_TILE_SIZE = 44;
+const ICON_TILE_SIZE_COMPACT = 36;
 const ICON_TILE_RADIUS = 10;
 
 export type MenuItemProps = {
@@ -20,6 +21,8 @@ export type MenuItemProps = {
   /** Red exclamation overlay on the icon tile (e.g. push disabled). */
   iconAlert?: boolean;
   variant?: MenuItemVariant;
+  /** Плотнее: меньше иконка, шрифт и gaps — для мобильного меню. */
+  compact?: boolean;
   onPress?: () => void;
 };
 
@@ -27,12 +30,16 @@ export type MenuProps = {
   title?: string;
   children?: React.ReactNode;
   style?: ViewStyle;
+  compact?: boolean;
 };
 
 function createStyles(colors: ThemeColors) {
   return StyleSheet.create({
     container: {
       gap: Spacing.lg,
+    },
+    containerCompact: {
+      gap: Spacing.sm,
     },
     title: {
       fontSize: 22,
@@ -42,10 +49,17 @@ function createStyles(colors: ThemeColors) {
     list: {
       gap: Spacing.lg,
     },
+    listCompact: {
+      gap: 10,
+    },
     item: {
       flexDirection: 'row',
       alignItems: 'center',
       gap: Spacing.md,
+    },
+    itemCompact: {
+      gap: 10,
+      minHeight: 40,
     },
     itemPressed: {
       opacity: 0.85,
@@ -59,6 +73,11 @@ function createStyles(colors: ThemeColors) {
       justifyContent: 'center',
       position: 'relative',
       overflow: 'visible',
+    },
+    iconTileCompact: {
+      width: ICON_TILE_SIZE_COMPACT,
+      height: ICON_TILE_SIZE_COMPACT,
+      borderRadius: 8,
     },
     iconAlert: {
       position: 'absolute',
@@ -82,10 +101,18 @@ function createStyles(colors: ThemeColors) {
       flex: 1,
       gap: Spacing.xs,
     },
+    itemBodyCompact: {
+      gap: 1,
+    },
     label: {
       fontSize: FontSize.button,
       fontWeight: '600',
       color: colors.text,
+    },
+    labelCompact: {
+      fontSize: 15,
+      fontWeight: '500',
+      lineHeight: 20,
     },
     labelDanger: {
       color: colors.destructive,
@@ -95,6 +122,10 @@ function createStyles(colors: ThemeColors) {
       color: colors.textMuted,
       lineHeight: FontSize.caption * 1.45,
     },
+    subtitleCompact: {
+      fontSize: 12,
+      lineHeight: 15,
+    },
     divider: {
       height: 1,
       backgroundColor: colors.borderLight,
@@ -102,13 +133,13 @@ function createStyles(colors: ThemeColors) {
   });
 }
 
-export function Menu({ title, children, style }: MenuProps) {
+export function Menu({ title, children, style, compact = false }: MenuProps) {
   const styles = useThemedStyles(createStyles);
 
   return (
-    <View style={[styles.container, style]}>
+    <View style={[styles.container, compact && styles.containerCompact, style]}>
       {title ? <Text style={styles.title}>{title}</Text> : null}
-      <View style={styles.list}>{children}</View>
+      <View style={[styles.list, compact && styles.listCompact]}>{children}</View>
     </View>
   );
 }
@@ -126,14 +157,16 @@ export function MenuItem({
   badge,
   iconAlert = false,
   variant = 'default',
+  compact = false,
   onPress,
 }: MenuItemProps) {
   const styles = useThemedStyles(createStyles);
   const isDanger = variant === 'danger';
+  const iconSize = compact ? 18 : 22;
 
   const iconNode = navbarIcon ? (
-    <View style={styles.iconTile}>
-      <NavbarIcon name={navbarIcon} inverted />
+    <View style={[styles.iconTile, compact && styles.iconTileCompact]}>
+      <NavbarIcon name={navbarIcon} size={iconSize} inverted />
       {iconAlert ? (
         <View style={styles.iconAlert} accessibilityLabel="Требует внимания">
           <Text style={styles.iconAlertText}>!</Text>
@@ -141,7 +174,7 @@ export function MenuItem({
       ) : null}
     </View>
   ) : icon ? (
-    <View style={styles.iconTile}>
+    <View style={[styles.iconTile, compact && styles.iconTileCompact]}>
       <MenuIcon name={icon} />
       {iconAlert ? (
         <View style={styles.iconAlert} accessibilityLabel="Требует внимания">
@@ -154,12 +187,27 @@ export function MenuItem({
   return (
     <Pressable
       onPress={onPress}
-      style={({ pressed }) => [styles.item, pressed && styles.itemPressed]}
+      style={({ pressed }) => [
+        styles.item,
+        compact && styles.itemCompact,
+        pressed && styles.itemPressed,
+      ]}
       accessibilityRole="button">
       {iconNode}
-      <View style={styles.itemBody}>
-        <Text style={[styles.label, isDanger && styles.labelDanger]}>{label}</Text>
-        {subtitle ? <Text style={styles.subtitle}>{subtitle}</Text> : null}
+      <View style={[styles.itemBody, compact && styles.itemBodyCompact]}>
+        <Text
+          style={[
+            styles.label,
+            compact && styles.labelCompact,
+            isDanger && styles.labelDanger,
+          ]}>
+          {label}
+        </Text>
+        {subtitle ? (
+          <Text style={[styles.subtitle, compact && styles.subtitleCompact]}>
+            {subtitle}
+          </Text>
+        ) : null}
       </View>
       {badge ? <Badge label={badge} variant="unread" /> : null}
     </Pressable>

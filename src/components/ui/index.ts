@@ -67,3 +67,15 @@ export {
   type NavbarSpec,
 } from './navigation/navbar.config';
 export { type NavbarIconKey } from './navigation/navbar-icon-assets';
+export {
+  NAV_SECTIONS,
+  PRIMARY_NAV_SECTIONS,
+  getNavSection,
+  getNavSectionByPathname,
+  matchNavLeafId,
+  matchNavSectionId,
+  type NavLeaf,
+  type NavLeafId,
+  type NavSection,
+  type NavSectionId,
+} from './navigation/nav.sections';
