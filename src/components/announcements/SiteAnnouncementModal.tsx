@@ -18,6 +18,7 @@ import RenderHTML, { defaultSystemFonts } from 'react-native-render-html';
 import { useIsDesktopWeb } from '@/components/navigation/DesktopThemeToggle';
 import { FadeInImage } from '@/components/ui';
 import { FontSize, Spacing } from '@/constants/theme';
+import { useTheme, useThemePreference } from '@/hooks/use-theme';
 import type { SiteAnnouncement } from '@/services/announcements/announcementsApi';
 import { formatDateRu } from '@/utils/date-format';
 
@@ -79,9 +80,27 @@ export function SiteAnnouncementModal({
 }: SiteAnnouncementModalProps) {
   const insets = useSafeAreaInsets();
   const isDesktopWeb = useIsDesktopWeb();
+  const colors = useTheme();
+  const { colorScheme } = useThemePreference();
   const { width: windowWidth, height: windowHeight } = useWindowDimensions();
 
   const theme = announcement?.theme;
+  // CMS palette is light|dark. If it doesn't match the app theme, use ThemeContext
+  // so a default white sheet doesn't stay white in dark mode.
+  const followAppTheme = Boolean(theme && theme.themeMode !== colorScheme);
+  const sheetBg = followAppTheme
+    ? colors.surface
+    : (theme?.backgroundColor ?? colors.surface);
+  const titleColor = followAppTheme
+    ? colors.text
+    : (theme?.titleColor ?? colors.text);
+  const bodyColor = followAppTheme
+    ? colors.textSecondary
+    : (theme?.bodyColor ?? colors.textSecondary);
+  const accent = theme?.accentColor || colors.primary;
+  const buttonColor = theme?.buttonColor || accent;
+  const imagePlaceholder = colors.surfaceMuted;
+
   const sideLayout =
     Boolean(theme?.imageLayout === 'side') &&
     isDesktopWeb &&
@@ -110,7 +129,7 @@ export function SiteAnnouncementModal({
   const tagsStyles = useMemo(
     () => ({
       body: {
-        color: theme?.bodyColor ?? '#374151',
+        color: bodyColor,
         fontSize: FontSize.label,
         lineHeight: FontSize.label * 1.55,
         margin: 0,
@@ -118,29 +137,29 @@ export function SiteAnnouncementModal({
       p: { marginTop: 0, marginBottom: Spacing.sm },
       strong: {
         fontWeight: '700' as const,
-        color: theme?.titleColor ?? theme?.bodyColor,
+        color: titleColor,
       },
       b: {
         fontWeight: '700' as const,
-        color: theme?.titleColor ?? theme?.bodyColor,
+        color: titleColor,
       },
       em: { fontStyle: 'italic' as const },
       i: { fontStyle: 'italic' as const },
       a: {
-        color: theme?.accentColor ?? '#157AFE',
+        color: accent,
         textDecorationLine: 'underline' as const,
       },
       ul: { marginBottom: Spacing.sm, paddingLeft: Spacing.md },
       ol: { marginBottom: Spacing.sm, paddingLeft: Spacing.md },
       li: { marginBottom: 4 },
     }),
-    [theme?.accentColor, theme?.bodyColor, theme?.titleColor],
+    [accent, bodyColor, titleColor],
   );
 
   const titleTagsStyles = useMemo(
     () => ({
       body: {
-        color: theme?.titleColor ?? '#111827',
+        color: titleColor,
         fontSize: FontSize.h1,
         fontWeight: '700' as const,
         lineHeight: FontSize.h1 * 1.25,
@@ -152,7 +171,7 @@ export function SiteAnnouncementModal({
       em: { fontStyle: 'italic' as const },
       i: { fontStyle: 'italic' as const },
     }),
-    [theme?.titleColor],
+    [titleColor],
   );
 
   if (!announcement || !theme) {
@@ -183,7 +202,6 @@ export function SiteAnnouncementModal({
     void Linking.openURL(url).catch(() => undefined);
   };
 
-  const accent = theme.accentColor || '#157AFE';
   const pagerLabel = `Новость ${index + 1} из ${total}`;
   const dateLabel = formatAnnouncementDate(announcement.publishedAt);
 
@@ -214,7 +232,7 @@ export function SiteAnnouncementModal({
           style={[
             styles.sheet,
             {
-              backgroundColor: theme.backgroundColor,
+              backgroundColor: sheetBg,
               borderRadius: theme.borderRadius,
               maxWidth: maxModalWidth,
               width: '100%',
@@ -270,7 +288,7 @@ export function SiteAnnouncementModal({
               <Text
                 style={[
                   styles.pagerLabel,
-                  { color: showImage ? '#FFFFFF' : theme.titleColor },
+                  { color: showImage ? '#FFFFFF' : titleColor },
                 ]}
                 accessibilityLiveRegion="polite"
               >
@@ -302,6 +320,7 @@ export function SiteAnnouncementModal({
             <View
               style={[
                 sideLayout ? styles.imageSide : styles.imageTop,
+                { backgroundColor: imagePlaceholder },
                 !sideLayout ? aspectStyle(theme.imageAspect) : null,
                 imageMaxHeight != null ? { maxHeight: imageMaxHeight } : null,
               ]}
@@ -339,7 +358,7 @@ export function SiteAnnouncementModal({
               <View style={styles.metaRow}>
                 {dateLabel ? (
                   <Text
-                    style={[styles.dateLabel, { color: theme.bodyColor }]}
+                    style={[styles.dateLabel, { color: bodyColor }]}
                     accessibilityLabel={`Дата публикации ${dateLabel}`}
                   >
                     {dateLabel}
@@ -352,9 +371,9 @@ export function SiteAnnouncementModal({
                     <Ionicons
                       name="eye-outline"
                       size={14}
-                      color={theme.bodyColor}
+                      color={bodyColor}
                     />
-                    <Text style={[styles.statText, { color: theme.bodyColor }]}>
+                    <Text style={[styles.statText, { color: bodyColor }]}>
                       {announcement.views ?? 0}
                     </Text>
                   </View>
@@ -364,9 +383,9 @@ export function SiteAnnouncementModal({
                     <Ionicons
                       name="heart-outline"
                       size={14}
-                      color={theme.bodyColor}
+                      color={bodyColor}
                     />
-                    <Text style={[styles.statText, { color: theme.bodyColor }]}>
+                    <Text style={[styles.statText, { color: bodyColor }]}>
                       {announcement.likes ?? 0}
                     </Text>
                   </View>
@@ -384,7 +403,7 @@ export function SiteAnnouncementModal({
                   defaultTextProps={{ selectable: true }}
                 />
               ) : (
-                <Text style={[styles.title, { color: theme.titleColor }]}>
+                <Text style={[styles.title, { color: titleColor }]}>
                   {announcement.title}
                 </Text>
               )}
@@ -409,9 +428,9 @@ export function SiteAnnouncementModal({
                     ? {
                         backgroundColor: 'transparent',
                         borderWidth: 2,
-                        borderColor: theme.buttonColor,
+                        borderColor: buttonColor,
                       }
-                    : { backgroundColor: theme.buttonColor },
+                    : { backgroundColor: buttonColor },
                   pressed ? styles.pressed : null,
                 ]}
                 accessibilityRole="button"
@@ -423,7 +442,7 @@ export function SiteAnnouncementModal({
                     {
                       color:
                         theme.buttonStyle === 'outline'
-                          ? theme.buttonColor
+                          ? buttonColor
                           : '#FFFFFF',
                     },
                   ]}
@@ -517,13 +536,11 @@ const styles = StyleSheet.create({
   imageTop: {
     width: '100%',
     overflow: 'hidden',
-    backgroundColor: '#e5e7eb',
   },
   imageSide: {
     width: '42%',
     minHeight: 200,
     overflow: 'hidden',
-    backgroundColor: '#e5e7eb',
   },
   image: {
     width: '100%',

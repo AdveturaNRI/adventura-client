@@ -237,11 +237,36 @@ export default function NewsDetailScreen() {
     return () => clearTimeout(timer);
   }, [announcements?.markAnnouncementRead, item?.id, item?.publicationVersion]);
 
+  const titleHtml = useMemo(() => {
+    const raw = item?.title?.trim() ?? '';
+    if (!raw || !looksLikeHtml(raw)) return '';
+    return raw;
+  }, [item?.title]);
+
   const html = useMemo(() => {
     const raw = item?.body?.trim() ?? '';
     if (!raw) return '';
     return looksLikeHtml(raw) ? raw : plainToHtml(raw);
   }, [item?.body]);
+
+  const titleTagsStyles = useMemo(
+    () => ({
+      body: {
+        color: colors.text,
+        fontSize: isDesktopWeb ? 30 : FontSize.h1,
+        fontWeight: '700' as const,
+        lineHeight: (isDesktopWeb ? 30 : FontSize.h1) * 1.25,
+        margin: 0,
+        letterSpacing: -0.3,
+      },
+      p: { marginTop: 0, marginBottom: 0 },
+      strong: { fontWeight: '800' as const },
+      b: { fontWeight: '800' as const },
+      em: { fontStyle: 'italic' as const },
+      i: { fontStyle: 'italic' as const },
+    }),
+    [colors.text, isDesktopWeb],
+  );
 
   const tagsStyles = useMemo(
     () => ({
@@ -332,7 +357,18 @@ export default function NewsDetailScreen() {
             </View>
           ) : null}
 
-          <Text style={styles.title}>{item.title}</Text>
+          {titleHtml ? (
+            <RenderHTML
+              contentWidth={contentWidth}
+              source={{ html: titleHtml }}
+              systemFonts={defaultSystemFonts}
+              tagsStyles={titleTagsStyles}
+              baseStyle={titleTagsStyles.body}
+              defaultTextProps={{ selectable: true }}
+            />
+          ) : (
+            <Text style={styles.title}>{item.title}</Text>
+          )}
 
           <View style={styles.metaRow}>
             {item.unread ? (

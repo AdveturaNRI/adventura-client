@@ -19,7 +19,10 @@ import {
 import { useTheme } from '@/hooks/use-theme';
 import { useThemedStyles } from '@/hooks/use-themed-styles';
 import type { NewsItem } from '@/services/news/newsApi';
-import { authorContentExcerpt } from '@/utils/authors-format';
+import {
+  authorContentExcerpt,
+  authorContentToPlainText,
+} from '@/utils/authors-format';
 
 type NewsCardProps = {
   item: NewsItem;
@@ -167,6 +170,7 @@ export function NewsCard({ item, onToggleLike, onOpen }: NewsCardProps) {
   const styles = useThemedStyles(createStyles);
   const announcements = useAnnouncementsOptional();
   const rootRef = useRef<View>(null);
+  const titlePlain = authorContentToPlainText(item.title) || item.title;
   const excerpt = authorContentExcerpt(item.body, 420);
   const dateLabel = formatNewsDate(item.publishedAt);
   const open = () => {
@@ -249,7 +253,7 @@ export function NewsCard({ item, onToggleLike, onOpen }: NewsCardProps) {
       style={[styles.card, item.unread && styles.cardUnread]}>
       <Pressable
         accessibilityRole="button"
-        accessibilityLabel={item.unread ? `${item.title}, новая` : item.title}
+        accessibilityLabel={item.unread ? `${titlePlain}, новая` : titlePlain}
         onPress={open}
         style={({ pressed }) => [pressed && { opacity: 0.94 }]}>
         {item.imageUrl ? (
@@ -275,7 +279,7 @@ export function NewsCard({ item, onToggleLike, onOpen }: NewsCardProps) {
             </View>
           ) : null}
           <Text style={styles.title} numberOfLines={3}>
-            {item.title}
+            {titlePlain}
           </Text>
           {excerpt ? (
             <Text style={styles.excerpt} numberOfLines={10}>
