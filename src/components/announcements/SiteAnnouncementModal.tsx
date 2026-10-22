@@ -451,7 +451,18 @@ export function SiteAnnouncementModal({
           {sideLayout ? coverImage : null}
 
           <ScrollView
-            style={styles.scroll}
+            style={[
+              styles.scroll,
+              Platform.OS === 'web'
+                ? ({
+                    scrollbarWidth: 'thin',
+                    scrollbarColor: 'rgba(120, 120, 128, 0.45) transparent',
+                  } as object)
+                : null,
+            ]}
+            {...(Platform.OS === 'web'
+              ? ({ className: 'announcement-modal-scroll' } as object)
+              : {})}
             contentContainerStyle={[
               styles.scrollContent,
               !sideLayout && showImage ? styles.scrollContentWithCover : null,

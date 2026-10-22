@@ -55,6 +55,30 @@ body {
   border-radius: 999px;
 }
 
+/* Site announcement modal — thin scrollbar (sheet may be light or dark independently of app theme). */
+.announcement-modal-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(100, 100, 110, 0.5) transparent;
+}
+
+.announcement-modal-scroll::-webkit-scrollbar {
+  width: 6px;
+}
+
+.announcement-modal-scroll::-webkit-scrollbar-track {
+  background: transparent;
+  margin: 8px 0;
+}
+
+.announcement-modal-scroll::-webkit-scrollbar-thumb {
+  background-color: rgba(100, 100, 110, 0.5);
+  border-radius: 999px;
+}
+
+.announcement-modal-scroll::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(100, 100, 110, 0.72);
+}
+
 /* Call overlay: always-visible thin scrollbar when the people grid overflows. */
 .call-grid-scroll {
   scrollbar-width: thin;
