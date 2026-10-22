@@ -156,6 +156,11 @@ export function RealtimeProvider({ children }) {
         };
     }, [isAuthenticated, isLoading, token]);
     useEffect(() => {
+        if (unreadChats === 0 && unreadNotifications === 0) {
+            stopNewMessageTitleBlink();
+        }
+    }, [unreadChats, unreadNotifications]);
+    useEffect(() => {
         if (typeof window === 'undefined') {
             return;
         }

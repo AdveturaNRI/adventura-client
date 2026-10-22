@@ -1,11 +1,12 @@
 import { useMemo } from 'react';
-import { Platform, StyleSheet, Text, View } from 'react-native';
-import { Image } from 'expo-image';
+import { StyleSheet, Text, View } from 'react-native';
+import { SvgXml } from 'react-native-svg';
 
 import type { DieGlyphSides } from '@/components/dice/DieGlyph';
+import { DIE_SVG_BY_SIDES } from '@/components/dice/die-svg-assets';
 import { FontSize } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
-import { coerceDiceAccent, DICE_ACCENT_PALETTE } from '@/utils/dice-color-storage';
+import { coerceDiceAccent } from '@/utils/dice-color-storage';
 
 type DieMeshPreviewProps = {
   sides: DieGlyphSides;
@@ -16,45 +17,76 @@ type DieMeshPreviewProps = {
   paused?: boolean;
 };
 
-const PALETTE_HEX = new Set(
-  DICE_ACCENT_PALETTE.map((item) => item.hex.slice(1).toUpperCase()),
-);
-
 function dieLabel(sides: DieGlyphSides) {
   return `d${sides}`;
 }
 
-function nearestPaletteHex(accent: string): string {
-  const normalized = coerceDiceAccent(accent).slice(1).toUpperCase();
-  if (PALETTE_HEX.has(normalized)) {
-    return normalized;
-  }
-  const r = parseInt(normalized.slice(0, 2), 16);
-  const g = parseInt(normalized.slice(2, 4), 16);
-  const b = parseInt(normalized.slice(4, 6), 16);
-  let best = '157AFE';
-  let bestDist = Infinity;
-  for (const hex of PALETTE_HEX) {
-    const dr = r - parseInt(hex.slice(0, 2), 16);
-    const dg = g - parseInt(hex.slice(2, 4), 16);
-    const db = b - parseInt(hex.slice(4, 6), 16);
-    const dist = dr * dr + dg * dg + db * db;
-    if (dist < bestDist) {
-      bestDist = dist;
-      best = hex;
-    }
-  }
-  return best;
+function parseHex(hex: string): [number, number, number] {
+  const h = hex.replace('#', '');
+  const full =
+    h.length === 3
+      ? h
+          .split('')
+          .map((c) => c + c)
+          .join('')
+      : h;
+  return [
+    parseInt(full.slice(0, 2), 16),
+    parseInt(full.slice(2, 4), 16),
+    parseInt(full.slice(4, 6), 16),
+  ];
 }
 
-function previewSrc(sides: DieGlyphSides, accent: string): string {
-  const hex = nearestPaletteHex(accent);
-  const label = dieLabel(sides);
-  // d4–d20: hand-drawn SVGs (white numerals). d100: baked mesh PNG.
-  if (sides === 100) {
-    return `/dice-previews/${hex}/${label}.png?v=even1`;
+function toHex([r, g, b]: [number, number, number]) {
+  return (
+    '#' +
+    [r, g, b]
+      .map((v) =>
+        Math.max(0, Math.min(255, Math.round(v)))
+          .toString(16)
+          .padStart(2, '0'),
+      )
+      .join('')
+      .toUpperCase()
+  );
+}
+
+function luminance([r, g, b]: [number, number, number]) {
+  return 0.299 * r + 0.587 * g + 0.114 * b;
+}
+
+/** Tint grayscale face fills to accent; keep white numerals. */
+function tintDieSvg(svgText: string, accentHex: string, idSuffix: string): string {
+  const accent = parseHex(coerceDiceAccent(accentHex));
+  const faceHexes = new Set<string>();
+  const fillRe = /fill="(#[0-9A-Fa-f]{3,8})"/g;
+  let match: RegExpExecArray | null;
+  while ((match = fillRe.exec(svgText))) {
+    const hex = match[1];
+    const lower = hex.toLowerCase();
+    if (lower === '#fff' || lower === '#ffffff') continue;
+    faceHexes.add(hex);
   }
-  return `/dice-previews/${hex}/${label}.svg?v=svg1`;
+
+  let maxFaceLum = 0;
+  for (const hex of faceHexes) {
+    maxFaceLum = Math.max(maxFaceLum, luminance(parseHex(hex)));
+  }
+  if (maxFaceLum < 1) maxFaceLum = 189;
+
+  let out = svgText;
+  for (const hex of faceHexes) {
+    const lum = luminance(parseHex(hex));
+    const t = Math.pow(lum / maxFaceLum, 0.9);
+    const tinted = toHex([accent[0] * t, accent[1] * t, accent[2] * t]);
+    out = out.split(`fill="${hex}"`).join(`fill="${tinted}"`);
+  }
+
+  // Unique clipPath ids when several dice mount at once.
+  out = out.replace(/\bid="([^"]+)"/g, (_m, id: string) => `id="${id}_${idSuffix}"`);
+  out = out.replace(/url\(#([^)]+)\)/g, (_m, id: string) => `url(#${id}_${idSuffix})`);
+
+  return out;
 }
 
 function DieTextFallback({
@@ -90,14 +122,13 @@ function DieTextFallback({
   );
 }
 
-/** No-op provider — previews are static PNGs from public/dice-previews. */
+/** No-op — SVGs are bundled. */
 export function DieMeshPreviewProvider({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
 /**
- * Static die art tinted to the selected dice accent
- * (`assets/dice` → colorized into `public/dice-previews/{HEX}`).
+ * Hand-drawn SVG from assets/dice, tinted to the selected dice accent at runtime.
  */
 export function DieMeshPreview({
   sides,
@@ -107,22 +138,20 @@ export function DieMeshPreview({
 }: DieMeshPreviewProps) {
   const colors = useTheme();
   const accent = themeColor?.trim() || colors.primary;
-  const src = useMemo(() => previewSrc(sides, accent), [accent, sides]);
+  const raw = DIE_SVG_BY_SIDES[sides];
 
-  if (Platform.OS !== 'web' || !src) {
+  const xml = useMemo(
+    () => (raw ? tintDieSvg(raw, accent, `${sides}`) : ''),
+    [accent, raw, sides],
+  );
+
+  if (!xml) {
     return <DieTextFallback sides={sides} size={size} active={active} themeColor={accent} />;
   }
 
   return (
     <View style={{ width: size, height: size, opacity: active ? 1 : 0.45 }}>
-      <Image
-        source={{ uri: src }}
-        style={{ width: size, height: size }}
-        contentFit="contain"
-        cachePolicy="memory-disk"
-        recyclingKey={src}
-        transition={0}
-      />
+      <SvgXml xml={xml} width={size} height={size} />
     </View>
   );
 }

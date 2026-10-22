@@ -106,7 +106,7 @@ import { ApiError } from '@/services/api/api-error';
 import { upsertWandererReaction, clearWandererReaction } from '@/services/profile/wanderersApi';
 import { diceRollPreviewText, parseDiceRollPayload, type DiceRollMode } from '@/utils/chat-dice-roll';
 import { getDiceAnimationSpeedSync, loadDiceAnimationSpeed, subscribeDiceAnimationSpeed } from '@/utils/dice-animations-storage';
-import { setFocusedChatConversation } from '@/utils/chat-alerts';
+import { setFocusedChatConversation, stopNewMessageTitleBlink } from '@/utils/chat-alerts';
 import { emitTypingUpdate } from '@/services/realtime/socket';
 import { localizeErrorMessage } from '@/utils/localizeError';
 import { formatPresenceLabel } from '@/utils/presence-label';
@@ -477,21 +477,30 @@ const TYPING_REFRESH_MS = 2_000;
 const TYPING_IDLE_MS = 2_000;
 const TYPING_EXPIRE_MS = 3_500;
 
-function formatTypingLabel(peers: Array<{ nickname: string }>, isGroup: boolean) {
+function typingDots(phase: number) {
+  return '.'.repeat((phase % 3) + 1);
+}
+
+function formatTypingLabel(
+  peers: Array<{ nickname: string }>,
+  isGroup: boolean,
+  dotsPhase = 2,
+) {
   if (peers.length === 0) {
     return null;
   }
+  const dots = typingDots(dotsPhase);
   if (!isGroup) {
-    return 'печатает…';
+    return `печатает${dots}`;
   }
   const names = peers.map((peer) => peer.nickname.trim() || 'Участник');
   if (names.length === 1) {
-    return `${names[0]} печатает…`;
+    return `${names[0]} печатает${dots}`;
   }
   if (names.length === 2) {
-    return `${names[0]} и ${names[1]} печатают…`;
+    return `${names[0]} и ${names[1]} печатают${dots}`;
   }
-  return `${names[0]} и ещё ${names.length - 1} печатают…`;
+  return `${names[0]} и ещё ${names.length - 1} печатают${dots}`;
 }
 
 function formatLastSeen(online: boolean, lastSeenAt: string | null) {
@@ -593,7 +602,8 @@ function createStyles(colors: ThemeColors, bottomPad: number, isDark: boolean) {
     },
     headerStatusTyping: {
       color: colors.primary,
-      fontWeight: '600',
+      fontWeight: '700',
+      fontSize: FontSize.label,
     },
     senderName: {
       fontSize: 12,
@@ -1633,6 +1643,7 @@ export default function ChatThreadScreen() {
   const typingIdleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const typingConversationIdRef = useRef(conversationId);
   const [typingPeers, setTypingPeers] = useState<Array<{ userId: string; nickname: string; expiresAt: number }>>([]);
+  const [typingDotsPhase, setTypingDotsPhase] = useState(0);
   typingConversationIdRef.current = conversationId;
   const composerFieldWrapRef = useRef<View>(null);
   const composerInputRef = useRef<TextInput>(null);
@@ -1695,6 +1706,8 @@ export default function ChatThreadScreen() {
       const result = await markVisibleMessagesRead(conversationId, messageIds);
       if (conversationId) setUnreadReactionCount(result.count);
       messageIds.forEach((messageId) => readMessageIdsRef.current.add(messageId));
+      // Clear «Новое сообщение» in this tab and siblings.
+      stopNewMessageTitleBlink();
     } catch {
       // Leave IDs unacknowledged so the next viewability update can retry.
     }
@@ -1830,11 +1843,12 @@ export default function ChatThreadScreen() {
     }
     const timer = setInterval(() => {
       const now = Date.now();
+      setTypingDotsPhase((phase) => phase + 1);
       setTypingPeers((prev) => {
         const next = prev.filter((peer) => peer.expiresAt > now);
         return next.length === prev.length ? prev : next;
       });
-    }, 500);
+    }, 450);
     return () => clearInterval(timer);
   }, [typingPeers.length]);
 
@@ -2584,6 +2598,7 @@ export default function ChatThreadScreen() {
       return;
     }
     if (lastConversationRead.readerId === myId) {
+      stopNewMessageTitleBlink();
       return;
     }
     setPeerLastReadAt(lastConversationRead.lastReadAt);
@@ -2636,7 +2651,7 @@ export default function ChatThreadScreen() {
 
   const isGroup = isGroupConversation(conversation);
   const title = isGroup ? conversation?.title?.trim() || 'Группа' : (conversation?.peer?.nickname ?? 'Чат');
-  const typingLabel = formatTypingLabel(typingPeers, isGroup);
+  const typingLabel = formatTypingLabel(typingPeers, isGroup, typingDotsPhase);
   const statusLabel =
     typingLabel ??
     (isGroup

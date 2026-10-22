@@ -61,7 +61,7 @@
   "scripts": {
     "postinstall": "patch-package && node scripts/copy-dice-box-assets.js",
     "generate:dice-previews": "node scripts/generate-dice-previews.js",
-    "colorize:dice-previews": "node scripts/colorize-dice-previews.js",
+    "embed:dice-svgs": "node scripts/embed-dice-svgs.js",
     "start": "expo start",
     "android": "expo run:android",
     "ios": "expo run:ios",

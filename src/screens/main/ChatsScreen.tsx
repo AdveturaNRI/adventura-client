@@ -296,6 +296,10 @@ function createStyles(colors: ThemeColors, isRail: boolean, isDark: boolean) {
     rowSelected: {
       backgroundColor: 'rgba(21, 122, 254, 0.06)',
     },
+    rowUnread: {
+      backgroundColor: isDark ? 'rgba(21, 122, 254, 0.14)' : 'rgba(21, 122, 254, 0.09)',
+      borderBottomColor: isDark ? 'rgba(21, 122, 254, 0.28)' : 'rgba(21, 122, 254, 0.2)',
+    },
     rowMain: {
       flex: 1,
       minWidth: 0,
@@ -457,10 +461,17 @@ function createStyles(colors: ThemeColors, isRail: boolean, isDark: boolean) {
       fontWeight: '600',
       color: colors.text,
     },
+    nameUnread: {
+      fontWeight: '800',
+    },
     time: {
       fontSize: FontSize.caption,
       color: colors.textSubtle,
       flexShrink: 0,
+    },
+    timeUnread: {
+      color: colors.primary,
+      fontWeight: '700',
     },
     previewRow: {
       flexDirection: 'row',
@@ -474,14 +485,24 @@ function createStyles(colors: ThemeColors, isRail: boolean, isDark: boolean) {
     },
     previewUnread: {
       color: colors.text,
-      fontWeight: '600',
+      fontWeight: '700',
     },
-    unreadDot: {
-      width: 8,
-      height: 8,
-      borderRadius: 4,
-      backgroundColor: colors.primary,
+    previewTyping: {
+      color: colors.primary,
+      fontWeight: '700',
+    },
+    unreadBadge: {
+      paddingHorizontal: 8,
+      paddingVertical: 3,
+      borderRadius: 8,
+      backgroundColor: isDark ? 'rgba(21, 122, 254, 0.22)' : 'rgba(21, 122, 254, 0.14)',
       flexShrink: 0,
+    },
+    unreadBadgeText: {
+      fontSize: 11,
+      fontWeight: '700',
+      color: colors.primary,
+      letterSpacing: 0.2,
     },
     menuButton: {
       width: 28,
@@ -586,11 +607,13 @@ function createStyles(colors: ThemeColors, isRail: boolean, isDark: boolean) {
     },
     groupMeta: {
       fontSize: FontSize.caption,
-      color: colors.primary,
+      color: colors.textSubtle,
       fontWeight: '600',
     },
   });
 }
+
+const LIST_TYPING_EXPIRE_MS = 3_500;
 
 function formatPreview(item: ConversationListItem) {
   if (!item.lastMessage) {
@@ -696,12 +719,16 @@ export default function ChatsScreen({ variant = 'page' }: ChatsScreenProps) {
     lastPresence,
     dataResyncAt,
     publishConversationUpdate,
+    subscribeTyping,
   } = useRealtime();
   const { user } = useAuth();
 
   const [items, setItems] = useState<ConversationListItem[]>(
     () => getCachedConversations() ?? [],
   );
+  const [typingByConversation, setTypingByConversation] = useState<
+    Record<string, { nickname: string; expiresAt: number }>
+  >({});
   const [loading, setLoading] = useState(() => !getCachedConversations());
   const [pendingDelete, setPendingDelete] = useState<ConversationListItem | null>(null);
   const [pendingBlock, setPendingBlock] = useState<ConversationListItem | null>(null);
@@ -735,6 +762,66 @@ export default function ChatsScreen({ variant = 'page' }: ChatsScreenProps) {
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    return subscribeTyping((event) => {
+      if (user?.id && event.userId === user.id) {
+        return;
+      }
+      setTypingByConversation((prev) => {
+        if (!event.typing) {
+          if (!prev[event.conversationId]) {
+            return prev;
+          }
+          const next = { ...prev };
+          delete next[event.conversationId];
+          return next;
+        }
+        return {
+          ...prev,
+          [event.conversationId]: {
+            nickname: event.nickname?.trim() || 'Участник',
+            expiresAt: Date.now() + LIST_TYPING_EXPIRE_MS,
+          },
+        };
+      });
+    });
+  }, [subscribeTyping, user?.id]);
+
+  useEffect(() => {
+    if (Object.keys(typingByConversation).length === 0) {
+      return;
+    }
+    const timer = setInterval(() => {
+      const now = Date.now();
+      setTypingByConversation((prev) => {
+        let changed = false;
+        const next = { ...prev };
+        for (const id of Object.keys(next)) {
+          if (next[id].expiresAt <= now) {
+            delete next[id];
+            changed = true;
+          }
+        }
+        return changed ? next : prev;
+      });
+    }, 500);
+    return () => clearInterval(timer);
+  }, [Object.keys(typingByConversation).length]);
+
+  useEffect(() => {
+    if (!lastMessage) {
+      return;
+    }
+    setTypingByConversation((prev) => {
+      if (!prev[lastMessage.conversationId]) {
+        return prev;
+      }
+      const next = { ...prev };
+      delete next[lastMessage.conversationId];
+      return next;
+    });
+  }, [lastMessage]);
 
   const handleListTabChange = useCallback((key: string) => {
     const next = key as ChatsListTab;
@@ -1228,12 +1315,19 @@ export default function ChatsScreen({ variant = 'page' }: ChatsScreenProps) {
         !group && Boolean(item.isFavorite) && !item.blockedByMe && !item.blockedMe;
       const isPinned = Boolean(item.isPinned);
       const previewMembers = item.membersPreview ?? [];
+      const typingPeer = typingByConversation[item.id];
+      const previewText = typingPeer
+        ? group
+          ? `${typingPeer.nickname} печатает…`
+          : 'печатает…'
+        : formatPreview(item);
 
       const row = (
           <View
             style={[
               localStyles.row,
               selected && localStyles.rowSelected,
+              item.unread && !selected && localStyles.rowUnread,
               isFavorite && localStyles.rowFavorite,
               isPinned && localStyles.rowPinned,
               isActive && localStyles.rowDragging,
@@ -1337,7 +1431,11 @@ export default function ChatsScreen({ variant = 'page' }: ChatsScreenProps) {
               <View style={localStyles.body}>
                 <View style={localStyles.nameRow}>
                   <Text
-                    style={[localStyles.name, isFavorite && localStyles.nameFavorite]}
+                    style={[
+                      localStyles.name,
+                      isFavorite && localStyles.nameFavorite,
+                      item.unread && localStyles.nameUnread,
+                    ]}
                     numberOfLines={1}>
                     {title}
                   </Text>
@@ -1347,15 +1445,30 @@ export default function ChatsScreen({ variant = 'page' }: ChatsScreenProps) {
                       {item.memberCount ?? previewMembers.length}
                     </Text>
                   ) : null}
-                  {timeLabel ? <Text style={localStyles.time}>{timeLabel}</Text> : null}
+                  {timeLabel ? (
+                    <Text style={[localStyles.time, item.unread && localStyles.timeUnread]}>
+                      {timeLabel}
+                    </Text>
+                  ) : null}
                 </View>
                 <View style={localStyles.previewRow}>
                   <Text
-                    style={[localStyles.preview, item.unread && localStyles.previewUnread]}
+                    style={[
+                      localStyles.preview,
+                      typingPeer
+                        ? localStyles.previewTyping
+                        : item.unread
+                          ? localStyles.previewUnread
+                          : null,
+                    ]}
                     numberOfLines={1}>
-                    {formatPreview(item)}
+                    {previewText}
                   </Text>
-                  {item.unread ? <View style={localStyles.unreadDot} /> : null}
+                  {item.unread && !typingPeer ? (
+                    <View style={localStyles.unreadBadge} accessibilityLabel="Новое сообщение">
+                      <Text style={localStyles.unreadBadgeText}>новое</Text>
+                    </View>
+                  ) : null}
                 </View>
               </View>
             </Pressable>
@@ -1383,7 +1496,16 @@ export default function ChatsScreen({ variant = 'page' }: ChatsScreenProps) {
 
       return <ScaleDecorator>{row}</ScaleDecorator>;
     },
-    [colors.primary, colors.textMuted, colors.textSubtle, localStyles, openMenu, pathname, router],
+    [
+      colors.primary,
+      colors.textMuted,
+      colors.textSubtle,
+      localStyles,
+      openMenu,
+      pathname,
+      router,
+      typingByConversation,
+    ],
   );
 
   const content = (

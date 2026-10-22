@@ -173,6 +173,7 @@ function startTitleBlink(title) {
     if (!canUseWebAlerts()) {
         return;
     }
+    bindTitleClearListeners();
     alertTitle = title;
     if (!blinkTimer) {
         baseTitle =
@@ -196,16 +197,72 @@ function startTitleBlink(title) {
 export function startNewMessageTitleBlink() {
     startTitleBlink(MESSAGE_ALERT_TITLE);
 }
-export function stopNewMessageTitleBlink() {
+const TITLE_CLEAR_STORAGE_KEY = 'adventura:clear-tab-title';
+const TITLE_CLEAR_CHANNEL = 'adventura-tab-title';
+let titleClearChannel = null;
+let titleClearListenersBound = false;
+function getTitleClearChannel() {
+    if (!canUseWebAlerts() || typeof BroadcastChannel === 'undefined') {
+        return null;
+    }
+    if (!titleClearChannel) {
+        try {
+            titleClearChannel = new BroadcastChannel(TITLE_CLEAR_CHANNEL);
+        }
+        catch {
+            titleClearChannel = null;
+        }
+    }
+    return titleClearChannel;
+}
+function bindTitleClearListeners() {
+    if (!canUseWebAlerts() || titleClearListenersBound) {
+        return;
+    }
+    titleClearListenersBound = true;
+    const channel = getTitleClearChannel();
+    if (channel) {
+        channel.onmessage = () => {
+            stopNewMessageTitleBlink({ broadcast: false });
+        };
+    }
+    window.addEventListener('storage', (event) => {
+        if (event.key === TITLE_CLEAR_STORAGE_KEY) {
+            stopNewMessageTitleBlink({ broadcast: false });
+        }
+    });
+}
+export function stopNewMessageTitleBlink(options) {
     if (!canUseWebAlerts()) {
         return;
     }
+    bindTitleClearListeners();
     if (blinkTimer) {
         clearInterval(blinkTimer);
         blinkTimer = null;
     }
     showingAlertTitle = false;
-    document.title = baseTitle || SITE_TITLE;
+    document.title =
+        baseTitle &&
+            baseTitle !== MESSAGE_ALERT_TITLE &&
+            baseTitle !== NOTIFICATION_ALERT_TITLE
+            ? baseTitle
+            : SITE_TITLE;
+    if (options?.broadcast === false) {
+        return;
+    }
+    try {
+        getTitleClearChannel()?.postMessage({ type: 'clear-title' });
+    }
+    catch {
+        // ignore
+    }
+    try {
+        localStorage.setItem(TITLE_CLEAR_STORAGE_KEY, String(Date.now()));
+    }
+    catch {
+        // ignore
+    }
 }
 export function notifyIncomingChatMessage(conversationId) {
     if (conversationId && isChatConversationFocused(conversationId)) {
