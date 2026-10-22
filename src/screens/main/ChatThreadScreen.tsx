@@ -1002,11 +1002,13 @@ function createStyles(colors: ThemeColors, bottomPad: number, isDark: boolean) {
     },
     bubbleShell: {
       maxWidth: '78%',
+      minWidth: 0,
       position: 'relative',
       ...Platform.select({
         web: {
           width: 'fit-content',
           maxWidth: '78%',
+          minWidth: 0,
         },
         default: {},
       }),
@@ -1020,6 +1022,8 @@ function createStyles(colors: ThemeColors, bottomPad: number, isDark: boolean) {
       paddingHorizontal: 10,
       paddingTop: 6,
       paddingBottom: 6,
+      maxWidth: '100%',
+      minWidth: 0,
       // На тёмной теме surfaceMuted почти сливается с фоном — чуть светлее.
       backgroundColor: isDark ? '#2C2C2E' : colors.surfaceMuted,
     },
@@ -1103,12 +1107,23 @@ function createStyles(colors: ThemeColors, bottomPad: number, isDark: boolean) {
       alignItems: 'flex-end',
       columnGap: 6,
       rowGap: 2,
+      maxWidth: '100%',
+      minWidth: 0,
     },
     bubbleText: {
       fontSize: FontSize.label,
       color: isDark ? '#FFFFFF' : colors.text,
       lineHeight: FontSize.label * 1.35,
       flexShrink: 1,
+      maxWidth: '100%',
+      // Одно длинное слово без пробелов иначе уезжает за край пузыря/экрана.
+      ...Platform.select({
+        web: {
+          wordBreak: 'break-word',
+          overflowWrap: 'anywhere',
+        } as object,
+        default: {},
+      }),
     },
     bubbleTextMine: {
       color: colors.onPrimary,

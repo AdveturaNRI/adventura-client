@@ -27,9 +27,16 @@ function openExternalLink(raw: string) {
   void Linking.openURL(url);
 }
 
+/** Soft wrap points so one long token can't blow past the bubble on native/web. */
+function allowBreaksInLongTokens(value: string, every = 18) {
+  return value.replace(/\S{19,}/g, (token) =>
+    token.replace(new RegExp(`.{1,${every}}`, 'g'), (chunk) => `${chunk}\u200B`),
+  );
+}
+
 export function ChatMessageBody({ text, textStyle, linkStyle }: ChatMessageBodyProps) {
   const parts = useMemo(() => {
-    const chunks: Array<{ type: 'text' | 'link'; value: string }> = [];
+    const chunks: Array<{ type: 'text' | 'link'; value: string; display: string }> = [];
     let lastIndex = 0;
     const matches = text.matchAll(URL_PATTERN);
 
@@ -37,37 +44,39 @@ export function ChatMessageBody({ text, textStyle, linkStyle }: ChatMessageBodyP
       const value = match[0];
       const index = match.index ?? 0;
       if (index > lastIndex) {
-        chunks.push({ type: 'text', value: text.slice(lastIndex, index) });
+        const slice = text.slice(lastIndex, index);
+        chunks.push({ type: 'text', value: slice, display: allowBreaksInLongTokens(slice) });
       }
-      chunks.push({ type: 'link', value });
+      chunks.push({ type: 'link', value, display: allowBreaksInLongTokens(value) });
       lastIndex = index + value.length;
     }
 
     if (lastIndex < text.length) {
-      chunks.push({ type: 'text', value: text.slice(lastIndex) });
+      const slice = text.slice(lastIndex);
+      chunks.push({ type: 'text', value: slice, display: allowBreaksInLongTokens(slice) });
     }
 
     if (chunks.length === 0) {
-      chunks.push({ type: 'text', value: text });
+      chunks.push({ type: 'text', value: text, display: allowBreaksInLongTokens(text) });
     }
 
     return chunks;
   }, [text]);
 
   return (
-    <Text style={textStyle} selectable={false}>
+    <Text style={[styles.body, textStyle]} selectable={false}>
       {parts.map((part, index) =>
         part.type === 'link' ? (
           <Text
             key={`${part.type}-${index}`}
             selectable={false}
-            style={[textStyle, styles.linkBase, linkStyle]}
+            style={[styles.body, textStyle, styles.linkBase, linkStyle]}
             onPress={() => openExternalLink(part.value)}>
-            {part.value}
+            {part.display}
           </Text>
         ) : (
-          <Text key={`${part.type}-${index}`} selectable={false} style={textStyle}>
-            {part.value}
+          <Text key={`${part.type}-${index}`} selectable={false} style={[styles.body, textStyle]}>
+            {part.display}
           </Text>
         ),
       )}
@@ -76,6 +85,17 @@ export function ChatMessageBody({ text, textStyle, linkStyle }: ChatMessageBodyP
 }
 
 const styles = StyleSheet.create({
+  body: {
+    flexShrink: 1,
+    maxWidth: '100%',
+    ...Platform.select({
+      web: {
+        wordBreak: 'break-word',
+        overflowWrap: 'anywhere',
+      } as object,
+      default: {},
+    }),
+  },
   linkBase: {
     textDecorationLine: 'underline',
   },
