@@ -190,9 +190,10 @@ export function SiteAnnouncementModal({
   const focusX = theme.imageFocusX ?? 50;
   const focusY = theme.imageFocusY ?? 50;
   const sheetMaxHeight = windowHeight - insets.top - insets.bottom - 24;
-  const imageMaxHeight = isDesktopWeb
-    ? undefined
-    : Math.round(Math.min(sheetMaxHeight * 0.42, 240));
+  // Cap cover so text stays reachable; cover scrolls away with content (top layout).
+  const imageMaxHeight = Math.round(
+    Math.min(sheetMaxHeight * (isDesktopWeb ? 0.48 : 0.42), isDesktopWeb ? 320 : 240),
+  );
 
   const animationType = theme.animationEnabled === false ? 'none' : 'fade';
 
@@ -204,6 +205,199 @@ export function SiteAnnouncementModal({
 
   const pagerLabel = `Новость ${index + 1} из ${total}`;
   const dateLabel = formatAnnouncementDate(announcement.publishedAt);
+  const pagerOnImage = showImage && !sideLayout;
+
+  const renderPager = (onImage: boolean) => {
+    if (!showPager) return null;
+    return (
+      <View
+        style={[
+          styles.pager,
+          {
+            backgroundColor: onImage ? 'rgba(0,0,0,0.45)' : `${accent}18`,
+          },
+          onImage ? styles.pagerOnImage : null,
+        ]}
+      >
+        <Pressable
+          onPress={onPrev}
+          disabled={!canPrev}
+          hitSlop={10}
+          style={({ pressed }) => [
+            styles.pagerArrow,
+            !canPrev ? styles.pagerArrowDisabled : null,
+            pressed && canPrev ? styles.pressed : null,
+          ]}
+          accessibilityRole="button"
+          accessibilityLabel="Предыдущая новость"
+        >
+          <Ionicons
+            name="chevron-back"
+            size={22}
+            color={onImage ? '#FFFFFF' : accent}
+          />
+        </Pressable>
+
+        <Text
+          style={[
+            styles.pagerLabel,
+            { color: onImage ? '#FFFFFF' : titleColor },
+          ]}
+          accessibilityLiveRegion="polite"
+        >
+          {pagerLabel}
+        </Text>
+
+        <Pressable
+          onPress={onNext}
+          disabled={!canNext}
+          hitSlop={10}
+          style={({ pressed }) => [
+            styles.pagerArrow,
+            !canNext ? styles.pagerArrowDisabled : null,
+            pressed && canNext ? styles.pressed : null,
+          ]}
+          accessibilityRole="button"
+          accessibilityLabel="Следующая новость"
+        >
+          <Ionicons
+            name="chevron-forward"
+            size={22}
+            color={onImage ? '#FFFFFF' : accent}
+          />
+        </Pressable>
+      </View>
+    );
+  };
+
+  const coverImage =
+    showImage && announcement.imageUrl ? (
+      <View
+        style={[
+          sideLayout ? styles.imageSide : styles.imageTop,
+          { backgroundColor: imagePlaceholder },
+          !sideLayout ? aspectStyle(theme.imageAspect) : null,
+          { maxHeight: imageMaxHeight },
+        ]}
+      >
+        <FadeInImage
+          uri={announcement.imageUrl}
+          recyclingKey={announcement.id}
+          transitionMs={0}
+          style={styles.image}
+          imageStyle={
+            Platform.OS === 'web'
+              ? ({
+                  objectFit: 'cover',
+                  objectPosition: `${focusX}% ${focusY}%`,
+                } as ImageStyle)
+              : undefined
+          }
+          contentFit="cover"
+          contentPosition={{
+            left: `${focusX}%`,
+            top: `${focusY}%`,
+          }}
+        />
+        {pagerOnImage ? renderPager(true) : null}
+      </View>
+    ) : null;
+
+  const textBlock = (
+    <>
+      {!pagerOnImage ? renderPager(false) : null}
+
+      {dateLabel || announcement.views != null || announcement.likes != null ? (
+        <View style={styles.metaRow}>
+          {dateLabel ? (
+            <Text
+              style={[styles.dateLabel, { color: bodyColor }]}
+              accessibilityLabel={`Дата публикации ${dateLabel}`}
+            >
+              {dateLabel}
+            </Text>
+          ) : null}
+          <View style={styles.statsRow}>
+            <View
+              style={styles.stat}
+              accessibilityLabel={`Просмотры: ${announcement.views ?? 0}`}
+            >
+              <Ionicons name="eye-outline" size={14} color={bodyColor} />
+              <Text style={[styles.statText, { color: bodyColor }]}>
+                {announcement.views ?? 0}
+              </Text>
+            </View>
+            <View
+              style={styles.stat}
+              accessibilityLabel={`Лайки: ${announcement.likes ?? 0}`}
+            >
+              <Ionicons name="heart-outline" size={14} color={bodyColor} />
+              <Text style={[styles.statText, { color: bodyColor }]}>
+                {announcement.likes ?? 0}
+              </Text>
+            </View>
+          </View>
+        </View>
+      ) : null}
+
+      <View style={styles.titleWrap}>
+        {titleHtml ? (
+          <RenderHTML
+            contentWidth={contentWidth}
+            source={{ html: titleHtml }}
+            systemFonts={[...defaultSystemFonts]}
+            tagsStyles={titleTagsStyles}
+            defaultTextProps={{ selectable: true }}
+          />
+        ) : (
+          <Text style={[styles.title, { color: titleColor }]}>
+            {announcement.title}
+          </Text>
+        )}
+      </View>
+
+      {html ? (
+        <RenderHTML
+          contentWidth={contentWidth}
+          source={{ html }}
+          systemFonts={[...defaultSystemFonts]}
+          tagsStyles={tagsStyles}
+          defaultTextProps={{ selectable: true }}
+        />
+      ) : null}
+
+      {showAction ? (
+        <Pressable
+          onPress={onAction}
+          style={({ pressed }) => [
+            styles.actionButton,
+            theme.buttonStyle === 'outline'
+              ? {
+                  backgroundColor: 'transparent',
+                  borderWidth: 2,
+                  borderColor: buttonColor,
+                }
+              : { backgroundColor: buttonColor },
+            pressed ? styles.pressed : null,
+          ]}
+          accessibilityRole="button"
+          accessibilityLabel={announcement.actionLabel ?? 'Действие'}
+        >
+          <Text
+            style={[
+              styles.actionLabel,
+              {
+                color:
+                  theme.buttonStyle === 'outline' ? buttonColor : '#FFFFFF',
+              },
+            ]}
+          >
+            {announcement.actionLabel}
+          </Text>
+        </Pressable>
+      ) : null}
+    </>
+  );
 
   return (
     <Modal
@@ -254,203 +448,27 @@ export function SiteAnnouncementModal({
             <Ionicons name="close" size={22} color="#FFFFFF" />
           </Pressable>
 
-          {showPager ? (
-            <View
-              style={[
-                styles.pager,
-                {
-                  backgroundColor: showImage
-                    ? 'rgba(0,0,0,0.45)'
-                    : `${accent}18`,
-                },
-                showImage ? styles.pagerOnImage : null,
-              ]}
-            >
-              <Pressable
-                onPress={onPrev}
-                disabled={!canPrev}
-                hitSlop={10}
-                style={({ pressed }) => [
-                  styles.pagerArrow,
-                  !canPrev ? styles.pagerArrowDisabled : null,
-                  pressed && canPrev ? styles.pressed : null,
-                ]}
-                accessibilityRole="button"
-                accessibilityLabel="Предыдущая новость"
-              >
-                <Ionicons
-                  name="chevron-back"
-                  size={22}
-                  color={showImage ? '#FFFFFF' : accent}
-                />
-              </Pressable>
-
-              <Text
-                style={[
-                  styles.pagerLabel,
-                  { color: showImage ? '#FFFFFF' : titleColor },
-                ]}
-                accessibilityLiveRegion="polite"
-              >
-                {pagerLabel}
-              </Text>
-
-              <Pressable
-                onPress={onNext}
-                disabled={!canNext}
-                hitSlop={10}
-                style={({ pressed }) => [
-                  styles.pagerArrow,
-                  !canNext ? styles.pagerArrowDisabled : null,
-                  pressed && canNext ? styles.pressed : null,
-                ]}
-                accessibilityRole="button"
-                accessibilityLabel="Следующая новость"
-              >
-                <Ionicons
-                  name="chevron-forward"
-                  size={22}
-                  color={showImage ? '#FFFFFF' : accent}
-                />
-              </Pressable>
-            </View>
-          ) : null}
-
-          {showImage && announcement.imageUrl ? (
-            <View
-              style={[
-                sideLayout ? styles.imageSide : styles.imageTop,
-                { backgroundColor: imagePlaceholder },
-                !sideLayout ? aspectStyle(theme.imageAspect) : null,
-                imageMaxHeight != null ? { maxHeight: imageMaxHeight } : null,
-              ]}
-            >
-              <FadeInImage
-                uri={announcement.imageUrl}
-                recyclingKey={announcement.id}
-                transitionMs={0}
-                style={styles.image}
-                imageStyle={
-                  Platform.OS === 'web'
-                    ? ({
-                        objectFit: 'cover',
-                        objectPosition: `${focusX}% ${focusY}%`,
-                      } as ImageStyle)
-                    : undefined
-                }
-                contentFit="cover"
-                contentPosition={{
-                  left: `${focusX}%`,
-                  top: `${focusY}%`,
-                }}
-              />
-            </View>
-          ) : null}
+          {sideLayout ? coverImage : null}
 
           <ScrollView
             style={styles.scroll}
-            contentContainerStyle={styles.scrollContent}
+            contentContainerStyle={[
+              styles.scrollContent,
+              !sideLayout && showImage ? styles.scrollContentWithCover : null,
+            ]}
             bounces={false}
             keyboardShouldPersistTaps="handled"
-            showsVerticalScrollIndicator={false}
+            showsVerticalScrollIndicator
           >
-            {dateLabel || announcement.views != null || announcement.likes != null ? (
-              <View style={styles.metaRow}>
-                {dateLabel ? (
-                  <Text
-                    style={[styles.dateLabel, { color: bodyColor }]}
-                    accessibilityLabel={`Дата публикации ${dateLabel}`}
-                  >
-                    {dateLabel}
-                  </Text>
-                ) : null}
-                <View style={styles.statsRow}>
-                  <View
-                    style={styles.stat}
-                    accessibilityLabel={`Просмотры: ${announcement.views ?? 0}`}>
-                    <Ionicons
-                      name="eye-outline"
-                      size={14}
-                      color={bodyColor}
-                    />
-                    <Text style={[styles.statText, { color: bodyColor }]}>
-                      {announcement.views ?? 0}
-                    </Text>
-                  </View>
-                  <View
-                    style={styles.stat}
-                    accessibilityLabel={`Лайки: ${announcement.likes ?? 0}`}>
-                    <Ionicons
-                      name="heart-outline"
-                      size={14}
-                      color={bodyColor}
-                    />
-                    <Text style={[styles.statText, { color: bodyColor }]}>
-                      {announcement.likes ?? 0}
-                    </Text>
-                  </View>
-                </View>
-              </View>
-            ) : null}
-
-            <View style={styles.titleWrap}>
-              {titleHtml ? (
-                <RenderHTML
-                  contentWidth={contentWidth}
-                  source={{ html: titleHtml }}
-                  systemFonts={[...defaultSystemFonts]}
-                  tagsStyles={titleTagsStyles}
-                  defaultTextProps={{ selectable: true }}
-                />
-              ) : (
-                <Text style={[styles.title, { color: titleColor }]}>
-                  {announcement.title}
-                </Text>
-              )}
+            {!sideLayout ? coverImage : null}
+            <View
+              style={[
+                styles.scrollBody,
+                !sideLayout && showImage ? styles.scrollBodyAfterCover : null,
+              ]}
+            >
+              {textBlock}
             </View>
-
-            {html ? (
-              <RenderHTML
-                contentWidth={contentWidth}
-                source={{ html }}
-                systemFonts={[...defaultSystemFonts]}
-                tagsStyles={tagsStyles}
-                defaultTextProps={{ selectable: true }}
-              />
-            ) : null}
-
-            {showAction ? (
-              <Pressable
-                onPress={onAction}
-                style={({ pressed }) => [
-                  styles.actionButton,
-                  theme.buttonStyle === 'outline'
-                    ? {
-                        backgroundColor: 'transparent',
-                        borderWidth: 2,
-                        borderColor: buttonColor,
-                      }
-                    : { backgroundColor: buttonColor },
-                  pressed ? styles.pressed : null,
-                ]}
-                accessibilityRole="button"
-                accessibilityLabel={announcement.actionLabel ?? 'Действие'}
-              >
-                <Text
-                  style={[
-                    styles.actionLabel,
-                    {
-                      color:
-                        theme.buttonStyle === 'outline'
-                          ? buttonColor
-                          : '#FFFFFF',
-                    },
-                  ]}
-                >
-                  {announcement.actionLabel}
-                </Text>
-              </Pressable>
-            ) : null}
           </ScrollView>
         </View>
       </View>
@@ -536,11 +554,13 @@ const styles = StyleSheet.create({
   imageTop: {
     width: '100%',
     overflow: 'hidden',
+    position: 'relative',
   },
   imageSide: {
     width: '42%',
     minHeight: 200,
     overflow: 'hidden',
+    position: 'relative',
   },
   image: {
     width: '100%',
@@ -550,14 +570,24 @@ const styles = StyleSheet.create({
   scroll: {
     flexGrow: 1,
     flexShrink: 1,
+    minHeight: 0,
   },
   scrollContent: {
+    flexGrow: 1,
+    paddingBottom: Spacing.lg,
+  },
+  scrollContentWithCover: {
+    paddingTop: 0,
+  },
+  scrollBody: {
     paddingHorizontal: Spacing.lg,
     paddingTop: Spacing.lg,
-    paddingBottom: Spacing.lg,
     // Close button: right 10 + 40 wide — keep content clear of that corner.
     paddingRight: Spacing.lg + 44,
     gap: Spacing.md,
+  },
+  scrollBodyAfterCover: {
+    paddingTop: Spacing.md,
   },
   metaRow: {
     flexDirection: 'row',
