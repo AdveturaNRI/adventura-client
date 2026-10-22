@@ -2,6 +2,7 @@ import { createContext, useContext, useEffect, useMemo, useRef, useState, type R
 import { AppState, Platform } from 'react-native';
 
 import { useAuth } from '@/context/AuthContext';
+import type { AnnouncementPublishedEvent } from '@/services/announcements/announcementsApi';
 import type { ChatMessage, ChatReactionEvent, ConversationListItem } from '@/services/chats/chatsApi';
 import { appendCachedThreadMessage } from '@/utils/chat-thread-cache';
 import { getNotificationsUnreadCount, type PortalNotification } from '@/services/notifications/notificationsApi';
@@ -39,6 +40,8 @@ type RealtimeContextValue = {
   lastConversationDeleted: ConversationDeletedPayload | null;
   lastPresence: PresenceUpdatePayload | null;
   lastNotification: PortalNotification | null;
+  /** Bumps when admin publishes / republishes a site announcement. */
+  lastAnnouncementPublished: AnnouncementPublishedEvent | null;
   setUnreadChats: (value: number) => void;
   setUnreadNotifications: (value: number) => void;
   publishConversationUpdate: (conversation: ConversationListItem) => void;
@@ -65,6 +68,8 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
   const [lastConversationDeleted, setLastConversationDeleted] = useState<ConversationDeletedPayload | null>(null);
   const [lastPresence, setLastPresence] = useState<PresenceUpdatePayload | null>(null);
   const [lastNotification, setLastNotification] = useState<PortalNotification | null>(null);
+  const [lastAnnouncementPublished, setLastAnnouncementPublished] =
+    useState<AnnouncementPublishedEvent | null>(null);
   const messageListenersRef = useRef(new Set<(message: ChatMessage) => void>());
   const reactionListenersRef = useRef(new Set<(event: ChatReactionEvent) => void>());
   const callListenersRef = useRef(new Set<(event: CallRealtimeEvent) => void>());
@@ -126,6 +131,7 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
       setLastConversationDeleted(null);
       setLastPresence(null);
       setLastNotification(null);
+      setLastAnnouncementPublished(null);
       return;
     }
 
@@ -183,6 +189,7 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
           messageText: notification.messageText,
         });
       },
+      onAnnouncementPublished: setLastAnnouncementPublished,
       onUnreadSync: (payload: UnreadSyncPayload) => {
         hasUnreadSynced = true;
         setUnreadChats(payload.chats);
@@ -390,6 +397,7 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
       lastConversationDeleted,
       lastPresence,
       lastNotification,
+      lastAnnouncementPublished,
       setUnreadChats,
       setUnreadNotifications,
       publishConversationUpdate,
@@ -409,6 +417,7 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
       lastConversationDeleted,
       lastPresence,
       lastNotification,
+      lastAnnouncementPublished,
       publishConversationUpdate,
       subscribeMessages,
       subscribeMessageReactions,

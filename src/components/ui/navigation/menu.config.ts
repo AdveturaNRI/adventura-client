@@ -8,6 +8,7 @@ export type MenuIconKey =
   | 'author'
   | 'clubs'
   | 'music'
+  | 'news'
   | 'telegram'
   | 'support'
   | 'developer';
@@ -114,7 +115,7 @@ export const PROFILE_MENU_SECTIONS: ProfileMenuSectionSpec[] = [
       {
         key: 'social',
         label: 'Наши соцсети',
-        subtitle: 'Здесь вы можете следить за новостями о нас',
+        subtitle: 'Telegram-канал проекта',
         icon: 'telegram',
         externalUrl: 'https://t.me/AdventuraNRI',
       },

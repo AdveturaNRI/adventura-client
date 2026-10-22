@@ -12,6 +12,7 @@ import { GlobalLoadingOverlay } from '@/components/ui/feedback/GlobalLoadingOver
 import { YandexMetrikaTracker } from '@/components/analytics/YandexMetrikaTracker';
 import { VkPixelTracker } from '@/components/analytics/VkPixelTracker';
 import { ThemeProvider } from '@/context/ThemeContext';
+import { AnnouncementProvider } from '@/context/AnnouncementContext';
 import { AuthProvider } from '@/context/AuthContext';
 import { ProfileProvider } from '@/context/ProfileContext';
 import { PushPromptProvider } from '@/context/PushPromptContext';
@@ -19,6 +20,7 @@ import { RealtimeProvider } from '@/context/RealtimeContext';
 import { VoiceCallProvider } from '@/context/VoiceCallContext';
 import { MusicPlayerProvider } from '@/context/MusicPlayerContext';
 import { AuthorsProvider } from '@/context/AuthorsContext';
+import { NewsProvider } from '@/context/NewsContext';
 import { useTheme, useThemePreference } from '@/hooks/use-theme';
 import { registerLivekitGlobals } from '@/services/livekit/platform';
 
@@ -78,11 +80,15 @@ function AppRouteProviders() {
         <RealtimeProvider>
           <ProfileProvider>
             <AuthorsProvider>
-              <VoiceCallProvider>
-                <MusicPlayerProvider>
-                  <PushPromptProvider>{navigator}</PushPromptProvider>
-                </MusicPlayerProvider>
-              </VoiceCallProvider>
+              <NewsProvider>
+                <VoiceCallProvider>
+                  <MusicPlayerProvider>
+                    <PushPromptProvider>
+                      <AnnouncementProvider>{navigator}</AnnouncementProvider>
+                    </PushPromptProvider>
+                  </MusicPlayerProvider>
+                </VoiceCallProvider>
+              </NewsProvider>
             </AuthorsProvider>
           </ProfileProvider>
         </RealtimeProvider>

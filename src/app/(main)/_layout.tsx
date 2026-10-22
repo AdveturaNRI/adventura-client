@@ -4,7 +4,10 @@ import { ActivityIndicator, StyleSheet, View } from 'react-native';
 import { MobileAppMenuProvider } from '@/components/navigation/MobileAppMenuContext';
 import { MainDesktopHeader } from '@/components/navigation/MainDesktopHeader';
 import { MainDesktopSidebar } from '@/components/navigation/MainDesktopSidebar';
-import { useIsDesktopSidebarVisible, useIsDesktopWeb } from '@/components/navigation/DesktopThemeToggle';
+import {
+  useIsDesktopSidebarVisible,
+  useIsDesktopWeb,
+} from '@/components/navigation/DesktopThemeToggle';
 import { stackScreenOptions } from '@/constants/navigation.config';
 import { buildLoginHref, isPublicAppPath } from '@/constants/auth-routes';
 import { useAuth } from '@/context/AuthContext';
@@ -37,10 +40,33 @@ function MainStack() {
       <Stack.Screen name="games/[id]" />
       <Stack.Screen name="users/[id]" />
       <Stack.Screen name="authors" />
+      <Stack.Screen name="news" />
       <Stack.Screen name="handbook" />
       <Stack.Screen name="rewards-lab" />
       <Stack.Screen name="profile-appearance" />
     </Stack>
+  );
+}
+
+function MainChrome({
+  showSidebar,
+  showDesktopHeader,
+}: {
+  showSidebar: boolean;
+  showDesktopHeader: boolean;
+}) {
+  return (
+    <View style={styles.root}>
+      <View style={showSidebar ? styles.desktopShell : styles.root}>
+        {showSidebar ? <MainDesktopSidebar /> : null}
+        <View style={showSidebar ? styles.desktopMain : styles.root}>
+          {showDesktopHeader ? <MainDesktopHeader /> : null}
+          <View style={styles.content}>
+            <MainStack />
+          </View>
+        </View>
+      </View>
+    </View>
   );
 }
 
@@ -63,31 +89,12 @@ export default function MainLayout() {
     return <Redirect href={buildLoginHref(pathname)} />;
   }
 
-  if (isDesktopWeb) {
-    return (
-      <MobileAppMenuProvider>
-        <View style={styles.root}>
-          <View style={styles.desktopShell}>
-            {showDesktopSidebar ? <MainDesktopSidebar /> : null}
-            <View style={styles.desktopMain}>
-              <MainDesktopHeader />
-              <View style={styles.content}>
-                <MainStack />
-              </View>
-            </View>
-          </View>
-        </View>
-      </MobileAppMenuProvider>
-    );
-  }
-
   return (
     <MobileAppMenuProvider>
-      <View style={styles.root}>
-        <View style={styles.content}>
-          <MainStack />
-        </View>
-      </View>
+      <MainChrome
+        showSidebar={showDesktopSidebar}
+        showDesktopHeader={isDesktopWeb}
+      />
     </MobileAppMenuProvider>
   );
 }

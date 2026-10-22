@@ -2,6 +2,7 @@ import { io, type Socket } from 'socket.io-client';
 
 import { API_ORIGIN } from '@/constants/api.config';
 import type { ChatMessage, ChatReactionEvent, ConversationListItem } from '@/services/chats/chatsApi';
+import type { AnnouncementPublishedEvent } from '@/services/announcements/announcementsApi';
 import type { PortalNotification } from '@/services/notifications/notificationsApi';
 
 export const REALTIME_EVENTS = {
@@ -12,6 +13,7 @@ export const REALTIME_EVENTS = {
   CONVERSATION_READ: 'conversation:read',
   CONVERSATION_DELETED: 'conversation:deleted',
   NOTIFICATION_NEW: 'notification:new',
+  ANNOUNCEMENT_PUBLISHED: 'announcement:published',
   UNREAD_SYNC: 'unread:sync',
   PRESENCE_UPDATE: 'presence:update',
   CALL_INVITE: 'call:invite',
@@ -71,6 +73,7 @@ export type RealtimeHandlers = {
   onConversationRead?: (payload: ConversationReadPayload) => void;
   onConversationDeleted?: (payload: ConversationDeletedPayload) => void;
   onNotificationNew?: (notification: PortalNotification) => void;
+  onAnnouncementPublished?: (payload: AnnouncementPublishedEvent) => void;
   onUnreadSync?: (payload: UnreadSyncPayload) => void;
   onPresenceUpdate?: (payload: PresenceUpdatePayload) => void;
   onCallEvent?: (event: CallRealtimeEvent) => void;
@@ -107,6 +110,12 @@ function ensureListeners(current: Socket) {
   current.on(REALTIME_EVENTS.NOTIFICATION_NEW, (payload: PortalNotification) => {
     handlers.onNotificationNew?.(payload);
   });
+  current.on(
+    REALTIME_EVENTS.ANNOUNCEMENT_PUBLISHED,
+    (payload: AnnouncementPublishedEvent) => {
+      handlers.onAnnouncementPublished?.(payload);
+    },
+  );
   current.on(REALTIME_EVENTS.UNREAD_SYNC, (payload: UnreadSyncPayload) => {
     handlers.onUnreadSync?.(payload);
   });

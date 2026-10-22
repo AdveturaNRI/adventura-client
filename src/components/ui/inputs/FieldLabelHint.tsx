@@ -2,7 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useEffect, useRef, useState } from 'react';
 import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 
-import { FontSize, Spacing, type ThemeColors } from '@/constants/theme';
+import { Spacing, type ThemeColors } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { useThemedStyles } from '@/hooks/use-themed-styles';
 
@@ -29,12 +29,13 @@ function createStyles(colors: ThemeColors) {
       paddingHorizontal: Spacing.sm,
       paddingVertical: 4,
       borderRadius: 6,
-      backgroundColor: colors.surface,
+      // Hard dark chip — readable on light and dark forms; CSS !important fights Safari.
+      backgroundColor: '#2C2C2E',
       borderWidth: 1,
-      borderColor: colors.borderLight,
+      borderColor: '#48484A',
       shadowColor: colors.shadow,
       shadowOffset: { width: 0, height: 1 },
-      shadowOpacity: 0.06,
+      shadowOpacity: 0.2,
       shadowRadius: 3,
       elevation: 2,
       zIndex: 10,
@@ -50,7 +51,8 @@ function createStyles(colors: ThemeColors) {
     tooltipText: {
       fontSize: 11,
       lineHeight: 14,
-      color: colors.textMuted,
+      color: '#FFFFFF',
+      fontWeight: '500',
     },
   });
 }
@@ -93,8 +95,15 @@ export function FieldLabelHint({ text }: FieldLabelHintProps) {
       accessibilityRole="button"
       accessibilityLabel={text}>
       {isWeb && hintVisible ? (
-        <View style={styles.tooltip} pointerEvents="none">
-          <Text style={styles.tooltipText}>{text}</Text>
+        <View
+          style={styles.tooltip}
+          pointerEvents="none"
+          {...({ className: 'adventura-field-hint' } as object)}>
+          <Text
+            style={styles.tooltipText}
+            {...({ className: 'adventura-field-hint-text' } as object)}>
+            {text}
+          </Text>
         </View>
       ) : null}
       <Ionicons name="information-circle-outline" size={15} color={colors.textSubtle} />

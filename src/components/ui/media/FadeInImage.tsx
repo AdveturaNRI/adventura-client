@@ -1,5 +1,11 @@
 import { useEffect, useState, type ComponentProps } from 'react';
-import { StyleSheet, View, type StyleProp, type ViewStyle } from 'react-native';
+import {
+  StyleSheet,
+  View,
+  type ImageStyle,
+  type StyleProp,
+  type ViewStyle,
+} from 'react-native';
 import { Image } from 'expo-image';
 import Animated, {
   Easing,
@@ -17,6 +23,8 @@ type FadeInImageProps = {
   /** Локальный ассет: `require('…/cover.png')`. */
   source?: ComponentProps<typeof Image>['source'];
   style?: StyleProp<ViewStyle>;
+  /** Extra styles for the inner Image (e.g. web objectPosition). */
+  imageStyle?: StyleProp<ImageStyle>;
   contentFit?: ComponentProps<typeof Image>['contentFit'];
   /** Cross-fade duration once the image is ready. */
   transitionMs?: number;
@@ -35,6 +43,7 @@ export function FadeInImage({
   uri,
   source,
   style,
+  imageStyle,
   contentFit = 'cover',
   transitionMs = 320,
   recyclingKey,
@@ -86,7 +95,7 @@ export function FadeInImage({
           {...imageProps}
           key={cacheKey}
           source={imageSource}
-          style={styles.image}
+          style={[styles.image, imageStyle]}
           contentFit={contentFit}
           transition={transitionMs}
           recyclingKey={cacheKey}
