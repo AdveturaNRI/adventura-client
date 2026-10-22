@@ -16,6 +16,7 @@ export type NavLeafId =
   | 'chats'
   | 'dice'
   | 'generators'
+  | 'handbook'
   | 'news'
   | 'profile';
 
@@ -96,6 +97,7 @@ export function matchNavLeafId(pathname: string): NavLeafId | null {
   if (startsWithPath(pathname, '/chats')) return 'chats';
   if (startsWithPath(pathname, '/dice')) return 'dice';
   if (startsWithPath(pathname, '/generators')) return 'generators';
+  if (startsWithPath(pathname, '/handbook')) return 'handbook';
   if (startsWithPath(pathname, '/news')) return 'news';
   if (matchesProfileFamily(pathname)) return 'profile';
   return null;
@@ -247,6 +249,14 @@ export const NAV_SECTIONS: NavSection[] = [
         label: 'Генераторы',
         href: '/generators',
         subtitle: 'NPC, таверны, подземелья',
+        public: true,
+      },
+      {
+        id: 'handbook',
+        routeKey: 'handbook',
+        label: 'Библиотека',
+        href: '/handbook',
+        subtitle: 'Расы, классы и правила по системам',
         public: true,
       },
     ],

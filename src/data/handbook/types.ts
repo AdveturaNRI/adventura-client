@@ -1,9 +1,15 @@
 export type HandbookCategory =
   | 'races'
   | 'classes'
+  | 'backgrounds'
+  | 'feats'
+  | 'glossary'
   | 'spells'
-  | 'equipment'
   | 'bestiary'
+  | 'magicItems'
+  | 'equipment'
+  | 'beginners'
+  /** @deprecated Prefer `glossary`. Kept for старые моки / storage. */
   | 'rules';
 
 export type HandbookCategoryFilter = HandbookCategory | 'all';
@@ -30,6 +36,8 @@ export type HandbookEntry = {
   title: string;
   summary: string;
   tags: string[];
+  /** Спасброски класса — чипы на карточке (без «Кость хитов»). */
+  savingThrows?: string[];
   /** Панорамная обложка для плитки (CDN). */
   coverUrl?: string;
   /** Локальный require из `assets/handbook/classes`. */

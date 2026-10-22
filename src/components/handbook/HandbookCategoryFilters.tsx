@@ -12,12 +12,16 @@ import { useThemedStyles } from '@/hooks/use-themed-styles';
 
 const FILTER_ORDER: HandbookCategoryFilter[] = [
   'all',
-  'races',
   'classes',
+  'races',
+  'backgrounds',
+  'feats',
+  'glossary',
   'spells',
-  'equipment',
   'bestiary',
-  // 'rules' — временно скрыт
+  'magicItems',
+  'equipment',
+  'beginners',
 ];
 
 type HandbookCategoryFiltersProps = {

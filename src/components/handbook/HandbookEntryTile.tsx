@@ -134,6 +134,21 @@ function createStyles(colors: ThemeColors) {
       gap: 4,
       marginTop: 4,
     },
+    saveTag: {
+      paddingHorizontal: 7,
+      minHeight: 20,
+      borderRadius: Radius.pill,
+      borderWidth: 1,
+      borderColor: 'rgba(167, 139, 250, 0.6)',
+      backgroundColor: 'rgba(124, 58, 237, 0.34)',
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    saveTagText: {
+      fontSize: 9,
+      fontWeight: '700',
+      color: '#F3E8FF',
+    },
     tag: {
       paddingHorizontal: 7,
       minHeight: 20,
@@ -162,16 +177,18 @@ function createStyles(colors: ThemeColors) {
 export function HandbookEntryTile({ entry, onPress }: HandbookEntryTileProps) {
   const styles = useThemedStyles(createStyles);
   const accent = entry.accent || '#2F6B4F';
+  const blurb = entry.summary.trim();
   const coverUrl =
     entry.coverSource != null
       ? undefined
       : entry.coverUrl ||
         `https://picsum.photos/seed/handbook-entry-${entry.id}/900/1600`;
+  const a11yLabel = blurb ? `${entry.title}. ${blurb}` : entry.title;
 
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={entry.title}
+      accessibilityLabel={a11yLabel}
       onPress={onPress}
       style={({ pressed, hovered }: PressState) => [
         styles.card,
@@ -202,9 +219,20 @@ export function HandbookEntryTile({ entry, onPress }: HandbookEntryTileProps) {
             <Text style={styles.title} numberOfLines={1}>
               {entry.title}
             </Text>
-            <Text style={styles.summary} numberOfLines={2}>
-              {entry.summary}
-            </Text>
+            {blurb ? (
+              <Text style={styles.summary} numberOfLines={3}>
+                {blurb}
+              </Text>
+            ) : null}
+            {entry.savingThrows && entry.savingThrows.length > 0 ? (
+              <View style={styles.tags}>
+                {entry.savingThrows.map((save) => (
+                  <View key={`${entry.id}-save-${save}`} style={styles.saveTag}>
+                    <Text style={styles.saveTagText}>{save}</Text>
+                  </View>
+                ))}
+              </View>
+            ) : null}
             {entry.tags.length > 0 ? (
               <View style={styles.tags}>
                 {entry.tags.slice(0, 2).map((tag, index) => (

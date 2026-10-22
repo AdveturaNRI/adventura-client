@@ -3,20 +3,30 @@ import type { Ionicons } from '@expo/vector-icons';
 import type { HandbookCategory, HandbookCategoryFilter } from './types';
 
 export const HANDBOOK_CATEGORY_LABELS: Record<HandbookCategory, string> = {
-  races: 'Расы',
   classes: 'Классы',
+  races: 'Расы',
+  backgrounds: 'Предыстории',
+  feats: 'Черты',
+  glossary: 'Глоссарий',
   spells: 'Заклинания',
-  equipment: 'Снаряжение',
   bestiary: 'Бестиарий',
+  magicItems: 'Магические предметы',
+  equipment: 'Снаряжение',
+  beginners: 'Новичку',
   rules: 'Правила',
 };
 
 export const HANDBOOK_CATEGORY_HINTS: Record<HandbookCategory, string> = {
-  races: 'Народы и происхождения',
   classes: 'Архетипы и роли',
+  races: 'Народы и происхождения',
+  backgrounds: 'Происхождение и навыки героя',
+  feats: 'Таланты и улучшения',
+  glossary: 'Термины и состояния',
   spells: 'Магия и эффекты',
-  equipment: 'Оружие, броня и предметы',
   bestiary: 'Монстры и враги',
+  magicItems: 'Артефакты и чудеса',
+  equipment: 'Оружие, броня и предметы',
+  beginners: 'С чего начать за столом',
   rules: 'Механики за столом',
 };
 
@@ -51,22 +61,32 @@ export function getHandbookCategoryFilterLabel(
   return getHandbookCategoryLabel(filter, systemId);
 }
 
+/** Порядок как на референсе dnd.su / TTG. */
 export const HANDBOOK_CATEGORY_ORDER: HandbookCategory[] = [
-  'races',
   'classes',
+  'races',
+  'backgrounds',
+  'feats',
+  'glossary',
   'spells',
-  'equipment',
   'bestiary',
-  // 'rules' — временно скрыт
+  'magicItems',
+  'equipment',
+  'beginners',
 ];
 
 /** Акценты плиток разделов — не серые, отличаются друг от друга. */
 export const HANDBOOK_CATEGORY_ACCENTS: Record<HandbookCategory, string> = {
-  races: '#157AFE',
   classes: '#2F6B4F',
+  races: '#157AFE',
+  backgrounds: '#A16207',
+  feats: '#7C3AED',
+  glossary: '#0E7490',
   spells: '#8B5CF6',
-  equipment: '#C45C26',
   bestiary: '#B45309',
+  magicItems: '#DB2777',
+  equipment: '#C45C26',
+  beginners: '#059669',
   rules: '#0E7490',
 };
 
@@ -80,21 +100,26 @@ export type HandbookCategoryCover = {
 };
 
 export const HANDBOOK_CATEGORY_COVERS: Record<HandbookCategory, HandbookCategoryCover> = {
-  races: {
-    source: require('../../../assets/handbook/categories/k4n8qm.jpg'),
-  },
   classes: {
     source: require('../../../assets/handbook/categories/p2w7xc.jpg'),
   },
+  races: {
+    source: require('../../../assets/handbook/categories/k4n8qm.jpg'),
+  },
+  backgrounds: { source: require('../../../assets/handbook/categories/b5j2wn.jpg') },
+  feats: { source: require('../../../assets/handbook/categories/f7x4ka.jpg') },
+  glossary: { source: require('../../../assets/handbook/categories/g1r9tp.jpg') },
   spells: {
     source: require('../../../assets/handbook/categories/r6t3yf.jpg'),
-  },
-  equipment: {
-    source: require('../../../assets/handbook/categories/h9m1vb.jpg'),
   },
   bestiary: {
     source: require('../../../assets/handbook/categories/m3q8zd.jpg'),
   },
+  magicItems: { source: require('../../../assets/handbook/categories/w8d3hs.jpg') },
+  equipment: {
+    source: require('../../../assets/handbook/categories/h9m1vb.jpg'),
+  },
+  beginners: { source: require('../../../assets/handbook/categories/n5z6cu.jpg') },
   rules: { uri: categoryCoverUri('handbook-cat-rules') },
 };
 
@@ -107,10 +132,15 @@ export const HANDBOOK_CATEGORY_ICONS: Record<
   HandbookCategory,
   keyof typeof Ionicons.glyphMap
 > = {
-  races: 'people-outline',
   classes: 'shield-outline',
+  races: 'people-outline',
+  backgrounds: 'scroll-outline',
+  feats: 'diamond-outline',
+  glossary: 'bookmark-outline',
   spells: 'flash-outline',
-  equipment: 'hammer-outline',
   bestiary: 'paw-outline',
+  magicItems: 'color-wand-outline',
+  equipment: 'hammer-outline',
+  beginners: 'school-outline',
   rules: 'book-outline',
 };

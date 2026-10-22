@@ -69,6 +69,21 @@ function createStyles(colors: ThemeColors) {
       flexWrap: 'wrap',
       gap: 6,
     },
+    saveTag: {
+      paddingHorizontal: 8,
+      minHeight: 22,
+      borderRadius: Radius.pill,
+      borderWidth: 1,
+      borderColor: 'rgba(124, 58, 237, 0.4)',
+      backgroundColor: 'rgba(124, 58, 237, 0.14)',
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    saveTagText: {
+      fontSize: 11,
+      fontWeight: '600',
+      color: '#7C3AED',
+    },
     tag: {
       paddingHorizontal: 8,
       minHeight: 22,
@@ -97,7 +112,7 @@ export function HandbookEntryCard({ entry }: HandbookEntryCardProps) {
       <View style={styles.top}>
         <View style={styles.titleBlock}>
           <Text style={styles.title}>{entry.title}</Text>
-          <Text style={styles.summary}>{entry.summary}</Text>
+          {entry.summary ? <Text style={styles.summary}>{entry.summary}</Text> : null}
         </View>
         <View style={styles.categoryBadge}>
           <Ionicons name={icon} size={12} color={colors.primary} />
@@ -106,6 +121,15 @@ export function HandbookEntryCard({ entry }: HandbookEntryCardProps) {
           </Text>
         </View>
       </View>
+      {entry.savingThrows && entry.savingThrows.length > 0 ? (
+        <View style={styles.tags}>
+          {entry.savingThrows.map((save) => (
+            <View key={`${entry.id}-save-${save}`} style={styles.saveTag}>
+              <Text style={styles.saveTagText}>{save}</Text>
+            </View>
+          ))}
+        </View>
+      ) : null}
       {entry.tags.length > 0 ? (
         <View style={styles.tags}>
           {entry.tags.map((tag, index) => (

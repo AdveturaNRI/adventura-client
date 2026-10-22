@@ -29,9 +29,33 @@ export const MOCK_HANDBOOK_ENTRIES: HandbookEntry[] = [
     tags: ['Evocation', '3'],
   },
   {
-    id: 'dnd2014-eq-bag',
+    id: 'dnd2014-bg-soldier',
+    systemId: 'dnd5e-2014',
+    category: 'backgrounds',
+    title: 'Солдат',
+    summary: 'Владение атлетикой и запугиванием, воинский ранг и снаряжение казарм.',
+    tags: ['PHB 2014'],
+  },
+  {
+    id: 'dnd2014-feat-alert',
+    systemId: 'dnd5e-2014',
+    category: 'feats',
+    title: 'Бдительность',
+    summary: '+5 к инициативе, нельзя застать врасплох, скрытые враги не получают преимущество.',
+    tags: ['PHB 2014'],
+  },
+  {
+    id: 'dnd2014-eq-longsword',
     systemId: 'dnd5e-2014',
     category: 'equipment',
+    title: 'Длинный меч',
+    summary: 'Воинское оружие ближнего боя. Универсальное: 1d8 / 1d10 двуручным хватом.',
+    tags: ['Weapon'],
+  },
+  {
+    id: 'dnd2014-magic-bag',
+    systemId: 'dnd5e-2014',
+    category: 'magicItems',
     title: 'Сумка хранения',
     summary: 'Экстрамерное пространство ~64 куб. фута. Вес содержимого не учитывается.',
     tags: ['Wondrous', 'Rare'],
@@ -45,12 +69,20 @@ export const MOCK_HANDBOOK_ENTRIES: HandbookEntry[] = [
     tags: ['Monstrosity', 'CR 3'],
   },
   {
-    id: 'dnd2014-rule-advantage',
+    id: 'dnd2014-glossary-advantage',
     systemId: 'dnd5e-2014',
-    category: 'rules',
+    category: 'glossary',
     title: 'Преимущество и помеха',
     summary: 'Бросаешь 2d20, берёшь больший или меньший. Не стакаются между собой.',
     tags: ['Core'],
+  },
+  {
+    id: 'dnd2014-beginner-session',
+    systemId: 'dnd5e-2014',
+    category: 'beginners',
+    title: 'Первая сессия',
+    summary: 'Что взять за стол: кубики, лист, карандаш. Как идут ходы и кто рассказывает историю.',
+    tags: ['Guide'],
   },
 
   // D&D 5e (2024) — классы из dnd-classes.ts
@@ -79,12 +111,36 @@ export const MOCK_HANDBOOK_ENTRIES: HandbookEntry[] = [
     tags: ['Evocation', '3'],
   },
   {
+    id: 'dnd2024-bg-guide',
+    systemId: 'dnd5e-2024',
+    category: 'backgrounds',
+    title: 'Проводник',
+    summary: 'Origin feat, навыки выживания и природы, снаряжение для долгих переходов.',
+    tags: ['PHB 2024'],
+  },
+  {
+    id: 'dnd2024-feat-alert',
+    systemId: 'dnd5e-2024',
+    category: 'feats',
+    title: 'Бдительность',
+    summary: 'Бонус к инициативе, нельзя застать врасплох — формулировки под Origin / General feat 2024.',
+    tags: ['PHB 2024'],
+  },
+  {
     id: 'dnd2024-eq-longsword',
     systemId: 'dnd5e-2024',
     category: 'equipment',
     title: 'Длинный меч',
     summary: 'Воинское оружие. Свойство Mastery: Sap — цель получает помеху на следующую атаку.',
     tags: ['Weapon', 'Mastery'],
+  },
+  {
+    id: 'dnd2024-magic-bag',
+    systemId: 'dnd5e-2024',
+    category: 'magicItems',
+    title: 'Сумка хранения',
+    summary: 'Экстрамерное пространство. Редкость и правила аттюна под DMG 2024.',
+    tags: ['Wondrous', 'Rare'],
   },
   {
     id: 'dnd2024-beast-owlbear',
@@ -95,12 +151,20 @@ export const MOCK_HANDBOOK_ENTRIES: HandbookEntry[] = [
     tags: ['Monstrosity', 'CR 3'],
   },
   {
-    id: 'dnd2024-rule-influence',
+    id: 'dnd2024-glossary-influence',
     systemId: 'dnd5e-2024',
-    category: 'rules',
+    category: 'glossary',
     title: 'Влияние (Influence)',
     summary: 'Социальная проверка с DC по отношению цели. Успех / частичный успех / провал.',
     tags: ['PHB 2024', 'Social'],
+  },
+  {
+    id: 'dnd2024-beginner-origin',
+    systemId: 'dnd5e-2024',
+    category: 'beginners',
+    title: 'Вид, класс и предыстория',
+    summary: 'Как собрать героя 2024: species → class → background → origin feat.',
+    tags: ['Guide'],
   },
 
   // Pathfinder 2e
@@ -147,7 +211,7 @@ export const MOCK_HANDBOOK_ENTRIES: HandbookEntry[] = [
   {
     id: 'pf-rule-degrees',
     systemId: 'pf2e',
-    category: 'rules',
+    category: 'glossary',
     title: 'Степени успеха',
     summary: 'Crit success / success / failure / crit failure. ±10 к DC меняет степень.',
     tags: ['Core'],
@@ -197,7 +261,7 @@ export const MOCK_HANDBOOK_ENTRIES: HandbookEntry[] = [
   {
     id: 'coc-rule-sanity',
     systemId: 'coc',
-    category: 'rules',
+    category: 'glossary',
     title: 'Sanity',
     summary: 'Потеря Sanity → temporary / indefinite insanity. Bout of madness на сессии.',
     tags: ['Core'],
@@ -247,7 +311,7 @@ export const MOCK_HANDBOOK_ENTRIES: HandbookEntry[] = [
   {
     id: 'vtm-rule-hunger',
     systemId: 'vtm',
-    category: 'rules',
+    category: 'glossary',
     title: 'Hunger dice',
     summary: 'Красные кости в пуле. Messy Critical и Bestial Failure на голодных успехах.',
     tags: ['V5'],
@@ -289,7 +353,7 @@ export const MOCK_HANDBOOK_ENTRIES: HandbookEntry[] = [
   {
     id: 'blades-rule-stress',
     systemId: 'blades',
-    category: 'rules',
+    category: 'glossary',
     title: 'Stress и Trauma',
     summary: 'Resist → stress. 9 stress = trauma и выбывание до следующей сессии.',
     tags: ['Core'],
@@ -347,7 +411,7 @@ export const MOCK_HANDBOOK_ENTRIES: HandbookEntry[] = [
   {
     id: 'cp-rule-humanity',
     systemId: 'cyberpunk',
-    category: 'rules',
+    category: 'glossary',
     title: 'Humanity Loss',
     summary: 'Киберварка ест Empathy. Слишком низко — cyberpsycho risk.',
     tags: ['Core'],
@@ -376,11 +440,16 @@ export function countEntriesByCategory(
 ): Record<HandbookCategory, number> {
   const resolved = resolveHandbookSystemId(systemId);
   const counts: Record<HandbookCategory, number> = {
-    races: 0,
     classes: 0,
+    races: 0,
+    backgrounds: 0,
+    feats: 0,
+    glossary: 0,
     spells: 0,
-    equipment: 0,
     bestiary: 0,
+    magicItems: 0,
+    equipment: 0,
+    beginners: 0,
     rules: 0,
   };
 

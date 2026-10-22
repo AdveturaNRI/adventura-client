@@ -18,11 +18,16 @@ const DEFAULT_LOCATION: HandbookLocation = {
 
 const CATEGORY_SET = new Set<HandbookCategoryFilter>([
   'all',
-  'races',
   'classes',
+  'races',
+  'backgrounds',
+  'feats',
+  'glossary',
   'spells',
-  'equipment',
   'bestiary',
+  'magicItems',
+  'equipment',
+  'beginners',
   'rules',
 ]);
 

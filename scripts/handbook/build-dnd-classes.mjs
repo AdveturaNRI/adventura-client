@@ -82,19 +82,12 @@ function loadClasses(editionFolder, systemId) {
     const en = String(name.en || '').trim();
     if (en.toLowerCase().includes('sidekick')) continue;
 
-    const hit = raw.hitDie;
-    const saves = Array.isArray(raw.savingThrows) ? raw.savingThrows : [];
-    const saveLabel = saves.map(String).join(', ');
+    const saves = Array.isArray(raw.savingThrows)
+      ? raw.savingThrows.map(String).map((s) => s.trim()).filter(Boolean)
+      : [];
     const source = raw.source || {};
     const book = source.book || '';
     const classification = source.classification || 'unknown';
-
-    const parts = [];
-    if (hit != null && hit !== '') {
-      const die = typeof hit === 'string' && hit.startsWith('d') ? hit : `d${hit}`;
-      parts.push(`Кость хитов ${die}`);
-    }
-    if (saveLabel) parts.push(`Спасброски: ${saveLabel}`);
 
     const tags = [];
     const bookTag = shortBook(book);
@@ -108,7 +101,8 @@ function loadClasses(editionFolder, systemId) {
       systemId,
       category: 'classes',
       title: ru,
-      summary: parts.join('. ') || en || ru,
+      summary: '',
+      savingThrows: saves,
       tags,
       coverUrl: coverUrlForClass(systemId, en, entryId),
       accent: CLASS_ACCENTS[en] || DEFAULT_CLASS_ACCENT,
