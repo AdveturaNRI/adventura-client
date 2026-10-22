@@ -107,6 +107,7 @@ import { upsertWandererReaction, clearWandererReaction } from '@/services/profil
 import { diceRollPreviewText, parseDiceRollPayload, type DiceRollMode } from '@/utils/chat-dice-roll';
 import { getDiceAnimationSpeedSync, loadDiceAnimationSpeed, subscribeDiceAnimationSpeed } from '@/utils/dice-animations-storage';
 import { setFocusedChatConversation } from '@/utils/chat-alerts';
+import { emitTypingUpdate } from '@/services/realtime/socket';
 import { localizeErrorMessage } from '@/utils/localizeError';
 import { formatPresenceLabel } from '@/utils/presence-label';
 import { stableAvatarUrl } from '@/utils/stable-avatar-url';
@@ -472,6 +473,27 @@ function withStablePeerAvatar(prev: ConversationListItem | null | undefined, nex
   };
 }
 
+const TYPING_REFRESH_MS = 2_000;
+const TYPING_IDLE_MS = 2_000;
+const TYPING_EXPIRE_MS = 3_500;
+
+function formatTypingLabel(peers: Array<{ nickname: string }>, isGroup: boolean) {
+  if (peers.length === 0) {
+    return null;
+  }
+  if (!isGroup) {
+    return 'печатает…';
+  }
+  const names = peers.map((peer) => peer.nickname.trim() || 'Участник');
+  if (names.length === 1) {
+    return `${names[0]} печатает…`;
+  }
+  if (names.length === 2) {
+    return `${names[0]} и ${names[1]} печатают…`;
+  }
+  return `${names[0]} и ещё ${names.length - 1} печатают…`;
+}
+
 function formatLastSeen(online: boolean, lastSeenAt: string | null) {
   const label = formatPresenceLabel(online, lastSeenAt);
   if (!label) {
@@ -567,6 +589,10 @@ function createStyles(colors: ThemeColors, bottomPad: number, isDark: boolean) {
     },
     headerStatusOnline: {
       color: colors.success,
+      fontWeight: '600',
+    },
+    headerStatusTyping: {
+      color: colors.primary,
       fontWeight: '600',
     },
     senderName: {
@@ -1330,6 +1356,7 @@ export default function ChatThreadScreen() {
     dataResyncAt,
     subscribeMessages,
     subscribeMessageReactions,
+    subscribeTyping,
     subscribeCallEvents,
     publishConversationUpdate,
   } = useRealtime();
@@ -1601,6 +1628,12 @@ export default function ChatThreadScreen() {
   const pendingAttachmentsRef = useRef<PendingAttachment[]>([]);
   const sendingRef = useRef(false);
   const blockedMeRef = useRef(false);
+  const typingActiveRef = useRef(false);
+  const lastTypingEmitAtRef = useRef(0);
+  const typingIdleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const typingConversationIdRef = useRef(conversationId);
+  const [typingPeers, setTypingPeers] = useState<Array<{ userId: string; nickname: string; expiresAt: number }>>([]);
+  typingConversationIdRef.current = conversationId;
   const composerFieldWrapRef = useRef<View>(null);
   const composerInputRef = useRef<TextInput>(null);
   const selectionRef = useRef({ start: 0, end: 0 });
@@ -1714,6 +1747,110 @@ export default function ChatThreadScreen() {
   pendingAttachmentsRef.current = pendingAttachments;
   sendingRef.current = sending;
   blockedMeRef.current = Boolean(conversation?.blockedMe);
+
+  const stopTypingSignal = useCallback(() => {
+    if (typingIdleTimerRef.current) {
+      clearTimeout(typingIdleTimerRef.current);
+      typingIdleTimerRef.current = null;
+    }
+    if (!typingActiveRef.current) {
+      return;
+    }
+    typingActiveRef.current = false;
+    lastTypingEmitAtRef.current = 0;
+    const id = typingConversationIdRef.current;
+    if (id) {
+      emitTypingUpdate(id, false);
+    }
+  }, []);
+
+  const bumpTypingSignal = useCallback(() => {
+    const id = typingConversationIdRef.current;
+    if (!id || blockedMeRef.current) {
+      return;
+    }
+    const now = Date.now();
+    if (!typingActiveRef.current || now - lastTypingEmitAtRef.current >= TYPING_REFRESH_MS) {
+      typingActiveRef.current = true;
+      lastTypingEmitAtRef.current = now;
+      emitTypingUpdate(id, true);
+    }
+    if (typingIdleTimerRef.current) {
+      clearTimeout(typingIdleTimerRef.current);
+    }
+    typingIdleTimerRef.current = setTimeout(() => {
+      typingIdleTimerRef.current = null;
+      stopTypingSignal();
+    }, TYPING_IDLE_MS);
+  }, [stopTypingSignal]);
+
+  useEffect(() => {
+    setTypingPeers([]);
+    return () => {
+      if (typingIdleTimerRef.current) {
+        clearTimeout(typingIdleTimerRef.current);
+        typingIdleTimerRef.current = null;
+      }
+      if (typingActiveRef.current && conversationId) {
+        typingActiveRef.current = false;
+        lastTypingEmitAtRef.current = 0;
+        emitTypingUpdate(conversationId, false);
+      }
+    };
+  }, [conversationId]);
+
+  useEffect(() => {
+    return subscribeTyping((event) => {
+      if (!conversationId || event.conversationId !== conversationId) {
+        return;
+      }
+      if (myId && event.userId === myId) {
+        return;
+      }
+      setTypingPeers((prev) => {
+        const without = prev.filter((peer) => peer.userId !== event.userId);
+        if (!event.typing) {
+          return without.length === prev.length ? prev : without;
+        }
+        return [
+          ...without,
+          {
+            userId: event.userId,
+            nickname: event.nickname?.trim() || 'Участник',
+            expiresAt: Date.now() + TYPING_EXPIRE_MS,
+          },
+        ];
+      });
+    });
+  }, [conversationId, myId, subscribeTyping]);
+
+  useEffect(() => {
+    if (typingPeers.length === 0) {
+      return;
+    }
+    const timer = setInterval(() => {
+      const now = Date.now();
+      setTypingPeers((prev) => {
+        const next = prev.filter((peer) => peer.expiresAt > now);
+        return next.length === prev.length ? prev : next;
+      });
+    }, 500);
+    return () => clearInterval(timer);
+  }, [typingPeers.length]);
+
+  useEffect(() => {
+    return subscribeMessages((message) => {
+      if (!conversationId || message.conversationId !== conversationId) {
+        return;
+      }
+      setTypingPeers((prev) => {
+        if (!prev.some((peer) => peer.userId === message.senderId)) {
+          return prev;
+        }
+        return prev.filter((peer) => peer.userId !== message.senderId);
+      });
+    });
+  }, [conversationId, subscribeMessages]);
 
   useEffect(() => {
     void loadDiceAnimationSpeed().then((speed) => {
@@ -2499,11 +2636,14 @@ export default function ChatThreadScreen() {
 
   const isGroup = isGroupConversation(conversation);
   const title = isGroup ? conversation?.title?.trim() || 'Группа' : (conversation?.peer?.nickname ?? 'Чат');
-  const statusLabel = isGroup
-    ? `${conversation?.memberCount ?? members.length} участников`
-    : conversation?.peer
-      ? formatLastSeen(conversation.peer.online, conversation.peer.lastSeenAt)
-      : '';
+  const typingLabel = formatTypingLabel(typingPeers, isGroup);
+  const statusLabel =
+    typingLabel ??
+    (isGroup
+      ? `${conversation?.memberCount ?? members.length} участников`
+      : conversation?.peer
+        ? formatLastSeen(conversation.peer.online, conversation.peer.lastSeenAt)
+        : '');
 
   const hasMessageText = Boolean(draft.trim());
   const canSend = Boolean(hasMessageText || pendingAttachments.length > 0) && !sending && !conversation?.blockedMe;
@@ -2578,6 +2718,11 @@ export default function ChatThreadScreen() {
     draftRef.current = next;
     selectionRef.current = { start: nextCursor, end: nextCursor };
     setDraft(next);
+    if (next.trim()) {
+      bumpTypingSignal();
+    } else {
+      stopTypingSignal();
+    }
     if (Platform.OS !== 'web' && emojiPanelOpenRef.current) {
       composerInputRef.current?.setNativeProps?.({
         selection: { start: nextCursor, end: nextCursor },
@@ -2590,7 +2735,7 @@ export default function ChatThreadScreen() {
         selection: { start: nextCursor, end: nextCursor },
       });
     });
-  }, []);
+  }, [bumpTypingSignal, stopTypingSignal]);
 
   useEffect(() => {
     if (Platform.OS !== 'web' || typeof document === 'undefined') {
@@ -2735,6 +2880,7 @@ export default function ChatThreadScreen() {
     setMessages((prev) => [...prev, pendingMessage]);
     setDraft('');
     draftRef.current = '';
+    stopTypingSignal();
     selectionRef.current = { start: 0, end: 0 };
     setEmojiPanelOpen(false);
     setReplyTo(null);
@@ -2775,7 +2921,16 @@ export default function ChatThreadScreen() {
       setSending(false);
       sendingRef.current = false;
     }
-  }, [clearPendingAttachments, conversationId, myId, replyTo, requestAfterFirstMessage, scrollToBottom, user?.nickname]);
+  }, [
+    clearPendingAttachments,
+    conversationId,
+    myId,
+    replyTo,
+    requestAfterFirstMessage,
+    scrollToBottom,
+    stopTypingSignal,
+    user?.nickname,
+  ]);
 
   const handleLocalDiceRollComplete = useCallback((outcome: DiceRollOutcome | null) => {
     const resolve = localDiceRollResolveRef.current;
@@ -3637,7 +3792,14 @@ export default function ChatThreadScreen() {
                 </Text>
                 {statusLabel ? (
                   <Text
-                    style={[styles.headerStatus, !isGroup && conversation?.peer?.online && styles.headerStatusOnline]}
+                    style={[
+                      styles.headerStatus,
+                      typingLabel
+                        ? styles.headerStatusTyping
+                        : !isGroup && conversation?.peer?.online
+                          ? styles.headerStatusOnline
+                          : null,
+                    ]}
                     numberOfLines={1}
                   >
                     {statusLabel}
@@ -4524,6 +4686,11 @@ export default function ChatThreadScreen() {
                               }
                               draftRef.current = value;
                               setDraft(value);
+                              if (value.trim()) {
+                                bumpTypingSignal();
+                              } else {
+                                stopTypingSignal();
+                              }
                             }}
                             onSelectionChange={(event) => {
                               selectionRef.current = event.nativeEvent.selection;

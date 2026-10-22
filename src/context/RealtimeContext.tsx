@@ -17,6 +17,7 @@ import {
   type ConversationDeletedPayload,
   type ConversationReadPayload,
   type PresenceUpdatePayload,
+  type TypingUpdatePayload,
   type UnreadSyncPayload,
 } from '@/services/realtime/socket';
 import {
@@ -47,6 +48,7 @@ type RealtimeContextValue = {
   publishConversationUpdate: (conversation: ConversationListItem) => void;
   subscribeMessages: (listener: (message: ChatMessage) => void) => () => void;
   subscribeMessageReactions: (listener: (event: ChatReactionEvent) => void) => () => void;
+  subscribeTyping: (listener: (event: TypingUpdatePayload) => void) => () => void;
   subscribeCallEvents: (listener: (event: CallRealtimeEvent) => void) => () => void;
 };
 
@@ -72,6 +74,7 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
     useState<AnnouncementPublishedEvent | null>(null);
   const messageListenersRef = useRef(new Set<(message: ChatMessage) => void>());
   const reactionListenersRef = useRef(new Set<(event: ChatReactionEvent) => void>());
+  const typingListenersRef = useRef(new Set<(event: TypingUpdatePayload) => void>());
   const callListenersRef = useRef(new Set<(event: CallRealtimeEvent) => void>());
   const userIdRef = useRef(user?.id);
 
@@ -91,6 +94,16 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
     () => (listener: (event: ChatReactionEvent) => void) => {
       reactionListenersRef.current.add(listener);
       return () => reactionListenersRef.current.delete(listener);
+    },
+    [],
+  );
+
+  const subscribeTyping = useMemo(
+    () => (listener: (event: TypingUpdatePayload) => void) => {
+      typingListenersRef.current.add(listener);
+      return () => {
+        typingListenersRef.current.delete(listener);
+      };
     },
     [],
   );
@@ -176,6 +189,9 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
         setLastConversationUpdate((prev) => (prev?.id === payload.conversationId ? null : prev));
       },
       onPresenceUpdate: setLastPresence,
+      onTypingUpdate: (payload) => {
+        typingListenersRef.current.forEach((listener) => listener(payload));
+      },
       onNotificationNew: (notification) => {
         setLastNotification(notification);
         if (!notification.readAt) {
@@ -401,6 +417,7 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
       publishConversationUpdate,
       subscribeMessages,
       subscribeMessageReactions,
+      subscribeTyping,
       subscribeCallEvents,
     }),
     [
@@ -419,6 +436,7 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
       publishConversationUpdate,
       subscribeMessages,
       subscribeMessageReactions,
+      subscribeTyping,
       subscribeCallEvents,
     ],
   );

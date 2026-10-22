@@ -49,8 +49,12 @@ function nearestPaletteHex(accent: string): string {
 
 function previewSrc(sides: DieGlyphSides, accent: string): string {
   const hex = nearestPaletteHex(accent);
-  // v=even1 — одинаковый размер/центр + ручной twist.
-  return `/dice-previews/${hex}/${dieLabel(sides)}.png?v=even1`;
+  const label = dieLabel(sides);
+  // d4–d20: hand-drawn SVGs (white numerals). d100: baked mesh PNG.
+  if (sides === 100) {
+    return `/dice-previews/${hex}/${label}.png?v=even1`;
+  }
+  return `/dice-previews/${hex}/${label}.svg?v=svg1`;
 }
 
 function DieTextFallback({
@@ -92,8 +96,8 @@ export function DieMeshPreviewProvider({ children }: { children: React.ReactNode
 }
 
 /**
- * Static 3D-looking die art baked from @3d-dice theme meshes
- * (`npm run generate:dice-previews`). Zero WebGL in the picker.
+ * Static die art tinted to the selected dice accent
+ * (`assets/dice` → colorized into `public/dice-previews/{HEX}`).
  */
 export function DieMeshPreview({
   sides,
@@ -113,7 +117,7 @@ export function DieMeshPreview({
     <View style={{ width: size, height: size, opacity: active ? 1 : 0.45 }}>
       <Image
         source={{ uri: src }}
-        style={{ width: size, height: size, borderRadius: 8 }}
+        style={{ width: size, height: size }}
         contentFit="contain"
         cachePolicy="memory-disk"
         recyclingKey={src}

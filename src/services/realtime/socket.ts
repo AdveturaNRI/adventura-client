@@ -16,6 +16,7 @@ export const REALTIME_EVENTS = {
   ANNOUNCEMENT_PUBLISHED: 'announcement:published',
   UNREAD_SYNC: 'unread:sync',
   PRESENCE_UPDATE: 'presence:update',
+  TYPING_UPDATE: 'typing:update',
   CALL_INVITE: 'call:invite',
   CALL_ACCEPTED: 'call:accepted',
   CALL_DECLINED: 'call:declined',
@@ -31,6 +32,13 @@ export type PresenceUpdatePayload = {
   userId: string;
   online: boolean;
   lastSeenAt: string | null;
+};
+
+export type TypingUpdatePayload = {
+  conversationId: string;
+  userId: string;
+  nickname: string;
+  typing: boolean;
 };
 
 export type ConversationReadPayload = {
@@ -76,6 +84,7 @@ export type RealtimeHandlers = {
   onAnnouncementPublished?: (payload: AnnouncementPublishedEvent) => void;
   onUnreadSync?: (payload: UnreadSyncPayload) => void;
   onPresenceUpdate?: (payload: PresenceUpdatePayload) => void;
+  onTypingUpdate?: (payload: TypingUpdatePayload) => void;
   onCallEvent?: (event: CallRealtimeEvent) => void;
 };
 
@@ -121,6 +130,9 @@ function ensureListeners(current: Socket) {
   });
   current.on(REALTIME_EVENTS.PRESENCE_UPDATE, (payload: PresenceUpdatePayload) => {
     handlers.onPresenceUpdate?.(payload);
+  });
+  current.on(REALTIME_EVENTS.TYPING_UPDATE, (payload: TypingUpdatePayload) => {
+    handlers.onTypingUpdate?.(payload);
   });
   current.on(REALTIME_EVENTS.CALL_INVITE, (payload: CallInvitePayload) => {
     handlers.onCallEvent?.({ type: 'invite', payload });
@@ -209,4 +221,13 @@ export function bindRealtimeHandlers(nextHandlers: RealtimeHandlers) {
       handlers = {};
     }
   };
+}
+
+/** Ephemeral: peer is composing a message. Server fans out to other participants. */
+export function emitTypingUpdate(conversationId: string, typing: boolean) {
+  const id = conversationId.trim();
+  if (!id || !socket?.connected) {
+    return;
+  }
+  socket.emit(REALTIME_EVENTS.TYPING_UPDATE, { conversationId: id, typing });
 }

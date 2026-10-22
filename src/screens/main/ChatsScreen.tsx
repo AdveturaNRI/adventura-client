@@ -594,7 +594,7 @@ function createStyles(colors: ThemeColors, isRail: boolean, isDark: boolean) {
 
 function formatPreview(item: ConversationListItem) {
   if (!item.lastMessage) {
-    return isGroupChat(item) ? 'Группа создана' : 'Начните переписку';
+    return isGroupChat(item) ? 'Группа создана' : '';
   }
   const peerId = item.peer?.id;
   if (item.lastMessage.kind === 'favorite_received') {
