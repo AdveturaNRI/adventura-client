@@ -75,6 +75,13 @@ export type ClubFeedBlock = MarketingBlockBase & {
   ctaUrl?: string;
 };
 
+export type WandererFeedBlock = MarketingBlockBase & {
+  type: 'wandererFeed';
+  limit?: number;
+  ctaLabel?: string;
+  ctaUrl?: string;
+};
+
 export type CtaBlock = MarketingBlockBase & {
   type: 'cta';
   imageUrl?: string;
@@ -134,6 +141,7 @@ export type MarketingLandingBlock =
   | GameFeedBlock
   | TestimonialsBlock
   | ClubFeedBlock
+  | WandererFeedBlock
   | CtaBlock
   | FaqBlock
   | StatsBlock

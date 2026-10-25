@@ -27,10 +27,10 @@ type Props = {
 
 type IconName = ComponentProps<typeof Ionicons>['name'];
 
-/** One column on phones: a long stack of cards pushes the rest of the landing too far down. */
-const MOBILE_GAMES_LIMIT = 3;
-/** Two even rows of three on desktop and tablet. */
-const WIDE_GAMES_LIMIT = 6;
+/** One row on desktop; on phones a longer stack pushes the rest of the landing too far down. */
+const GAMES_LIMIT = 3;
+/** Tablet grid has two columns, so a third card would stretch across the whole row. */
+const TABLET_GAMES_LIMIT = 2;
 
 /** Same palette as the games feed card, so the landing reads like the app. */
 const RECRUITING_GREEN = '#34C759';
@@ -90,7 +90,7 @@ export function GamesBlockView({ block, skin, games, loading, onCta, onOpenGame 
         </View>
       ) : (
         <View style={styles.grid}>
-          {games.slice(0, isMobile ? MOBILE_GAMES_LIMIT : WIDE_GAMES_LIMIT).map((game) => (
+          {games.slice(0, isTablet ? TABLET_GAMES_LIMIT : GAMES_LIMIT).map((game) => (
             <Pressable
               key={game.id}
               accessibilityRole="button"

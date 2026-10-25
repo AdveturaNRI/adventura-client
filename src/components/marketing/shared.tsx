@@ -229,11 +229,20 @@ export function CoverImage({
   // expo-image may reserve the box without painting redirected S3 URLs in
   // mobile web. A native DOM image follows the redirect reliably.
   if (Platform.OS === 'web' && isMobile) {
-    const imageStyle = StyleSheet.flatten(style) as Record<string, unknown>;
+    const imageStyle = (StyleSheet.flatten(style) ?? {}) as Record<string, unknown>;
+    // A replaced element keeps its intrinsic size under `inset: 0`, so absolute-fill
+    // styles need an explicit box or the photo renders zoomed and cropped.
+    const fillsParent =
+      imageStyle.position === 'absolute' && imageStyle.width == null && imageStyle.height == null;
     return createElement('img', {
       src: uri,
       alt: '',
-      style: { ...imageStyle, objectFit: fit, display: 'block' },
+      style: {
+        ...(fillsParent ? { width: '100%', height: '100%' } : null),
+        ...imageStyle,
+        objectFit: fit,
+        display: 'block',
+      },
     });
   }
   return (

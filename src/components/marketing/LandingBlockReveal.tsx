@@ -33,6 +33,7 @@ const PRESET_BY_TYPE: Record<MarketingLandingBlock['type'], LandingMotionPreset>
   gameFeed: 'rise',
   testimonials: 'fade',
   clubFeed: 'rise',
+  wandererFeed: 'rise',
   cta: 'zoom',
   faq: 'riseSoft',
   stats: 'rise',

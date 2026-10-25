@@ -14,6 +14,7 @@ import { HeroBlockView } from '@/components/marketing/blocks/HeroBlock';
 import { StatsBlockView } from '@/components/marketing/blocks/StatsBlock';
 import { StepsBlockView } from '@/components/marketing/blocks/StepsBlock';
 import { TestimonialsBlockView } from '@/components/marketing/blocks/TestimonialsBlock';
+import { WanderersBlockView } from '@/components/marketing/blocks/WanderersBlock';
 import { CoverImage, MarketingPanel, MarketingSection, useMarketingBreakpoint } from '@/components/marketing/shared';
 import { MarketingType, type ResolvedMarketingSkin } from '@/components/marketing/theme';
 import { useLandingSkin } from '@/components/marketing/use-landing-skin';
@@ -171,6 +172,8 @@ export function LandingRenderer({
                   onOpenClub={onOpenClub}
                 />,
               );
+            case 'wandererFeed':
+              return reveal(<WanderersBlockView block={block} skin={skin} onCta={onCta} />);
             case 'cta':
               return reveal(<CtaBlockView block={block} skin={skin} onCta={onCta} />);
             case 'faq':

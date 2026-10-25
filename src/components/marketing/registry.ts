@@ -59,6 +59,12 @@ export const BLOCK_REGISTRY: BlockMeta[] = [
     category: 'dynamic',
   },
   {
+    type: 'wandererFeed',
+    label: 'Странники',
+    hint: 'Колода активных анкет со свайпами.',
+    category: 'dynamic',
+  },
+  {
     type: 'cta',
     label: 'Призыв к действию',
     hint: 'Широкий баннер с кнопкой.',
@@ -179,6 +185,17 @@ export function createDefaultBlock(type: MarketingLandingBlock['type']): Marketi
         limit: 4,
         ctaLabel: 'Смотреть все',
         ctaUrl: '/clubs',
+      };
+    case 'wandererFeed':
+      return {
+        id: id(),
+        type: 'wandererFeed',
+        title: 'Ищи странников, с которыми можно отправиться в новое приключение',
+        description:
+          'Находи игроков и мастеров НРИ с помощью свайпов и фильтров по игровым системам, интересам, расписанию и формату игры. Собери свою компанию для следующего приключения!',
+        limit: 12,
+        ctaLabel: 'Смотреть анкеты',
+        ctaUrl: '/wanderers',
       };
     case 'cta':
       return {
