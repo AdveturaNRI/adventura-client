@@ -919,10 +919,9 @@ export function GameFeedCard({
           {coverBlock}
           <View style={styles.body}>
             {onPress ? (
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel={`Открыть игру ${item.title}`}
-                onPress={onPress}>
+              // Not a button: on web it would be a <button> wrapping the filter badge buttons.
+              // The cover Pressable above is the accessible «open game» control.
+              <Pressable focusable={false} onPress={onPress}>
                 {bodyContent}
               </Pressable>
             ) : (
