@@ -23,10 +23,12 @@ type Props = {
 
 /** One column on phones: a long stack of cards pushes the rest of the landing too far down. */
 const MOBILE_GAMES_LIMIT = 3;
+/** Two even rows of three on desktop and tablet. */
+const WIDE_GAMES_LIMIT = 6;
 
 export function GamesBlockView({ block, skin, games, loading, onCta, onOpenGame }: Props) {
   const { isMobile, isTablet } = useMarketingBreakpoint();
-  const cols = isMobile ? 1 : isTablet ? 2 : 4;
+  const cols = isMobile ? 1 : isTablet ? 2 : 3;
   const key = block.id ?? 'games';
 
   return (
@@ -57,7 +59,7 @@ export function GamesBlockView({ block, skin, games, loading, onCta, onOpenGame 
         </View>
       ) : (
         <View style={styles.grid}>
-          {(isMobile ? games.slice(0, MOBILE_GAMES_LIMIT) : games).map((game) => {
+          {games.slice(0, isMobile ? MOBILE_GAMES_LIMIT : WIDE_GAMES_LIMIT).map((game) => {
             const cover = game.coverUrl || game.cover?.url || null;
             const place = game.isOnline
               ? 'Онлайн'
