@@ -1387,8 +1387,8 @@ export function WandererDeck({
                         ? ({ className: 'adventura-wanderer-list-card' } as object)
                         : null)}
                       style={styles.listCardPressable}>
+                      {/* No button role: on web it becomes a <button> around UserCard's own buttons. */}
                       <Pressable
-                        accessibilityRole="button"
                         accessibilityLabel={`Анкета ${item.nickname}`}
                         onPress={() => router.push(`/users/${item.id}`)}
                         style={
