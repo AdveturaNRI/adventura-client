@@ -7,6 +7,8 @@ import { apiRequest } from '@/services/api/client';
 /** Link set in the admin: opens once per device on the home page and behind «О проекте». */
 export type WelcomeLanding = {
   url: string;
+  /** Admin toggle: false keeps the link behind «О проекте» only. */
+  showOnFirstVisit: boolean;
 };
 
 type AppRouter = ReturnType<typeof useRouter>;
@@ -18,8 +20,10 @@ let configPromise: Promise<WelcomeLanding | null> | null = null;
 let resolvedLanding: WelcomeLanding | null | undefined;
 
 function normalize(value: unknown): WelcomeLanding | null {
-  const url = (value as { url?: unknown } | null | undefined)?.url;
-  return typeof url === 'string' && url.trim() ? { url: url.trim() } : null;
+  const raw = value as { url?: unknown; showOnFirstVisit?: unknown } | null | undefined;
+  const url = raw?.url;
+  if (typeof url !== 'string' || !url.trim()) return null;
+  return { url: url.trim(), showOnFirstVisit: raw?.showOnFirstVisit !== false };
 }
 
 export function isInternalUrl(url: string): boolean {
@@ -129,7 +133,7 @@ export async function resolveWelcomeRedirect(): Promise<string | null> {
     getWelcomeLanding(),
     new Promise<null>((resolve) => setTimeout(() => resolve(null), CONFIG_TIMEOUT_MS)),
   ]);
-  if (!landing || (await hasSeen(landing.url))) return null;
+  if (!landing?.showOnFirstVisit || (await hasSeen(landing.url))) return null;
   await markSeen(landing.url);
   if (isInternalUrl(landing.url)) return withCurrentQuery(landing.url);
   openExternalUrl(landing.url, true);
