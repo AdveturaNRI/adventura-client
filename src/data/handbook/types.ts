@@ -34,14 +34,18 @@ export type HandbookEntry = {
   systemId: string;
   category: HandbookCategory;
   title: string;
+  /** Англ. имя / подзаголовок (расы и т.п.). */
+  subtitle?: string;
   summary: string;
   tags: string[];
   /** Спасброски класса — чипы на карточке (без «Кость хитов»). */
   savingThrows?: string[];
   /** Панорамная обложка для плитки (CDN). */
   coverUrl?: string;
-  /** Локальный require из `assets/handbook/classes`. */
+  /** Локальный require из `assets/handbook/classes` / races. */
   coverSource?: number;
   /** Акцент нижней полоски на карточке. */
   accent?: string;
+  /** Подварианты / подрасы / метки — внутри базовой расы, не в общей сетке. */
+  variants?: HandbookEntry[];
 };

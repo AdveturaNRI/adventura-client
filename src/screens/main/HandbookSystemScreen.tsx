@@ -6,6 +6,7 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  useWindowDimensions,
   View,
 } from 'react-native';
 
@@ -13,7 +14,13 @@ import { HandbookBreadcrumbs } from '@/components/handbook/HandbookBreadcrumbs';
 import { HandbookCategoryTile } from '@/components/handbook/HandbookCategoryTile';
 import { HandbookEntryCard } from '@/components/handbook/HandbookEntryCard';
 import { HandbookEntryTile } from '@/components/handbook/HandbookEntryTile';
-import { useIsDesktopWeb } from '@/components/navigation/DesktopThemeToggle';
+import { HandbookRaceTile } from '@/components/handbook/HandbookRaceTile';
+import { HandbookRaceVariantsSheet } from '@/components/handbook/HandbookRaceVariantsSheet';
+import {
+  useIsDesktopSidebarVisible,
+  useIsDesktopWeb,
+} from '@/components/navigation/DesktopThemeToggle';
+import { toast } from '@/components/ui/feedback/toast';
 import { MobileScreenHeader } from '@/components/navigation/MobileScreenHeader';
 import { ScreenTransition } from '@/components/navigation/ScreenTransition';
 import {
@@ -28,7 +35,11 @@ import {
 } from '@/data/handbook/labels';
 import { getHandbookEntriesForSystem } from '@/data/handbook/mock-entries';
 import { getHandbookSystem, resolveHandbookSystemId } from '@/data/handbook/mock-systems';
-import type { HandbookCategory, HandbookCategoryFilter } from '@/data/handbook/types';
+import type {
+  HandbookCategory,
+  HandbookCategoryFilter,
+  HandbookEntry,
+} from '@/data/handbook/types';
 import { useThemedStyles } from '@/hooks/use-themed-styles';
 import {
   loadHandbookLocation,
@@ -39,16 +50,55 @@ import {
 import { useMainScreenStyles } from './main-screen.styles';
 
 const DESKTOP_CONTENT_MAX = 960;
+/** Расы — плотнее, как на dnd.su. */
+const RACES_CONTENT_MAX = 1180;
+const DESKTOP_SIDEBAR_WIDTH = 268;
 const TILE_GAP = Spacing.md;
+const RACE_TILE_GAP = Spacing.sm;
 
-function createLocalStyles(colors: ThemeColors, isDesktopWeb: boolean) {
+/** Сколько колонок влезает в контент (сайдбар + паддинги). */
+function gridColumns(
+  windowWidth: number,
+  sidebarVisible: boolean,
+  minColWidth: number,
+  {
+    maxCols = 3,
+    contentMax = DESKTOP_CONTENT_MAX,
+    gap = TILE_GAP,
+  }: { maxCols?: number; contentMax?: number; gap?: number } = {},
+): number {
+  const chrome = (sidebarVisible ? DESKTOP_SIDEBAR_WIDTH : 0) + Spacing.lg * 4;
+  const avail = Math.max(280, Math.min(contentMax, windowWidth - chrome));
+  return Math.max(1, Math.min(maxCols, Math.floor((avail + gap) / (minColWidth + gap))));
+}
+
+function colWidth(contentWidth: number, cols: number, gap = TILE_GAP): number {
+  return Math.floor((contentWidth - gap * Math.max(0, cols - 1)) / cols);
+}
+
+function createLocalStyles(
+  colors: ThemeColors,
+  isDesktopWeb: boolean,
+  contentWidth: number,
+  racesContentWidth: number,
+  raceCols: number,
+  classCols: number,
+  categoryCols: number,
+  isRaces: boolean,
+) {
+  const raceW = colWidth(racesContentWidth, raceCols, RACE_TILE_GAP);
+  const classW = colWidth(contentWidth, classCols);
+  const catW = colWidth(contentWidth, categoryCols);
+  const shellMax = isRaces ? RACES_CONTENT_MAX : DESKTOP_CONTENT_MAX;
+
   return StyleSheet.create({
     shell: {
       width: '100%',
-      maxWidth: isDesktopWeb ? DESKTOP_CONTENT_MAX : undefined,
+      maxWidth: isDesktopWeb ? shellMax : undefined,
       alignSelf: isDesktopWeb ? 'center' : undefined,
       gap: isDesktopWeb ? Spacing.lg : Spacing.md,
       paddingBottom: Spacing.xl,
+      minWidth: 0,
     },
     headerBlock: {
       gap: Spacing.xs,
@@ -69,18 +119,42 @@ function createLocalStyles(colors: ThemeColors, isDesktopWeb: boolean) {
       flexDirection: 'row',
       flexWrap: 'wrap',
       gap: TILE_GAP,
+      width: '100%',
+      maxWidth: contentWidth,
+      minWidth: 0,
+      alignSelf: 'stretch',
+    },
+    raceGrid: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: RACE_TILE_GAP,
+      width: '100%',
+      maxWidth: racesContentWidth,
+      minWidth: 0,
+      alignSelf: 'stretch',
     },
     tileWrap: {
-      flexBasis: isDesktopWeb ? '31.5%' : '47.5%',
-      flexGrow: 1,
-      maxWidth: isDesktopWeb ? '32.5%' : '49%',
-      minWidth: isDesktopWeb ? 160 : 120,
+      width: catW,
+      maxWidth: catW,
+      minWidth: 0,
+      flexGrow: 0,
+      flexShrink: 0,
     },
     classTileWrap: {
-      flexBasis: isDesktopWeb ? '23%' : '47.5%',
-      flexGrow: 1,
-      maxWidth: isDesktopWeb ? '24.5%' : '49%',
-      minWidth: isDesktopWeb ? 140 : 108,
+      width: classW,
+      maxWidth: classW,
+      minWidth: 0,
+      flexGrow: 0,
+      flexShrink: 0,
+    },
+    raceTileWrap: {
+      width: raceW,
+      maxWidth: raceW,
+      minWidth: 0,
+      flexGrow: 0,
+      flexShrink: 0,
+      // Одна высота в ряду: карточка растягивается на wrap.
+      alignSelf: 'stretch',
     },
     list: {
       gap: Spacing.md,
@@ -124,11 +198,51 @@ export default function HandbookSystemScreen() {
   const system = getHandbookSystem(systemId);
 
   const isDesktopWeb = useIsDesktopWeb();
-  const mainStyles = useMainScreenStyles();
-  const styles = useThemedStyles((colors) => createLocalStyles(colors, isDesktopWeb));
-
+  const sidebarVisible = useIsDesktopSidebarVisible();
+  const { width: windowWidth } = useWindowDimensions();
   const [category, setCategory] = useState<HandbookCategoryFilter>('all');
   const [hydrated, setHydrated] = useState(false);
+  const [variantsRaceId, setVariantsRaceId] = useState<string | null>(null);
+
+  const contentWidth = Math.max(
+    280,
+    Math.min(
+      DESKTOP_CONTENT_MAX,
+      windowWidth - (sidebarVisible ? DESKTOP_SIDEBAR_WIDTH : 0) - Spacing.lg * 4,
+    ),
+  );
+  const racesContentWidth = Math.max(
+    280,
+    Math.min(
+      RACES_CONTENT_MAX,
+      windowWidth - (sidebarVisible ? DESKTOP_SIDEBAR_WIDTH : 0) - Spacing.lg * 4,
+    ),
+  );
+  // Шире колонки — длинные названия вроде «Драконорождённый» без разрыва слова.
+  const raceCols = gridColumns(windowWidth, sidebarVisible, isDesktopWeb ? 300 : 320, {
+    maxCols: 3,
+    contentMax: RACES_CONTENT_MAX,
+    gap: RACE_TILE_GAP,
+  });
+  const classCols = isDesktopWeb
+    ? gridColumns(windowWidth, sidebarVisible, 160)
+    : Math.min(2, gridColumns(windowWidth, false, 140));
+  const categoryCols = isDesktopWeb
+    ? gridColumns(windowWidth, sidebarVisible, 200)
+    : Math.min(2, gridColumns(windowWidth, false, 140));
+  const mainStyles = useMainScreenStyles();
+  const styles = useThemedStyles((colors) =>
+    createLocalStyles(
+      colors,
+      isDesktopWeb,
+      contentWidth,
+      racesContentWidth,
+      raceCols,
+      classCols,
+      categoryCols,
+      category === 'races',
+    ),
+  );
   const scrollRef = useRef<ScrollView>(null);
   const [showScrollTop, setShowScrollTop] = useState(false);
   const categoryRef = useRef(category);
@@ -185,13 +299,26 @@ export default function HandbookSystemScreen() {
   const goToHub = leaveToHub;
 
   const resetCategory = useCallback(() => {
+    setVariantsRaceId(null);
     setCategory('all');
   }, []);
 
   const openCategory = useCallback((next: HandbookCategory) => {
+    setVariantsRaceId(null);
     setCategory(next);
     scrollRef.current?.scrollTo({ y: 0, animated: false });
   }, []);
+
+  const openRaceEntry = useCallback((entry: HandbookEntry) => {
+    setVariantsRaceId(null);
+    // Страница статьи расы ещё не готова — пока подтверждаем выбор.
+    toast.info(entry.title);
+  }, []);
+
+  const variantsRace = useMemo(
+    () => entries.find((e) => e.id === variantsRaceId) ?? null,
+    [entries, variantsRaceId],
+  );
 
   const onBack = useCallback(() => {
     if (categoryRef.current !== 'all') {
@@ -332,6 +459,31 @@ export default function HandbookSystemScreen() {
                   </View>
                 ))}
               </View>
+            ) : category === 'races' ? (
+              <>
+                <View style={styles.raceGrid}>
+                  {entries.map((entry) => {
+                    const hasVariants = (entry.variants?.length ?? 0) > 0;
+                    return (
+                      <View key={entry.id} style={styles.raceTileWrap}>
+                        <HandbookRaceTile
+                          entry={entry}
+                          onPress={() => openRaceEntry(entry)}
+                          onOpenVariants={
+                            hasVariants ? () => setVariantsRaceId(entry.id) : undefined
+                          }
+                        />
+                      </View>
+                    );
+                  })}
+                </View>
+                <HandbookRaceVariantsSheet
+                  race={variantsRace}
+                  visible={variantsRace != null}
+                  onClose={() => setVariantsRaceId(null)}
+                  onSelect={openRaceEntry}
+                />
+              </>
             ) : (
               <View style={styles.list}>
                 {entries.map((entry) => (

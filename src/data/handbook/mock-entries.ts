@@ -1,41 +1,10 @@
 import { DND_HANDBOOK_CLASS_ENTRIES } from './dnd-classes';
+import { LAARU_HANDBOOK_ENTRIES } from './laaru-entries';
 import { resolveHandbookSystemId } from './mock-systems';
 import type { HandbookCategory, HandbookCategoryFilter, HandbookEntry } from './types';
 
 export const MOCK_HANDBOOK_ENTRIES: HandbookEntry[] = [
-  // D&D 5e (2014) — классы из dnd-classes.ts
-  {
-    id: 'dnd2014-race-elf',
-    systemId: 'dnd5e-2014',
-    category: 'races',
-    title: 'Эльф',
-    summary: 'Долгожители лесов и городов. Темновидение, Fey Ancestry, бонус к ловкости.',
-    tags: ['PHB 2014', 'Humanoid'],
-  },
-  {
-    id: 'dnd2014-race-dwarf',
-    systemId: 'dnd5e-2014',
-    category: 'races',
-    title: 'Дварф',
-    summary: 'Стойкие горцы. Сопротивление яду, владение топорами, бонус к телосложению.',
-    tags: ['PHB 2014'],
-  },
-  {
-    id: 'dnd2014-spell-fireball',
-    systemId: 'dnd5e-2014',
-    category: 'spells',
-    title: 'Огненный шар',
-    summary: '3-й круг, эвокация. Сфера 20 футов, 8d6 огня, спасбросок Ловкости.',
-    tags: ['Evocation', '3'],
-  },
-  {
-    id: 'dnd2014-bg-soldier',
-    systemId: 'dnd5e-2014',
-    category: 'backgrounds',
-    title: 'Солдат',
-    summary: 'Владение атлетикой и запугиванием, воинский ранг и снаряжение казарм.',
-    tags: ['PHB 2014'],
-  },
+  // D&D 5e (2014): расы / классы / происхождения / заклинания — из Laaru (см. laaru-entries.ts)
   {
     id: 'dnd2014-feat-alert',
     systemId: 'dnd5e-2014',
@@ -420,7 +389,9 @@ export const MOCK_HANDBOOK_ENTRIES: HandbookEntry[] = [
 
 const ALL_HANDBOOK_ENTRIES: HandbookEntry[] = [
   ...MOCK_HANDBOOK_ENTRIES,
-  ...DND_HANDBOOK_CLASS_ENTRIES,
+  // 2014 классы/расы/фоны/заклинания — Laaru; 2024 классы — dnd.su
+  ...LAARU_HANDBOOK_ENTRIES,
+  ...DND_HANDBOOK_CLASS_ENTRIES.filter((entry) => entry.systemId !== 'dnd5e-2014'),
 ];
 
 export function getHandbookEntriesForSystem(
@@ -428,11 +399,15 @@ export function getHandbookEntriesForSystem(
   category: HandbookCategoryFilter = 'all',
 ): HandbookEntry[] {
   const resolved = resolveHandbookSystemId(systemId);
-  return ALL_HANDBOOK_ENTRIES.filter((entry) => {
+  const list = ALL_HANDBOOK_ENTRIES.filter((entry) => {
     if (entry.systemId !== resolved) return false;
     if (category === 'all') return true;
     return entry.category === category;
   });
+  if (category === 'races') {
+    return [...list].sort((a, b) => a.title.localeCompare(b.title, 'ru'));
+  }
+  return list;
 }
 
 export function countEntriesByCategory(
