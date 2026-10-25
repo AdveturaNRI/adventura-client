@@ -1,4 +1,9 @@
-import { Stack, useLocalSearchParams, useRouter } from "expo-router";
+import {
+  Stack,
+  useLocalSearchParams,
+  usePathname,
+  useRouter,
+} from "expo-router";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
@@ -10,16 +15,21 @@ import {
   Text,
   View,
 } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import {
-  LandingRenderer,
-  resolveMarketingSkin,
-} from "@/components/marketing/LandingRenderer";
+import { AppChrome } from "@/components/navigation/AppChrome";
+import { useIsDesktopSidebarVisible } from "@/components/navigation/DesktopThemeToggle";
+import { MobileScreenHeader } from "@/components/navigation/MobileScreenHeader";
+import { LandingRenderer } from "@/components/marketing/LandingRenderer";
+import { useLandingSkin } from "@/components/marketing/use-landing-skin";
 import type {
   MarketingClubCard,
   MarketingGameCard,
   MarketingLandingBlock,
 } from "@/components/marketing/types";
+import { Spacing } from "@/constants/theme";
+import { useTheme } from "@/hooks/use-theme";
+import { useWelcomeLanding } from "@/hooks/use-welcome-landing";
 import { apiRequest } from "@/services/api/client";
 import {
   hitYandexMetrika,
@@ -36,6 +46,7 @@ import {
   getPublishedLanding,
   type MarketingLanding,
 } from "@/services/marketing/landings";
+import { isWelcomeLandingPath } from "@/services/marketing/welcome";
 
 const landingViewSent = new Set<string>();
 const ctaClickSent = new Set<string>();
@@ -141,6 +152,43 @@ async function fetchMarketingClubs(
 }
 
 export default function PublicLandingRoute() {
+  const pathname = usePathname();
+  const welcomeLanding = useWelcomeLanding();
+
+  if (!isWelcomeLandingPath(welcomeLanding, pathname)) {
+    return <LandingPage />;
+  }
+
+  return (
+    <AppChrome>
+      <AboutMobileHeader />
+      <LandingPage />
+    </AppChrome>
+  );
+}
+
+function AboutMobileHeader() {
+  const insets = useSafeAreaInsets();
+  const colors = useTheme();
+  const hasDesktopSidebar = useIsDesktopSidebarVisible();
+  if (hasDesktopSidebar) return null;
+
+  return (
+    <View
+      style={[
+        styles.mobileHeader,
+        {
+          paddingTop: insets.top + Spacing.sm,
+          backgroundColor: colors.background,
+        },
+      ]}
+    >
+      <MobileScreenHeader title="О проекте" />
+    </View>
+  );
+}
+
+function LandingPage() {
   const params = useLocalSearchParams<Record<string, unknown>>();
   const slug = params.slug;
   const router = useRouter();
@@ -207,10 +255,7 @@ export default function PublicLandingRoute() {
     [landing?.content?.blocks],
   );
 
-  const skin = useMemo(
-    () => resolveMarketingSkin(landing?.content?.theme),
-    [landing?.content?.theme],
-  );
+  const skin = useLandingSkin(landing?.content?.theme);
 
   useEffect(() => {
     if (!landingSlug) return;
@@ -410,6 +455,10 @@ export default function PublicLandingRoute() {
 }
 
 const styles = StyleSheet.create({
+  mobileHeader: {
+    paddingHorizontal: Spacing.lg,
+    paddingBottom: Spacing.sm,
+  },
   center: {
     flex: 1,
     alignItems: "center",

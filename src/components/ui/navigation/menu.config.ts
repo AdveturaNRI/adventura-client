@@ -11,7 +11,8 @@ export type MenuIconKey =
   | 'news'
   | 'telegram'
   | 'support'
-  | 'developer';
+  | 'developer'
+  | 'about';
 
 export type MenuItemVariant = 'default' | 'danger';
 

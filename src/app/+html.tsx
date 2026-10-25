@@ -1,6 +1,10 @@
 import { ScrollViewStyleReset } from 'expo-router/html';
 import { type PropsWithChildren } from 'react';
 
+import { MarketingColors } from '@/components/marketing/theme';
+import { Palettes } from '@/constants/theme';
+import { THEME_PREFERENCE_KEY } from '@/constants/theme-storage-key';
+
 const YANDEX_METRIKA_ID = process.env.EXPO_PUBLIC_YANDEX_METRIKA_ID?.trim() ?? '';
 const API_BASE_URL =
   process.env.EXPO_PUBLIC_API_URL?.replace(/\/$/, '') ??
@@ -367,6 +371,25 @@ html[data-theme="dark"] .adventura-notification-card {
 }
 `;
 
+/**
+ * Paints the saved theme before the JS bundle loads, otherwise the page sits
+ * white until React mounts.
+ */
+const earlyThemeScript = `
+(function(){
+  try {
+    var pref = localStorage.getItem(${JSON.stringify(THEME_PREFERENCE_KEY)});
+    var dark = pref === 'dark' || (pref !== 'light' && window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
+    var landing = /^\\/l(\\/|$)/.test(location.pathname);
+    var bg = dark ? (landing ? ${JSON.stringify(MarketingColors.bg)} : ${JSON.stringify(Palettes.dark.background)}) : ${JSON.stringify(Palettes.light.background)};
+    var root = document.documentElement;
+    root.dataset.theme = dark ? 'dark' : 'light';
+    root.style.colorScheme = dark ? 'dark' : 'light';
+    root.style.backgroundColor = bg;
+  } catch (e) {}
+})();
+`.trim();
+
 /** Official snippet when ID is known at build time (helps Metrika HTML checker). */
 function yandexMetrikaStaticBootstrap(counterId: string) {
   return `
@@ -452,6 +475,7 @@ export default function Root({ children }: PropsWithChildren) {
         <link rel="shortcut icon" href="/favicon.png?v=d20-white" />
         <link rel="manifest" href="/manifest.json" />
         <link rel="apple-touch-icon" href="/icons/icon-192.png" />
+        <script dangerouslySetInnerHTML={{ __html: earlyThemeScript }} />
         <ScrollViewStyleReset />
         <style dangerouslySetInnerHTML={{ __html: responsiveRootCss }} />
         {metrikaId ? (

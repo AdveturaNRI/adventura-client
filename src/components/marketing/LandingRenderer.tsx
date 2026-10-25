@@ -15,11 +15,8 @@ import { StatsBlockView } from '@/components/marketing/blocks/StatsBlock';
 import { StepsBlockView } from '@/components/marketing/blocks/StepsBlock';
 import { TestimonialsBlockView } from '@/components/marketing/blocks/TestimonialsBlock';
 import { CoverImage, MarketingPanel, MarketingSection, useMarketingBreakpoint } from '@/components/marketing/shared';
-import {
-  MarketingType,
-  resolveMarketingSkin,
-  type ResolvedMarketingSkin,
-} from '@/components/marketing/theme';
+import { MarketingType, type ResolvedMarketingSkin } from '@/components/marketing/theme';
+import { useLandingSkin } from '@/components/marketing/use-landing-skin';
 import type {
   MarketingClubCard,
   MarketingGameCard,
@@ -100,7 +97,7 @@ export function LandingRenderer({
   onOpenGame,
   onOpenClub,
 }: LandingRendererProps) {
-  const skin = resolveMarketingSkin(theme);
+  const skin = useLandingSkin(theme);
   const hasFixedBackground = Boolean(skin.pageBackgroundImage);
   const backgroundLayerStyle: ViewStyle =
     Platform.OS === 'web'

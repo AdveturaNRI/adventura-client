@@ -21,6 +21,9 @@ type Props = {
   onOpenClub: (id: string) => void;
 };
 
+/** One column on phones: a long stack of cards pushes the rest of the landing too far down. */
+const MOBILE_CLUBS_LIMIT = 3;
+
 export function ClubsBlockView({ block, skin, clubs, loading, onCta, onOpenClub }: Props) {
   const { isMobile, isTablet } = useMarketingBreakpoint();
   const cols = isMobile ? 1 : isTablet ? 2 : 4;
@@ -54,7 +57,7 @@ export function ClubsBlockView({ block, skin, clubs, loading, onCta, onOpenClub 
         </View>
       ) : (
         <View style={styles.grid}>
-          {clubs.map((club) => (
+          {(isMobile ? clubs.slice(0, MOBILE_CLUBS_LIMIT) : clubs).map((club) => (
             <Pressable
               key={club.id}
               onPress={() => onOpenClub(club.id)}

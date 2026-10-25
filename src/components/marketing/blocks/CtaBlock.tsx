@@ -6,7 +6,12 @@ import {
   MarketingSection,
   useMarketingBreakpoint,
 } from '@/components/marketing/shared';
-import { MarketingLayout, MarketingType, type ResolvedMarketingSkin } from '@/components/marketing/theme';
+import {
+  MarketingLayout,
+  MarketingType,
+  onDarkScrimSkin,
+  type ResolvedMarketingSkin,
+} from '@/components/marketing/theme';
 import type { CtaBlock } from '@/components/marketing/types';
 
 type Props = {
@@ -15,8 +20,9 @@ type Props = {
   onCta: (url: string, key: string) => void;
 };
 
-export function CtaBlockView({ block, skin, onCta }: Props) {
+export function CtaBlockView({ block, skin: pageSkin, onCta }: Props) {
   const { isMobile } = useMarketingBreakpoint();
+  const skin = onDarkScrimSkin(pageSkin);
   const key = block.id ?? 'cta';
   return (
     <MarketingSection skin={skin}>

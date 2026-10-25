@@ -41,6 +41,8 @@ import { useProfile } from '@/context/ProfileContext';
 import { useRealtimeOptional } from '@/context/RealtimeContext';
 import { useTheme } from '@/hooks/use-theme';
 import { useThemedStyles } from '@/hooks/use-themed-styles';
+import { useWelcomeLanding } from '@/hooks/use-welcome-landing';
+import { openAboutLanding } from '@/services/marketing/welcome';
 import { getQuestionnaireCompletion } from '@/utils/questionnaire-completion';
 import { formatUnreadBadge } from '@/utils/unread-badge';
 
@@ -286,6 +288,7 @@ export function MainDesktopSidebar() {
   const announcements = useAnnouncementsOptional();
   const { isAuthenticated } = useAuth();
   const { profile } = useProfile();
+  const welcomeLanding = useWelcomeLanding();
   const unreadChats = realtime?.unreadChats ?? 0;
   const unreadNews = announcements?.unreadNewsCount ?? 0;
   const profileIncomplete =
@@ -530,6 +533,29 @@ export function MainDesktopSidebar() {
           {standalone.map(renderStandalone)}
           <View style={styles.divider} />
           {grouped.map(renderGroup)}
+          {welcomeLanding ? (
+            <>
+              <View style={styles.divider} />
+              <Pressable
+                accessibilityRole="link"
+                accessibilityLabel="О проекте"
+                onPress={() => {
+                  openAboutLanding(router, welcomeLanding);
+                }}
+                style={({ pressed }) => [styles.linkRow, pressed && { opacity: 0.88 }]}>
+                <View style={styles.iconWrap}>
+                  <NavSectionIcon
+                    name="information-outline"
+                    size={ICON_SIZE}
+                    color={colors.textMuted}
+                  />
+                </View>
+                <Text style={styles.linkLabel} numberOfLines={1}>
+                  О проекте
+                </Text>
+              </Pressable>
+            </>
+          ) : null}
         </ScrollView>
 
         {showPartnerCard ? (

@@ -109,8 +109,8 @@ export function AppShowcaseBlockView({ block, skin, onCta }: Props) {
 }
 
 const styles = StyleSheet.create({
-  row: { flexDirection: 'row', alignItems: 'center', gap: 28 },
-  panel: { paddingVertical: 34 },
+  row: { flexDirection: 'row', alignItems: 'center', gap: 32 },
+  panel: { paddingVertical: 24 },
   panelMobile: { paddingVertical: 20 },
   rowMobile: { flexDirection: 'column', alignItems: 'stretch', gap: 20 },
   rowReverse: { flexDirection: 'row-reverse' },
@@ -125,7 +125,7 @@ const styles = StyleSheet.create({
   },
   mediaMobileSolo: {
     width: '100%',
-    height: 220,
+    height: 240,
     position: 'relative',
     overflow: 'hidden',
     borderRadius: 16,
@@ -139,7 +139,7 @@ const styles = StyleSheet.create({
     borderRadius: 16,
   },
   mediaSolo: {
-    minHeight: 280,
+    minHeight: 0,
   },
   mediaDual: {
     flexDirection: 'row',
@@ -162,13 +162,13 @@ const styles = StyleSheet.create({
     zIndex: 1,
   },
   shotSolo: {
-    width: '72%',
-    maxWidth: 280,
-    aspectRatio: 0.55,
+    width: '100%',
+    maxWidth: 560,
+    aspectRatio: 4 / 3,
   },
   shotMobile: {
     width: '100%',
-    height: 220,
+    height: 240,
     borderRadius: 16,
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.12)',

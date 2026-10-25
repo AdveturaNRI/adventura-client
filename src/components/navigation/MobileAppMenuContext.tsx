@@ -13,7 +13,6 @@ import {
   Modal,
   Platform,
   Pressable,
-  ScrollView,
   StyleSheet,
   Text,
   useWindowDimensions,
@@ -23,6 +22,7 @@ import Animated, {
   Easing,
   interpolate,
   runOnJS,
+  useAnimatedScrollHandler,
   useAnimatedStyle,
   useSharedValue,
   withSpring,
@@ -45,6 +45,8 @@ import { useProfile } from '@/context/ProfileContext';
 import { useRealtimeOptional } from '@/context/RealtimeContext';
 import { useTheme } from '@/hooks/use-theme';
 import { useThemedStyles } from '@/hooks/use-themed-styles';
+import { useWelcomeLanding } from '@/hooks/use-welcome-landing';
+import { openAboutLanding } from '@/services/marketing/welcome';
 import { getQuestionnaireCompletion } from '@/utils/questionnaire-completion';
 import { formatUnreadBadge } from '@/utils/unread-badge';
 
@@ -62,6 +64,9 @@ const MENU_SPRING = {
   stiffness: 260,
   mass: 0.82,
 };
+
+const SCROLL_TRACK_INSET = 6;
+const SCROLL_THUMB_MIN = 28;
 
 
 function createStyles(colors: ThemeColors) {
@@ -116,10 +121,29 @@ function createStyles(colors: ThemeColors) {
     closeButtonPressed: {
       opacity: 0.85,
     },
-    navScroll: {
+    navScrollWrap: {
       flex: 1,
       flexBasis: 0,
       minHeight: 0,
+    },
+    navScroll: {
+      flex: 1,
+    },
+    /** Нативный индикатор на iOS гаснет через секунду — держим свой, чтобы было видно, что есть продолжение. */
+    scrollTrack: {
+      position: 'absolute',
+      top: SCROLL_TRACK_INSET,
+      bottom: SCROLL_TRACK_INSET,
+      right: 4,
+      width: 3,
+      borderRadius: Radius.pill,
+      backgroundColor: colors.borderLight,
+    },
+    scrollThumb: {
+      width: '100%',
+      borderRadius: Radius.pill,
+      backgroundColor: colors.textMuted,
+      opacity: 0.6,
     },
     scrollContent: {
       paddingHorizontal: Spacing.lg,
@@ -178,11 +202,14 @@ function MobileAppMenuModal({
   onClose,
   onNavigateLeaf,
   onNavigateSection,
+  onOpenAbout,
 }: {
   visible: boolean;
   onClose: () => void;
   onNavigateLeaf: (leaf: NavLeaf) => void;
   onNavigateSection: (sectionId: (typeof PRIMARY_NAV_SECTIONS)[number]['id']) => void;
+  /** Absent when no welcome landing is set in the admin. */
+  onOpenAbout?: () => void;
 }) {
   const insets = useSafeAreaInsets();
   const colors = useTheme();
@@ -200,6 +227,28 @@ function MobileAppMenuModal({
   const [viewportHeight, setViewportHeight] = useState(windowHeight);
   const [renderModal, setRenderModal] = useState(visible);
   const progress = useSharedValue(0);
+  const scrollY = useSharedValue(0);
+  const [scrollViewportHeight, setScrollViewportHeight] = useState(0);
+  const [scrollContentHeight, setScrollContentHeight] = useState(0);
+
+  const canScroll = scrollViewportHeight > 0 && scrollContentHeight > scrollViewportHeight + 1;
+  const trackHeight = Math.max(scrollViewportHeight - SCROLL_TRACK_INSET * 2, 0);
+  const thumbHeight = canScroll
+    ? Math.max(SCROLL_THUMB_MIN, (trackHeight * scrollViewportHeight) / scrollContentHeight)
+    : 0;
+
+  const scrollHandler = useAnimatedScrollHandler((event) => {
+    scrollY.value = event.contentOffset.y;
+  });
+
+  const thumbStyle = useAnimatedStyle(() => {
+    const maxScroll = scrollContentHeight - scrollViewportHeight;
+    const ratio = maxScroll > 0 ? Math.min(Math.max(scrollY.value / maxScroll, 0), 1) : 0;
+    return {
+      height: thumbHeight,
+      transform: [{ translateY: ratio * Math.max(trackHeight - thumbHeight, 0) }],
+    };
+  }, [scrollContentHeight, scrollViewportHeight, thumbHeight, trackHeight]);
 
   useEffect(() => {
     if (Platform.OS !== 'web' || typeof window === 'undefined') {
@@ -237,11 +286,12 @@ function MobileAppMenuModal({
       },
       (finished) => {
         if (finished) {
+          scrollY.value = 0;
           runOnJS(setRenderModal)(false);
         }
       },
     );
-  }, [progress, refreshProfile, visible]);
+  }, [progress, refreshProfile, scrollY, visible]);
 
   const backdropStyle = useAnimatedStyle(() => ({
     opacity: interpolate(progress.value, [0, 1], [0, 0.46]),
@@ -288,61 +338,85 @@ function MobileAppMenuModal({
               </Pressable>
             </View>
 
-            <ScrollView
-              style={styles.navScroll}
-              contentContainerStyle={[
-                styles.scrollContent,
-                { paddingBottom: bottomPad },
-              ]}
-              keyboardShouldPersistTaps="handled"
-              showsVerticalScrollIndicator>
-              {PRIMARY_NAV_SECTIONS.map((section) => {
-                // Один пункт в разделе — заголовок дублирует название (Новости/Профиль).
-                const showSectionTitle = section.items.length > 1;
+            <View style={styles.navScrollWrap}>
+              <Animated.ScrollView
+                style={styles.navScroll}
+                contentContainerStyle={[
+                  styles.scrollContent,
+                  { paddingBottom: bottomPad },
+                ]}
+                keyboardShouldPersistTaps="handled"
+                showsVerticalScrollIndicator={false}
+                onScroll={scrollHandler}
+                scrollEventThrottle={16}
+                onLayout={(event) => setScrollViewportHeight(event.nativeEvent.layout.height)}
+                onContentSizeChange={(_width, height) => setScrollContentHeight(height)}>
+                {PRIMARY_NAV_SECTIONS.map((section) => {
+                  // Один пункт в разделе — заголовок дублирует название (Новости/Профиль).
+                  const showSectionTitle = section.items.length > 1;
 
-                return (
-                  <View key={section.id} style={styles.sectionBlock}>
-                    {showSectionTitle ? (
-                      <AnimatedMenuRow index={animIndex++} progress={progress}>
-                        <Pressable
-                          onPress={() => onNavigateSection(section.id)}
-                          accessibilityRole="button">
-                          <Text style={styles.sectionTitle}>{section.label}</Text>
-                        </Pressable>
-                      </AnimatedMenuRow>
-                    ) : null}
+                  return (
+                    <View key={section.id} style={styles.sectionBlock}>
+                      {showSectionTitle ? (
+                        <AnimatedMenuRow index={animIndex++} progress={progress}>
+                          <Pressable
+                            onPress={() => onNavigateSection(section.id)}
+                            accessibilityRole="button">
+                            <Text style={styles.sectionTitle}>{section.label}</Text>
+                          </Pressable>
+                        </AnimatedMenuRow>
+                      ) : null}
 
-                    <Menu compact>
-                      {section.items.map((leaf) => {
-                        const index = animIndex++;
-                        return (
-                          <AnimatedMenuRow key={leaf.id} index={index} progress={progress}>
-                            <MenuItem
-                              compact
-                              label={leaf.label}
-                              subtitle={leaf.subtitle}
-                              navbarIcon={leaf.routeKey}
-                              badge={
-                                leaf.id === 'chats' && unreadChats > 0
-                                  ? formatUnreadBadge(unreadChats)
-                                  : leaf.id === 'news' && unreadNews > 0
-                                    ? formatUnreadBadge(unreadNews)
-                                    : undefined
-                              }
-                              iconAlert={leaf.id === 'profile' && profileIncomplete}
-                              onPress={() => onNavigateLeaf(leaf)}
-                            />
-                          </AnimatedMenuRow>
-                        );
-                      })}
-                    </Menu>
-                  </View>
-                );
-              })}
-              <View style={styles.partnerSlot}>
-                <SidebarPartnerCard />
-              </View>
-            </ScrollView>
+                      <Menu compact>
+                        {section.items.map((leaf) => {
+                          const index = animIndex++;
+                          return (
+                            <AnimatedMenuRow key={leaf.id} index={index} progress={progress}>
+                              <MenuItem
+                                compact
+                                label={leaf.label}
+                                subtitle={leaf.subtitle}
+                                navbarIcon={leaf.routeKey}
+                                badge={
+                                  leaf.id === 'chats' && unreadChats > 0
+                                    ? formatUnreadBadge(unreadChats)
+                                    : leaf.id === 'news' && unreadNews > 0
+                                      ? formatUnreadBadge(unreadNews)
+                                      : undefined
+                                }
+                                iconAlert={leaf.id === 'profile' && profileIncomplete}
+                                onPress={() => onNavigateLeaf(leaf)}
+                              />
+                            </AnimatedMenuRow>
+                          );
+                        })}
+                      </Menu>
+                    </View>
+                  );
+                })}
+                {onOpenAbout ? (
+                  <Menu compact>
+                    <AnimatedMenuRow index={animIndex++} progress={progress}>
+                      <MenuItem
+                        compact
+                        label="О проекте"
+                        subtitle="Кто мы и что такое Adventura"
+                        icon="about"
+                        onPress={onOpenAbout}
+                      />
+                    </AnimatedMenuRow>
+                  </Menu>
+                ) : null}
+                <View style={styles.partnerSlot}>
+                  <SidebarPartnerCard />
+                </View>
+              </Animated.ScrollView>
+              {canScroll ? (
+                <View pointerEvents="none" style={styles.scrollTrack}>
+                  <Animated.View style={[styles.scrollThumb, thumbStyle]} />
+                </View>
+              ) : null}
+            </View>
           </View>
         </Animated.View>
       </View>
@@ -354,6 +428,7 @@ export function MobileAppMenuProvider({ children }: { children: ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
   const { isAuthenticated } = useAuth();
+  const welcomeLanding = useWelcomeLanding();
   const [isOpen, setIsOpen] = useState(false);
 
   const open = useCallback(() => setIsOpen(true), []);
@@ -375,6 +450,12 @@ export function MobileAppMenuProvider({ children }: { children: ReactNode }) {
     },
     [close, isAuthenticated, pathname, router],
   );
+
+  const handleOpenAbout = useCallback(() => {
+    if (!welcomeLanding) return;
+    close();
+    openAboutLanding(router, welcomeLanding);
+  }, [close, router, welcomeLanding]);
 
   useEffect(() => {
     if (Platform.OS !== 'web' || typeof window === 'undefined') {
@@ -427,6 +508,7 @@ export function MobileAppMenuProvider({ children }: { children: ReactNode }) {
         onClose={close}
         onNavigateLeaf={handleNavigateLeaf}
         onNavigateSection={handleNavigateSection}
+        onOpenAbout={welcomeLanding ? handleOpenAbout : undefined}
       />
     </MobileAppMenuContext.Provider>
   );

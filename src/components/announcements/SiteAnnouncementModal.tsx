@@ -431,7 +431,6 @@ export function SiteAnnouncementModal({
               maxWidth: maxModalWidth,
               width: '100%',
               maxHeight: sheetMaxHeight,
-              borderColor: accent,
             },
             sideLayout ? styles.sheetRow : null,
           ]}
@@ -508,7 +507,6 @@ const styles = StyleSheet.create({
   sheet: {
     width: '100%',
     overflow: 'hidden',
-    borderWidth: 1,
     zIndex: 1,
     isolation: 'isolate',
   },

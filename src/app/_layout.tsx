@@ -22,7 +22,9 @@ import { MusicPlayerProvider } from '@/context/MusicPlayerContext';
 import { AuthorsProvider } from '@/context/AuthorsContext';
 import { NewsProvider } from '@/context/NewsContext';
 import { useTheme, useThemePreference } from '@/hooks/use-theme';
+import { useWelcomeLanding } from '@/hooks/use-welcome-landing';
 import { registerLivekitGlobals } from '@/services/livekit/platform';
+import { isWelcomeLandingPath } from '@/services/marketing/welcome';
 
 registerLivekitGlobals();
 
@@ -61,7 +63,11 @@ export default function RootLayout() {
 
 function AppRouteProviders() {
   const pathname = usePathname();
-  const isPublicLanding = pathname === '/l' || pathname.startsWith('/l/');
+  const welcomeLanding = useWelcomeLanding();
+  // Ad landings skip session and realtime; the «О проекте» page is part of the app.
+  const isPublicLanding =
+    (pathname === '/l' || pathname.startsWith('/l/')) &&
+    !isWelcomeLandingPath(welcomeLanding, pathname);
   const navigator = (
     <View style={rootStyles.container}>
       <YandexMetrikaTracker />

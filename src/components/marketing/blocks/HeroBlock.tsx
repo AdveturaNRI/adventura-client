@@ -1,4 +1,6 @@
+import { useId } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
+import Svg, { Defs, LinearGradient, Rect, Stop } from 'react-native-svg';
 
 import {
   CoverImage,
@@ -7,7 +9,12 @@ import {
   MarketingSection,
   useMarketingBreakpoint,
 } from '@/components/marketing/shared';
-import { MarketingLayout, MarketingType, type ResolvedMarketingSkin } from '@/components/marketing/theme';
+import {
+  MarketingLayout,
+  MarketingType,
+  onDarkScrimSkin,
+  type ResolvedMarketingSkin,
+} from '@/components/marketing/theme';
 import type { HeroBlock } from '@/components/marketing/types';
 
 type Props = {
@@ -16,16 +23,46 @@ type Props = {
   onCta: (url: string, key: string) => void;
 };
 
-export function HeroBlockView({ block, skin, onCta }: Props) {
+/** Melts the cover image into the page so the next block doesn't start on a hard edge. */
+function BottomFade({ color }: { color: string }) {
+  const gradientId = `hero-fade-${useId().replace(/[^a-zA-Z0-9_-]/g, '')}`;
+  return (
+    <View pointerEvents="none" style={styles.fade}>
+      <Svg width="100%" height="100%" preserveAspectRatio="none">
+        <Defs>
+          <LinearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
+            <Stop offset="0" stopColor={color} stopOpacity={0} />
+            <Stop offset="0.6" stopColor={color} stopOpacity={0.7} />
+            <Stop offset="1" stopColor={color} stopOpacity={1} />
+          </LinearGradient>
+        </Defs>
+        <Rect x="0" y="0" width="100%" height="100%" fill={`url(#${gradientId})`} />
+      </Svg>
+    </View>
+  );
+}
+
+export function HeroBlockView({ block, skin: pageSkin, onCta }: Props) {
   const { isMobile } = useMarketingBreakpoint();
   const key = block.id ?? 'hero';
   const position = block.imagePosition ?? 'right';
   const bgImage = position === 'background' ? block.imageUrl : undefined;
+  const skin = bgImage ? onDarkScrimSkin(pageSkin) : pageSkin;
   const sideImage = position !== 'background' ? block.imageUrl : undefined;
   const centerAlign = position === 'center' || isMobile;
+  // A dark cover fades nicely into the dark page; on a light page the fade
+  // turns muddy, so there the cover becomes a card like the other blocks.
+  const contained = Boolean(bgImage) && pageSkin.mode === 'light';
+  const fadeIntoPage = Boolean(bgImage) && !contained;
 
-  return (
-    <View style={[styles.wrap, isMobile && styles.wrapMobile]}>
+  const hero = (
+    <View
+      style={[
+        styles.wrap,
+        isMobile && styles.wrapMobile,
+        contained && styles.wrapContained,
+        contained && isMobile && styles.wrapContainedMobile,
+      ]}>
       {bgImage ? <CoverImage uri={bgImage} style={StyleSheet.absoluteFillObject} priority /> : null}
       <View
         style={[
@@ -33,6 +70,7 @@ export function HeroBlockView({ block, skin, onCta }: Props) {
           { backgroundColor: bgImage ? 'rgba(11,17,27,0.78)' : skin.pageBackground },
         ]}
       />
+      {fadeIntoPage ? <BottomFade color={pageSkin.pageBackground} /> : null}
       {!bgImage ? (
         <>
           <View
@@ -59,6 +97,7 @@ export function HeroBlockView({ block, skin, onCta }: Props) {
           skin={skin}
           style={[
             styles.heroPanel,
+            { backgroundColor: skin.heroPanel },
             isMobile && styles.heroPanelMobile,
             bgImage && styles.heroPanelImage,
           ]}>
@@ -149,17 +188,45 @@ export function HeroBlockView({ block, skin, onCta }: Props) {
       </MarketingSection>
     </View>
   );
+
+  if (!contained) return hero;
+
+  return (
+    <View
+      style={[
+        styles.containedOuter,
+        {
+          paddingHorizontal: isMobile ? 16 : MarketingLayout.gutter,
+          paddingVertical: isMobile ? MarketingLayout.sectionYMobile : MarketingLayout.sectionY,
+        },
+      ]}>
+      {hero}
+    </View>
+  );
 }
 
 const styles = StyleSheet.create({
+  containedOuter: { width: '100%', alignItems: 'center' },
+  wrapContained: {
+    maxWidth: MarketingLayout.maxWidth,
+    borderRadius: MarketingLayout.radius,
+    marginBottom: 0,
+  },
+  wrapContainedMobile: {
+    borderRadius: MarketingLayout.radiusSm,
+    marginBottom: 0,
+  },
+  // Full-bleed, so it adds the half-gap a panel section would have.
   wrap: {
     width: '100%',
     minHeight: MarketingLayout.heroMinHeight * 0.75,
     position: 'relative',
     overflow: 'hidden',
+    marginBottom: MarketingLayout.sectionY,
   },
   wrapMobile: {
     minHeight: 0,
+    marginBottom: MarketingLayout.sectionYMobile,
   },
   sectionPad: {
     minHeight: MarketingLayout.heroMinHeight * 0.75,
@@ -169,7 +236,6 @@ const styles = StyleSheet.create({
     minHeight: 0,
   },
   heroPanel: {
-    backgroundColor: 'rgba(13, 23, 37, 0.78)',
     paddingVertical: 40,
     paddingHorizontal: 40,
   },
@@ -177,7 +243,14 @@ const styles = StyleSheet.create({
     paddingVertical: 22,
     paddingHorizontal: 16,
   },
-  heroPanelImage: { backgroundColor: 'rgba(11,17,27,0.52)' },
+  fade: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    height: '40%',
+  },
+  heroPanelImage: { backgroundColor: 'rgba(11,17,27,0.52)', borderWidth: 0 },
   blob: { position: 'absolute', width: 360, height: 360, borderRadius: 999, opacity: 0.35 },
   blobMobile: { width: 220, height: 220, opacity: 0.22 },
   blobPurple: { top: -80, right: -40 },

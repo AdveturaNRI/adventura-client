@@ -21,6 +21,9 @@ type Props = {
   onOpenGame: (id: string) => void;
 };
 
+/** One column on phones: a long stack of cards pushes the rest of the landing too far down. */
+const MOBILE_GAMES_LIMIT = 3;
+
 export function GamesBlockView({ block, skin, games, loading, onCta, onOpenGame }: Props) {
   const { isMobile, isTablet } = useMarketingBreakpoint();
   const cols = isMobile ? 1 : isTablet ? 2 : 4;
@@ -54,7 +57,7 @@ export function GamesBlockView({ block, skin, games, loading, onCta, onOpenGame 
         </View>
       ) : (
         <View style={styles.grid}>
-          {games.map((game) => {
+          {(isMobile ? games.slice(0, MOBILE_GAMES_LIMIT) : games).map((game) => {
             const cover = game.coverUrl || game.cover?.url || null;
             const place = game.isOnline
               ? 'Онлайн'

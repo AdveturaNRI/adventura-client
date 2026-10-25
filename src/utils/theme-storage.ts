@@ -1,9 +1,9 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
 
-export type ThemePreference = 'system' | 'light' | 'dark';
+import { THEME_PREFERENCE_KEY } from '@/constants/theme-storage-key';
 
-const THEME_PREFERENCE_KEY = '@adventura/theme-preference';
+export type ThemePreference = 'system' | 'light' | 'dark';
 
 function isThemePreference(value: string | null): value is ThemePreference {
   return value === 'light' || value === 'dark' || value === 'system';

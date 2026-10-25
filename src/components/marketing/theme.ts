@@ -1,4 +1,4 @@
-import { FontSize, Spacing } from '@/constants/theme';
+import { FontSize, Spacing, type ThemeColors } from '@/constants/theme';
 import type {
   MarketingLandingAccent,
   MarketingLandingBackground,
@@ -78,9 +78,18 @@ export type ResolvedMarketingSkin = {
   accentSecondary: string;
   surface: string;
   surfaceElevated: string;
+  /** Translucent so the hero glow shows through. */
+  heroPanel: string;
+  /** Fill of the secondary button. */
+  subtleFill: string;
   text: string;
   textSecondary: string;
   border: string;
+};
+
+export type AppThemeForLanding = {
+  scheme: 'light' | 'dark';
+  colors: ThemeColors;
 };
 
 const ACCENTS: Record<MarketingLandingAccent, string> = {
@@ -97,8 +106,31 @@ export const DEFAULT_MARKETING_THEME: MarketingLandingTheme & { skin?: 'fantasy'
   skin: 'fantasy',
 };
 
+/** For content over a dark scrim (cover image, CTA banner): light text in any app theme. */
+export function onDarkScrimSkin(skin: ResolvedMarketingSkin): ResolvedMarketingSkin {
+  if (skin.mode === 'dark') return skin;
+  return {
+    ...skin,
+    mode: 'dark',
+    skin: 'fantasy',
+    surface: MarketingColors.surface,
+    surfaceElevated: MarketingColors.surfaceElevated,
+    heroPanel: 'rgba(13, 23, 37, 0.78)',
+    subtleFill: 'rgba(255,255,255,0.08)',
+    text: MarketingColors.text,
+    textSecondary: MarketingColors.textSecondary,
+    border: MarketingColors.borderStrong,
+  };
+}
+
+/**
+ * With `app` the landing follows the app light/dark mode: light uses the app
+ * palette, dark keeps the navy landing palette (pure app black looks flat on
+ * big marketing panels). Accent and background image come from the landing.
+ */
 export function resolveMarketingSkin(
   raw: (MarketingLandingTheme & { skin?: 'fantasy' | 'app' }) | null | undefined,
+  app?: AppThemeForLanding,
 ): ResolvedMarketingSkin {
   const mode: MarketingLandingColorMode = raw?.mode === 'light' ? 'light' : 'dark';
   const background: MarketingLandingBackground =
@@ -117,7 +149,29 @@ export function resolveMarketingSkin(
 
   const accentColor = ACCENTS[accent];
 
-  if (skin === 'app' && mode === 'light') {
+  if (app?.scheme === 'light') {
+    return {
+      mode: 'light',
+      background,
+      backgroundImageUrl,
+      accent,
+      skin: 'app',
+      colors: MarketingColors,
+      pageBackground: app.colors.background,
+      pageBackgroundImage: background === 'image' ? backgroundImageUrl : null,
+      accentColor,
+      accentSecondary: MarketingColors.accentFantasy,
+      surface: app.colors.surface,
+      surfaceElevated: app.colors.surfaceMuted,
+      heroPanel: `${app.colors.surface}D9`,
+      subtleFill: 'rgba(0,0,0,0.04)',
+      text: app.colors.text,
+      textSecondary: app.colors.textSecondary,
+      border: app.colors.border,
+    };
+  }
+
+  if (!app && skin === 'app' && mode === 'light') {
     return {
       mode,
       background,
@@ -136,13 +190,15 @@ export function resolveMarketingSkin(
       accentSecondary: MarketingColors.accentFantasy,
       surface: '#FFFFFF',
       surfaceElevated: '#F7F9FC',
+      heroPanel: 'rgba(255,255,255,0.85)',
+      subtleFill: 'rgba(0,0,0,0.04)',
       text: '#000000',
       textSecondary: '#4C4C4C',
       border: '#E8E8E8',
     };
   }
 
-  let pageBackground = MarketingColors.bg;
+  let pageBackground: string = MarketingColors.bg;
   if (background === 'muted') pageBackground = MarketingColors.surfaceMuted;
   if (background === 'soft-blue') pageBackground = '#0B1220';
 
@@ -159,6 +215,8 @@ export function resolveMarketingSkin(
     accentSecondary: MarketingColors.accentFantasy,
     surface: MarketingColors.surface,
     surfaceElevated: MarketingColors.surfaceElevated,
+    heroPanel: 'rgba(13, 23, 37, 0.78)',
+    subtleFill: 'rgba(255,255,255,0.08)',
     text: MarketingColors.text,
     textSecondary: MarketingColors.textSecondary,
     border: MarketingColors.border,

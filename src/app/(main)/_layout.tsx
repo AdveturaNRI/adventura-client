@@ -1,13 +1,7 @@
 import { Redirect, Stack, usePathname } from 'expo-router';
 import { ActivityIndicator, StyleSheet, View } from 'react-native';
 
-import { MobileAppMenuProvider } from '@/components/navigation/MobileAppMenuContext';
-import { MainDesktopHeader } from '@/components/navigation/MainDesktopHeader';
-import { MainDesktopSidebar } from '@/components/navigation/MainDesktopSidebar';
-import {
-  useIsDesktopSidebarVisible,
-  useIsDesktopWeb,
-} from '@/components/navigation/DesktopThemeToggle';
+import { AppChrome } from '@/components/navigation/AppChrome';
 import { stackScreenOptions } from '@/constants/navigation.config';
 import { buildLoginHref, isPublicAppPath } from '@/constants/auth-routes';
 import { useAuth } from '@/context/AuthContext';
@@ -48,34 +42,10 @@ function MainStack() {
   );
 }
 
-function MainChrome({
-  showSidebar,
-  showDesktopHeader,
-}: {
-  showSidebar: boolean;
-  showDesktopHeader: boolean;
-}) {
-  return (
-    <View style={styles.root}>
-      <View style={showSidebar ? styles.desktopShell : styles.root}>
-        {showSidebar ? <MainDesktopSidebar /> : null}
-        <View style={showSidebar ? styles.desktopMain : styles.root}>
-          {showDesktopHeader ? <MainDesktopHeader /> : null}
-          <View style={styles.content}>
-            <MainStack />
-          </View>
-        </View>
-      </View>
-    </View>
-  );
-}
-
 export default function MainLayout() {
   const { isAuthenticated, isLoading } = useAuth();
   const pathname = usePathname();
   const colors = useTheme();
-  const isDesktopWeb = useIsDesktopWeb();
-  const showDesktopSidebar = useIsDesktopSidebarVisible();
 
   if (isLoading) {
     return (
@@ -90,29 +60,13 @@ export default function MainLayout() {
   }
 
   return (
-    <MobileAppMenuProvider>
-      <MainChrome
-        showSidebar={showDesktopSidebar}
-        showDesktopHeader={isDesktopWeb}
-      />
-    </MobileAppMenuProvider>
+    <AppChrome>
+      <MainStack />
+    </AppChrome>
   );
 }
 
 const styles = StyleSheet.create({
-  root: {
-    flex: 1,
-  },
-  desktopShell: {
-    flex: 1,
-    flexDirection: 'row',
-  },
-  desktopMain: {
-    flex: 1,
-  },
-  content: {
-    flex: 1,
-  },
   loader: {
     flex: 1,
     alignItems: 'center',

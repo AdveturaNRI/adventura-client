@@ -154,7 +154,7 @@ export function MarketingButton({
     variant === 'primary'
       ? skin.accentColor
       : variant === 'secondary'
-        ? 'rgba(255,255,255,0.08)'
+        ? skin.subtleFill
         : variant === 'surface'
           ? skin.surfaceElevated
           : 'transparent';
