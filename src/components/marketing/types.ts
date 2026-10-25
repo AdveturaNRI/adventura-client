@@ -151,9 +151,17 @@ export type MarketingGameCard = {
   systemName?: string | null;
   scheduledAt?: string | null;
   isOnline?: boolean | null;
-  city?: { name?: string | null } | null;
+  city?: { name?: string | null; region?: string | null } | null;
   isFree?: boolean | null;
   priceRub?: number | null;
+  kind?: 'ONESHOT' | 'CAMPAIGN' | null;
+  beginnersWelcome?: boolean | null;
+  minAge?: number | null;
+  maxPlayers?: number | null;
+  playersCount?: number | null;
+  durationHours?: number | null;
+  experienceLabel?: string | null;
+  owner?: { id: string; nickname?: string | null } | null;
 };
 
 export type MarketingClubCard = {
