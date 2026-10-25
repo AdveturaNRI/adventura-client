@@ -4,7 +4,7 @@ import { Linking, Platform } from 'react-native';
 
 import { apiRequest } from '@/services/api/client';
 
-/** Link set in the admin: opens once for new guests and behind «О проекте». */
+/** Link set in the admin: opens once per device on the home page and behind «О проекте». */
 export type WelcomeLanding = {
   url: string;
 };
@@ -104,8 +104,23 @@ async function markSeen(url: string): Promise<void> {
   }
 }
 
+/** A direct visit (ad link with UTM) counts as seen, so the home page won't redirect there again. */
+export function markWelcomeLandingSeen(landing: WelcomeLanding): void {
+  void markSeen(landing.url);
+}
+
+/** Carries `/?utm_source=…` over to the landing: metrics read UTM from its URL. */
+function withCurrentQuery(url: string): string {
+  if (Platform.OS !== 'web' || typeof window === 'undefined') return url;
+  const query = window.location.search.replace(/^\?/, '');
+  if (!query) return url;
+  const [base = '', hash] = url.split('#');
+  const joined = `${base}${base.includes('?') ? '&' : '?'}${query}`;
+  return hash != null ? `${joined}#${hash}` : joined;
+}
+
 /**
- * Internal href to redirect a new guest to, or null to open the app as usual.
+ * Internal href to redirect a first-time visitor to, or null to open the app as usual.
  * External links are opened here directly. Marks the link as seen before
  * leaving so a broken landing can't loop the redirect.
  */
@@ -116,7 +131,7 @@ export async function resolveWelcomeRedirect(): Promise<string | null> {
   ]);
   if (!landing || (await hasSeen(landing.url))) return null;
   await markSeen(landing.url);
-  if (isInternalUrl(landing.url)) return landing.url;
+  if (isInternalUrl(landing.url)) return withCurrentQuery(landing.url);
   openExternalUrl(landing.url, true);
   return null;
 }

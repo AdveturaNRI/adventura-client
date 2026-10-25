@@ -8,14 +8,13 @@ import { useTheme } from '@/hooks/use-theme';
 import { resolveWelcomeRedirect } from '@/services/marketing/welcome';
 
 export default function Index() {
-  const { isLoading, isAuthenticated } = useAuth();
+  const { isLoading } = useAuth();
   const colors = useTheme();
   /** undefined — still resolving, null — nothing to show. */
   const [welcomeHref, setWelcomeHref] = useState<string | null | undefined>(undefined);
-  const isGuest = !isLoading && !isAuthenticated;
 
   useEffect(() => {
-    if (!isGuest) return;
+    if (isLoading) return;
     let cancelled = false;
     void resolveWelcomeRedirect().then((href) => {
       if (!cancelled) setWelcomeHref(href);
@@ -23,9 +22,9 @@ export default function Index() {
     return () => {
       cancelled = true;
     };
-  }, [isGuest]);
+  }, [isLoading]);
 
-  if (isLoading || (isGuest && welcomeHref === undefined)) {
+  if (isLoading || welcomeHref === undefined) {
     return (
       <View style={[styles.loader, { backgroundColor: colors.background }]}>
         <ActivityIndicator color={colors.primary} />
@@ -33,7 +32,7 @@ export default function Index() {
     );
   }
 
-  if (isGuest && welcomeHref) {
+  if (welcomeHref) {
     return <Redirect href={welcomeHref as never} />;
   }
 

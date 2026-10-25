@@ -46,7 +46,10 @@ import {
   getPublishedLanding,
   type MarketingLanding,
 } from "@/services/marketing/landings";
-import { isWelcomeLandingPath } from "@/services/marketing/welcome";
+import {
+  isWelcomeLandingPath,
+  markWelcomeLandingSeen,
+} from "@/services/marketing/welcome";
 
 const landingViewSent = new Set<string>();
 const ctaClickSent = new Set<string>();
@@ -154,8 +157,13 @@ async function fetchMarketingClubs(
 export default function PublicLandingRoute() {
   const pathname = usePathname();
   const welcomeLanding = useWelcomeLanding();
+  const isAbout = isWelcomeLandingPath(welcomeLanding, pathname);
 
-  if (!isWelcomeLandingPath(welcomeLanding, pathname)) {
+  useEffect(() => {
+    if (isAbout && welcomeLanding) markWelcomeLandingSeen(welcomeLanding);
+  }, [isAbout, welcomeLanding]);
+
+  if (!isAbout) {
     return <LandingPage />;
   }
 
