@@ -20,6 +20,7 @@ import {
 } from '@/components/navigation/DesktopThemeToggle';
 import { MobileBackButton } from '@/components/navigation/MobileBackButton';
 import { ScreenTransition } from '@/components/navigation/ScreenTransition';
+import { SeoHead } from '@/components/seo/SeoHead';
 import { toast } from '@/components/ui';
 import { FontSize, Radius, Spacing, type ThemeColors } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
@@ -32,6 +33,7 @@ import {
 } from '@/services/clubs/clubsApi';
 import { localizeErrorMessage } from '@/utils/localizeError';
 import { trackEntityTransition } from '@/services/analytics/analytics';
+import { clubSeo } from '@/seo/entity-meta';
 
 function getTodaySchedule(schedule: ClubScheduleDay[]) {
   const jsDay = new Date().getDay();
@@ -451,6 +453,7 @@ export default function ClubDetailScreen() {
 
   return (
     <ScreenTransition>
+      {club ? <SeoHead {...clubSeo(club)} /> : null}
       <View style={styles.root}>
         <View style={styles.inner}>
           <View style={styles.headerRow}>

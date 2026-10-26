@@ -6,6 +6,9 @@ import { Palettes } from '@/constants/theme';
 import { THEME_PREFERENCE_KEY } from '@/constants/theme-storage-key';
 
 const YANDEX_METRIKA_ID = process.env.EXPO_PUBLIC_YANDEX_METRIKA_ID?.trim() ?? '';
+/** Codes from Yandex Webmaster / Google Search Console «HTML meta tag» verification. */
+const YANDEX_VERIFICATION = process.env.EXPO_PUBLIC_YANDEX_VERIFICATION?.trim() ?? '';
+const GOOGLE_SITE_VERIFICATION = process.env.EXPO_PUBLIC_GOOGLE_SITE_VERIFICATION?.trim() ?? '';
 const API_BASE_URL =
   process.env.EXPO_PUBLIC_API_URL?.replace(/\/$/, '') ??
   'https://api.adventu.ru/api';
@@ -470,6 +473,12 @@ export default function Root({ children }: PropsWithChildren) {
           content="width=device-width, initial-scale=1, shrink-to-fit=no, viewport-fit=cover"
         />
         <meta name="theme-color" content="#208AEF" />
+        {YANDEX_VERIFICATION ? (
+          <meta name="yandex-verification" content={YANDEX_VERIFICATION} />
+        ) : null}
+        {GOOGLE_SITE_VERIFICATION ? (
+          <meta name="google-site-verification" content={GOOGLE_SITE_VERIFICATION} />
+        ) : null}
         <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png?v=d20-white" />
         <link rel="icon" type="image/png" sizes="48x48" href="/favicon.png?v=d20-white" />
         <link rel="shortcut icon" href="/favicon.png?v=d20-white" />

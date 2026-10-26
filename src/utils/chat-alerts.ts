@@ -273,14 +273,18 @@ export function stopNewMessageTitleBlink(options?: { broadcast?: boolean }) {
   }
   bindTitleClearListeners();
 
+  // Without an active blink the title belongs to the page (SEO head), leave it alone.
+  const wasBlinking = blinkTimer != null || showingAlertTitle;
   if (blinkTimer) {
     clearInterval(blinkTimer);
     blinkTimer = null;
   }
   showingAlertTitle = false;
-  document.title = baseTitle && baseTitle !== MESSAGE_ALERT_TITLE && baseTitle !== NOTIFICATION_ALERT_TITLE
-    ? baseTitle
-    : SITE_TITLE;
+  if (wasBlinking) {
+    document.title = baseTitle && baseTitle !== MESSAGE_ALERT_TITLE && baseTitle !== NOTIFICATION_ALERT_TITLE
+      ? baseTitle
+      : SITE_TITLE;
+  }
 
   if (options?.broadcast === false) {
     return;

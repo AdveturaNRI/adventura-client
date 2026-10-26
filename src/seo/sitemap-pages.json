@@ -1,0 +1,9 @@
+[
+  { "path": "/", "changefreq": "weekly", "priority": 1.0 },
+  { "path": "/games", "changefreq": "daily", "priority": 0.9 },
+  { "path": "/dice", "changefreq": "monthly", "priority": 0.8 },
+  { "path": "/generators", "changefreq": "monthly", "priority": 0.7 },
+  { "path": "/clubs", "changefreq": "weekly", "priority": 0.7 },
+  { "path": "/authors", "changefreq": "daily", "priority": 0.6 },
+  { "path": "/news", "changefreq": "daily", "priority": 0.5 }
+]

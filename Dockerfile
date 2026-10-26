@@ -7,6 +7,13 @@ ARG EXPO_PUBLIC_API_URL=https://api.adventu.ru/api
 ARG EXPO_PUBLIC_YANDEX_METRIKA_ID=112799671
 ARG EXPO_PUBLIC_VK_APP_ID=
 ARG EXPO_PUBLIC_YANDEX_CLIENT_ID=
+# Canonical/sitemap origin and search-console verification codes.
+ARG EXPO_PUBLIC_SITE_URL=https://adventu.ru
+ARG EXPO_PUBLIC_YANDEX_VERIFICATION=
+ARG EXPO_PUBLIC_GOOGLE_SITE_VERIFICATION=
+ENV EXPO_PUBLIC_SITE_URL=$EXPO_PUBLIC_SITE_URL
+ENV EXPO_PUBLIC_YANDEX_VERIFICATION=$EXPO_PUBLIC_YANDEX_VERIFICATION
+ENV EXPO_PUBLIC_GOOGLE_SITE_VERIFICATION=$EXPO_PUBLIC_GOOGLE_SITE_VERIFICATION
 ENV EXPO_PUBLIC_API_URL=$EXPO_PUBLIC_API_URL
 ENV EXPO_PUBLIC_YANDEX_METRIKA_ID=$EXPO_PUBLIC_YANDEX_METRIKA_ID
 ENV EXPO_PUBLIC_VK_APP_ID=$EXPO_PUBLIC_VK_APP_ID
@@ -29,7 +36,8 @@ COPY src ./src
 RUN npx expo export -p web \
   && cp public/dice-stage.html dist/dice-stage.html \
   && cp public/serve.json dist/serve.json \
-  && cp dist/+not-found.html dist/404.html
+  && cp dist/+not-found.html dist/404.html \
+  && node scripts/generate-seo-files.mjs dist
 
 FROM node:22-bookworm-slim AS runner
 WORKDIR /app

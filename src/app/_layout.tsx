@@ -12,6 +12,7 @@ import { stackScreenOptions } from '@/constants/navigation.config';
 import { AppToast } from '@/components/ui';
 import { GlobalLoadingOverlay } from '@/components/ui/feedback/GlobalLoadingOverlay';
 import { YandexMetrikaTracker } from '@/components/analytics/YandexMetrikaTracker';
+import { SeoHead } from '@/components/seo/SeoHead';
 import { VkPixelTracker } from '@/components/analytics/VkPixelTracker';
 import { ThemeProvider } from '@/context/ThemeContext';
 import { AnnouncementProvider } from '@/context/AnnouncementContext';
@@ -85,6 +86,7 @@ function AppRouteProviders() {
     !isWelcomeLandingPath(welcomeLanding, pathname);
   const navigator = (
     <View style={rootStyles.container}>
+      <SeoHead />
       <YandexMetrikaTracker />
       <VkPixelTracker />
       <RootNavigator />

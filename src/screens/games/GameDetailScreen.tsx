@@ -18,6 +18,7 @@ import { GameFeedCard } from '@/components/games/GameFeedCard';
 import { useIsDesktopSidebarVisible, useIsDesktopWeb } from '@/components/navigation/DesktopThemeToggle';
 import { MobileBackButton } from '@/components/navigation/MobileBackButton';
 import { ScreenTransition } from '@/components/navigation/ScreenTransition';
+import { SeoHead } from '@/components/seo/SeoHead';
 import { toast } from '@/components/ui';
 import { FontSize, Spacing, type ThemeColors } from '@/constants/theme';
 import { useRequireAuth } from '@/hooks/use-require-auth';
@@ -37,6 +38,7 @@ import {
 import { localizeErrorMessage } from '@/utils/localizeError';
 import { trackEntityTransition } from '@/services/analytics/analytics';
 import { trackVkEvent, VK_PIXEL_EVENTS } from '@/services/analytics/vk-pixel';
+import { gameSeo } from '@/seo/entity-meta';
 
 function createStyles(
   colors: ThemeColors,
@@ -367,6 +369,7 @@ export default function GameDetailScreen() {
 
   return (
     <ScreenTransition animateOnFocus>
+      {item ? <SeoHead {...gameSeo(item)} /> : notFound ? <SeoHead noindex /> : null}
       <View style={styles.root}>
         <View style={styles.inner}>
           <View style={styles.headerRow}>
