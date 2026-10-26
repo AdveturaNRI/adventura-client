@@ -147,7 +147,13 @@ function WebScrollReveal({
   eager: boolean;
 }) {
   const hostRef = useRef<View>(null);
-  const [active, setActive] = useState(eager);
+  const [active, setActive] = useState(
+    () =>
+      eager ||
+      typeof IntersectionObserver === 'undefined' ||
+      (typeof window !== 'undefined' &&
+        Boolean(window.matchMedia?.('(prefers-reduced-motion: reduce)').matches)),
+  );
   const motion = motionFromPreset(preset);
   const opacity = useSharedValue(eager ? 1 : 0);
   const translateY = useSharedValue(eager ? 0 : motion.fromY);
@@ -155,54 +161,21 @@ function WebScrollReveal({
   const scale = useSharedValue(eager ? 1 : motion.fromScale);
 
   useEffect(() => {
-    if (active) {
-      return;
-    }
-
-    if (eager) {
-      setActive(true);
-      return;
-    }
-
-    if (
-      typeof window !== 'undefined' &&
-      window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
-    ) {
-      setActive(true);
-      return;
-    }
-
-    let cancelled = false;
-    let framed = 0;
-
-    const checkVisibility = () => {
-      if (cancelled || !hostRef.current) return;
-      hostRef.current.measureInWindow((_x, y, _w, h) => {
-        if (cancelled) return;
-        const viewport = typeof window !== 'undefined' ? window.innerHeight : 800;
-        const visible = y < viewport * 0.9 && y + h > viewport * 0.05;
-        if (visible) {
-          setActive(true);
-        }
-      });
-    };
-
-    const onScrollOrResize = () => {
-      cancelAnimationFrame(framed);
-      framed = requestAnimationFrame(checkVisibility);
-    };
-
-    checkVisibility();
-    window.addEventListener('scroll', onScrollOrResize, { passive: true, capture: true });
-    window.addEventListener('resize', onScrollOrResize, { passive: true });
-
-    return () => {
-      cancelled = true;
-      cancelAnimationFrame(framed);
-      window.removeEventListener('scroll', onScrollOrResize, true);
-      window.removeEventListener('resize', onScrollOrResize);
-    };
-  }, [eager, active]);
+    if (active) return;
+    const node = hostRef.current as unknown as Element | null;
+    if (!node) return;
+    // The block counts as visible once it enters the band between 5% and 90% of the viewport.
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (!entry.isIntersecting) return;
+        observer.disconnect();
+        setActive(true);
+      },
+      { rootMargin: '-5% 0px -10% 0px' },
+    );
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [active]);
 
   useEffect(() => {
     if (!active) return;

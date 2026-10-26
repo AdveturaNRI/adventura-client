@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { Image, type ImageSource } from 'expo-image';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Platform,
   Pressable,
@@ -192,7 +192,8 @@ const DEMO_FILTERS: { label: string; icon: keyof typeof Ionicons.glyphMap }[] = 
 
 /** Not strictly alternating, so the loop doesn't look mechanical. */
 const SWIPE_PATTERN: Direction[] = ['right', 'right', 'left', 'right', 'left', 'left', 'right'];
-const FIRST_HOLD_MS = 500;
+/** Lets the landing's scroll reveal fade the block in before the first lean. */
+const FIRST_HOLD_MS = 450;
 const HOLD_MS = 1900;
 const LEAN_MS = 380;
 const LEAN_HOLD_MS = 360;
@@ -233,7 +234,6 @@ export function WanderersBlockView({ block, skin, onCta }: Props) {
   const { height } = useWindowDimensions();
   const reduceMotion = useReducedMotion();
   const [cursor, setCursor] = useState(0);
-  const [paused, setPaused] = useState(false);
   const key = block.id ?? 'wanderers';
   const cards = MOCK_WANDERERS;
   const openUrl = block.ctaUrl || '/wanderers';
@@ -271,12 +271,7 @@ export function WanderersBlockView({ block, skin, onCta }: Props) {
         isMobile
           ? { width: '100%', maxWidth: CARD_WIDTH + DECK_SIDE_ROOM * 2, height: deckHeight }
           : { width: cardWidth + DECK_SIDE_ROOM * 2, height: deckHeight },
-      ]}
-      // Hover pauses the loop so the card can be read; touch has no reliable leave.
-      onPointerEnter={(event) => {
-        if (event.nativeEvent.pointerType === 'mouse') setPaused(true);
-      }}
-      onPointerLeave={() => setPaused(false)}>
+      ]}>
       {Array.from({ length: visible }, (_, index) => visible - 1 - index).map((slot) => {
         const absolute = cursor + slot;
         const card = cards[absolute % cards.length];
@@ -292,8 +287,7 @@ export function WanderersBlockView({ block, skin, onCta }: Props) {
             stackOffset={stackOffset}
             aboutLines={aboutLines}
             lean={isMobile ? MOBILE_LEAN : LEAN}
-            holdMs={cursor === 0 ? FIRST_HOLD_MS : HOLD_MS}
-            animate={!reduceMotion && !paused}
+            animate={!reduceMotion}
             onSwiped={advance}
             onOpen={() => onCta(openUrl, key)}
           />
@@ -432,7 +426,6 @@ function SwipeCard({
   stackOffset,
   aboutLines,
   lean,
-  holdMs,
   animate,
   onSwiped,
   onOpen,
@@ -447,7 +440,6 @@ function SwipeCard({
   stackOffset: number;
   aboutLines: number;
   lean: number;
-  holdMs: number;
   animate: boolean;
   onSwiped: () => void;
   onOpen: () => void;
@@ -455,13 +447,18 @@ function SwipeCard({
   const swipe = useSharedValue(0);
   const sign = direction === 'right' ? 1 : -1;
   const color = direction === 'right' ? LIKE_COLOR : SKIP_COLOR;
+  // The very first card and any resume after a pause swipe soon; the rest wait their turn.
+  const quickStart = useRef(slot === 0);
 
   useEffect(() => {
     if (slot !== 0) return;
     if (!animate) {
+      quickStart.current = true;
       swipe.set(withTiming(0, { duration: 220 }));
       return;
     }
+    const holdMs = quickStart.current ? FIRST_HOLD_MS : HOLD_MS;
+    quickStart.current = false;
     const timer = setTimeout(() => {
       swipe.set(
         withSequence(
@@ -481,7 +478,7 @@ function SwipeCard({
       clearTimeout(timer);
       cancelAnimation(swipe);
     };
-  }, [slot, animate, holdMs, lean, sign, swipe, onSwiped]);
+  }, [slot, animate, lean, sign, swipe, onSwiped]);
 
   const stackStyle = useAnimatedStyle(
     () => ({
