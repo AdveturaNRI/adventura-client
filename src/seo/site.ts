@@ -8,7 +8,7 @@ export const SITE_NAME = 'Adventura';
 export const SITE_DEFAULT_TITLE = 'Adventura — поиск игроков и мастера для D&D и НРИ';
 
 export const SITE_DEFAULT_DESCRIPTION =
-  'Найдите игроков или мастера для D&D, Pathfinder и других НРИ. Игры онлайн и вживую, чат и звонки для партии, кубики d20 в браузере. Бесплатно.';
+  'Adventura — социальная сеть для настольно-ролевых игр. Находи игроков и мастеров, собирай группы и отправляйся в приключения!';
 
 /** 1200×630, built by scripts/generate-og-image.mjs. */
 export const SITE_OG_IMAGE = `${SITE_URL}/og-image.png`;
