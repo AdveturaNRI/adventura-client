@@ -16,6 +16,8 @@ export const REALTIME_EVENTS = {
   ANNOUNCEMENT_PUBLISHED: 'announcement:published',
   UNREAD_SYNC: 'unread:sync',
   PRESENCE_UPDATE: 'presence:update',
+  PRESENCE_ACTIVE: 'presence:active',
+  PRESENCE_IDLE: 'presence:idle',
   TYPING_UPDATE: 'typing:update',
   CALL_INVITE: 'call:invite',
   CALL_ACCEPTED: 'call:accepted',
@@ -152,9 +154,14 @@ export function getRealtimeSocket() {
   return socket;
 }
 
+/** `presence: true` tells the server this client reports activity via presence:active / presence:idle. */
+function socketAuth(token: string) {
+  return { token, presence: true };
+}
+
 export function connectRealtime(token: string) {
   if (socket) {
-    socket.auth = { token };
+    socket.auth = socketAuth(token);
     if (!socket.connected) {
       socket.connect();
     }
@@ -164,7 +171,7 @@ export function connectRealtime(token: string) {
 
   socket = io(`${API_ORIGIN}/realtime`, {
     transports: ['websocket', 'polling'],
-    auth: { token },
+    auth: socketAuth(token),
     autoConnect: true,
     withCredentials: true,
     reconnection: true,
@@ -180,7 +187,7 @@ export function updateRealtimeAuthToken(token: string) {
   if (!socket || !token.trim()) {
     return;
   }
-  socket.auth = { token: token.trim() };
+  socket.auth = socketAuth(token.trim());
 }
 
 /**
@@ -230,4 +237,17 @@ export function emitTypingUpdate(conversationId: string, typing: boolean) {
     return;
   }
   socket.emit(REALTIME_EVENTS.TYPING_UPDATE, { conversationId: id, typing });
+}
+
+/** «В сети» heartbeat; the server drops the user to offline ~90 s after the last one. */
+export function emitPresenceActive() {
+  if (socket?.connected) {
+    socket.emit(REALTIME_EVENTS.PRESENCE_ACTIVE);
+  }
+}
+
+export function emitPresenceIdle(lastActiveAt: number) {
+  if (socket?.connected) {
+    socket.emit(REALTIME_EVENTS.PRESENCE_IDLE, { lastActiveAt });
+  }
 }

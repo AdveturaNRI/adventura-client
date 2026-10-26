@@ -11,6 +11,9 @@ type PartnerApiDto = {
   logoUrl?: string | null;
 };
 
+/** Как часто открытые экраны перепроверяют партнёров и их новости: правки из админки без перезагрузки. */
+export const PARTNERS_POLL_MS = 15_000;
+
 let cache: Partner[] | null = null;
 let inflight: Promise<Partner[]> | null = null;
 let sidebarCache: Partner[] | null = null;

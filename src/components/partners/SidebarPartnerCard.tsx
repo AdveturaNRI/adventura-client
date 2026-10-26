@@ -4,7 +4,6 @@ import { router } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   AccessibilityInfo,
-  AppState,
   Linking,
   Platform,
   Pressable,
@@ -24,7 +23,9 @@ import type { Partner } from '@/data/partners/partners';
 import { type ThemeColors } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { useThemedStyles } from '@/hooks/use-themed-styles';
+import { useVisiblePoll } from '@/hooks/use-visible-poll';
 import {
+  PARTNERS_POLL_MS,
   getPartnerNewsCache,
   getPartnersCache,
   getSidebarPartnersCache,
@@ -40,7 +41,6 @@ import {
 } from '@/utils/partner-news-seen-storage';
 
 const ROTATE_MS = 4_000;
-const POLL_MS = 15_000;
 const RESUME_DELAY_MS = 600;
 const FADE_OUT_MS = 140;
 const FADE_IN_MS = 200;
@@ -284,83 +284,42 @@ export function SidebarPartnerCard() {
     };
   }, []);
 
-  useEffect(() => {
-    let alive = true;
-    let inflight = false;
-
-    const load = async () => {
-      if (inflight) return;
-      inflight = true;
-      try {
-        await refresh();
-      } finally {
-        inflight = false;
-      }
-    };
-
-    const refresh = async () => {
-      const newsPromise = listPartnerNews({ force: true });
-      let rows = await listSidebarPartners({ force: true });
-      // Нет галочки «в сайдбаре» — всё равно показываем активных, блок не должен пропадать.
-      if (!rows.length) {
-        rows = await listPartners({ force: true });
-      }
-      const news = indexNews(await newsPromise);
-      if (!alive) return;
-      // Свежая новость выводит партнёра в ротацию, даже если он не отмечен «в сайдбаре».
-      const known = new Set(rows.map((row) => row.id));
-      const fromNews: Partner[] = [...news.values()]
-        .filter((item) => !known.has(item.partnerId))
-        .map((item) => ({
-          id: item.partner.id,
-          name: item.partner.name,
-          href: item.partner.href,
-          mark: item.partner.name,
-          accent: item.partner.accent,
-          logoUrl: item.partner.logoUrl,
-        }));
-      rows = newsFirst([...rows, ...fromNews], news);
-      const currentId = partnersRef.current[indexRef.current]?.id;
-      setNewsByPartner(news);
-      setPartners(rows);
-      if (!rows.length) {
-        setIndex(0);
-        return;
-      }
-      if (currentId) {
-        const found = rows.findIndex((row) => row.id === currentId);
-        setIndex(found >= 0 ? found : 0);
-        return;
-      }
-      setIndex(0);
-    };
-
-    const isVisible = () =>
-      Platform.OS === 'web'
-        ? typeof document === 'undefined' || document.visibilityState === 'visible'
-        : AppState.currentState === 'active';
-    const onVisible = () => {
-      if (isVisible()) void load();
-    };
-
-    void load();
-    // Правки из админки подтягиваются сами: опрос, пока вкладка видна, и сразу при возврате на неё.
-    const pollId = setInterval(onVisible, POLL_MS);
-    const appStateSub = AppState.addEventListener('change', onVisible);
-    if (Platform.OS === 'web' && typeof window !== 'undefined') {
-      document.addEventListener('visibilitychange', onVisible);
-      window.addEventListener('focus', onVisible);
+  // Правки из админки подтягиваются сами: опрос, пока вкладка видна, и сразу при возврате на неё.
+  useVisiblePoll(async () => {
+    const newsPromise = listPartnerNews({ force: true });
+    let rows = await listSidebarPartners({ force: true });
+    // Нет галочки «в сайдбаре» — всё равно показываем активных, блок не должен пропадать.
+    if (!rows.length) {
+      rows = await listPartners({ force: true });
     }
-    return () => {
-      alive = false;
-      clearInterval(pollId);
-      appStateSub.remove();
-      if (Platform.OS === 'web' && typeof window !== 'undefined') {
-        document.removeEventListener('visibilitychange', onVisible);
-        window.removeEventListener('focus', onVisible);
-      }
-    };
-  }, []);
+    const news = indexNews(await newsPromise);
+    // Свежая новость выводит партнёра в ротацию, даже если он не отмечен «в сайдбаре».
+    const known = new Set(rows.map((row) => row.id));
+    const fromNews: Partner[] = [...news.values()]
+      .filter((item) => !known.has(item.partnerId))
+      .map((item) => ({
+        id: item.partner.id,
+        name: item.partner.name,
+        href: item.partner.href,
+        mark: item.partner.name,
+        accent: item.partner.accent,
+        logoUrl: item.partner.logoUrl,
+      }));
+    rows = newsFirst([...rows, ...fromNews], news);
+    const currentId = partnersRef.current[indexRef.current]?.id;
+    setNewsByPartner(news);
+    setPartners(rows);
+    if (!rows.length) {
+      setIndex(0);
+      return;
+    }
+    if (currentId) {
+      const found = rows.findIndex((row) => row.id === currentId);
+      setIndex(found >= 0 ? found : 0);
+      return;
+    }
+    setIndex(0);
+  }, PARTNERS_POLL_MS);
 
   useEffect(() => {
     if (paused) {

@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   type NativeScrollEvent,
@@ -29,7 +29,9 @@ import { FontSize, Radius, Spacing, type ThemeColors } from '@/constants/theme';
 import { useNews } from '@/context/NewsContext';
 import { useTheme } from '@/hooks/use-theme';
 import { useThemedStyles } from '@/hooks/use-themed-styles';
+import { useVisiblePoll } from '@/hooks/use-visible-poll';
 import {
+  PARTNERS_POLL_MS,
   getPartnerNewsFeedCache,
   listPartnerNewsFeed,
   type PartnerNews,
@@ -55,8 +57,11 @@ type PartnerFeedState = {
   error: string | null;
 };
 
-/** Грузится и на вкладке «Adventura»: счётчик новых у «Партнёров» нужен сразу. */
-function usePartnerNewsFeed(active: boolean) {
+/**
+ * Грузится и на вкладке «Adventura»: счётчик новых у «Партнёров» нужен сразу.
+ * Фоновый опрос тихий: без спиннера, и сбой не стирает уже показанную ленту.
+ */
+function usePartnerNewsFeed() {
   const [state, setState] = useState<PartnerFeedState>(() => ({
     items: getPartnerNewsFeedCache() ?? [],
     isLoading: false,
@@ -64,12 +69,11 @@ function usePartnerNewsFeed(active: boolean) {
     error: null,
   }));
 
-  const load = useCallback(async (mode: 'initial' | 'refresh') => {
+  const load = useCallback(async (mode: 'poll' | 'refresh') => {
     setState((prev) => ({
       ...prev,
-      isLoading: mode === 'initial' && prev.items.length === 0,
+      isLoading: mode === 'poll' && prev.items.length === 0,
       isRefreshing: mode === 'refresh',
-      error: null,
     }));
     try {
       const items = await listPartnerNewsFeed();
@@ -79,14 +83,15 @@ function usePartnerNewsFeed(active: boolean) {
         ...prev,
         isLoading: false,
         isRefreshing: false,
-        error: 'Не получилось загрузить новости партнёров',
+        error:
+          mode === 'poll' && prev.items.length > 0
+            ? prev.error
+            : 'Не получилось загрузить новости партнёров',
       }));
     }
   }, []);
 
-  useEffect(() => {
-    void load('initial');
-  }, [active, load]);
+  useVisiblePoll(() => load('poll'), PARTNERS_POLL_MS);
   return { ...state, refresh: () => load('refresh') };
 }
 
@@ -188,7 +193,7 @@ export default function NewsScreen() {
   const params = useLocalSearchParams<{ tab?: string }>();
   const tab: NewsTab = params.tab === 'partners' ? 'partners' : 'platform';
   const news = useNews();
-  const partnerFeed = usePartnerNewsFeed(tab === 'partners');
+  const partnerFeed = usePartnerNewsFeed();
   const seenPartnerNews = useSeenPartnerNews();
   const { toggleLike, incrementViews } = news;
   const { items, isLoading, isRefreshing, error, refresh } =

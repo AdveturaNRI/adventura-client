@@ -20,6 +20,7 @@ import {
   type TypingUpdatePayload,
   type UnreadSyncPayload,
 } from '@/services/realtime/socket';
+import { startPresenceTracking } from '@/services/realtime/presence';
 import {
   notifyIncomingChatMessage,
   notifyIncomingPortalNotification,
@@ -232,7 +233,7 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
     };
   }, [isAuthenticated, isLoading, token]);
 
-  // Keep presence alive on any app section — reconnect when the app/tab is focused again.
+  // Keep the socket alive on any app section — reconnect when the app/tab is focused again.
   // iOS Safari freezes WS while locked; after unlock we force reconnect + bump dataResyncAt
   // so screens catch up missed message:new / conversation:updated events via HTTP.
   useEffect(() => {
@@ -353,6 +354,13 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
         }
       }
     };
+  }, [isAuthenticated, isLoading, token]);
+
+  useEffect(() => {
+    if (isLoading || !isAuthenticated || !token) {
+      return;
+    }
+    return startPresenceTracking();
   }, [isAuthenticated, isLoading, token]);
 
   useEffect(() => {
