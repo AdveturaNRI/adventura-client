@@ -127,6 +127,13 @@ function createStyles(colors: ThemeColors, isDesktop: boolean) {
       paddingHorizontal: Spacing.lg,
       paddingVertical: 12,
     },
+    rowMain: {
+      flex: 1,
+      minWidth: 0,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: Spacing.md,
+    },
     rowPressed: {
       opacity: 0.72,
     },
@@ -394,52 +401,50 @@ export function GroupMembersSheet({
                   member.role !== 'owner' &&
                   (isOwner || member.role === 'member');
                 return (
-                  <Pressable
-                    key={member.id}
-                    accessibilityRole="button"
-                    onPress={() => onOpenProfile(member.id)}
-                    style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}>
-                    <View style={styles.avatar}>
-                      {member.avatarUrl ? (
-                        <Image source={{ uri: member.avatarUrl }} style={styles.avatarImage} />
-                      ) : (
-                        <Text style={styles.avatarInitial}>{initial}</Text>
-                      )}
-                    </View>
-                    <View style={styles.body}>
-                      <Text style={styles.name} numberOfLines={1}>
-                        {member.nickname}
-                        {member.id === myUserId ? ' (вы)' : ''}
-                      </Text>
-                      <Text style={styles.meta}>
-                        {member.online ? 'в сети' : 'был(а) недавно'}
-                      </Text>
-                    </View>
-                    {badge ? (
-                      <View
-                        style={[
-                          styles.roleBadge,
-                          member.role === 'admin' && styles.roleBadgeAdmin,
-                        ]}>
-                        <Text
-                          style={[
-                            styles.roleLabel,
-                            member.role === 'admin' && styles.roleLabelAdmin,
-                          ]}>
-                          {badge}
+                  <View key={member.id} style={styles.row}>
+                    <Pressable
+                      accessibilityRole="button"
+                      onPress={() => onOpenProfile(member.id)}
+                      style={({ pressed }) => [styles.rowMain, pressed && styles.rowPressed]}>
+                      <View style={styles.avatar}>
+                        {member.avatarUrl ? (
+                          <Image source={{ uri: member.avatarUrl }} style={styles.avatarImage} />
+                        ) : (
+                          <Text style={styles.avatarInitial}>{initial}</Text>
+                        )}
+                      </View>
+                      <View style={styles.body}>
+                        <Text style={styles.name} numberOfLines={1}>
+                          {member.nickname}
+                          {member.id === myUserId ? ' (вы)' : ''}
+                        </Text>
+                        <Text style={styles.meta}>
+                          {member.online ? 'в сети' : 'был(а) недавно'}
                         </Text>
                       </View>
-                    ) : null}
+                      {badge ? (
+                        <View
+                          style={[
+                            styles.roleBadge,
+                            member.role === 'admin' && styles.roleBadgeAdmin,
+                          ]}>
+                          <Text
+                            style={[
+                              styles.roleLabel,
+                              member.role === 'admin' && styles.roleLabelAdmin,
+                            ]}>
+                            {badge}
+                          </Text>
+                        </View>
+                      ) : null}
+                    </Pressable>
                     {showManage ? (
                       <Pressable
                         accessibilityRole="button"
                         accessibilityLabel={`Управление ${member.nickname}`}
                         hitSlop={8}
                         disabled={busy}
-                        onPress={(event) => {
-                          event.stopPropagation?.();
-                          setSelected(member);
-                        }}
+                        onPress={() => setSelected(member)}
                         style={styles.manageBtn}>
                         <Ionicons
                           name="ellipsis-horizontal"
@@ -448,7 +453,7 @@ export function GroupMembersSheet({
                         />
                       </Pressable>
                     ) : null}
-                  </Pressable>
+                  </View>
                 );
               })
             )}

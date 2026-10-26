@@ -492,6 +492,7 @@ export type ChatVoiceToken = {
 export function createChatVoiceToken(conversationId: string) {
   return apiRequest<ChatVoiceToken>(`/chats/${conversationId}/voice/token`, {
     method: 'POST',
+    skipLoading: true,
   });
 }
 
@@ -507,7 +508,7 @@ export function inviteChatVoiceCall(conversationId: string) {
     conversationId: string;
     isGroup?: boolean;
     ringing?: VoiceCallPeer[];
-  }>(`/chats/${conversationId}/voice/invite`, { method: 'POST' });
+  }>(`/chats/${conversationId}/voice/invite`, { method: 'POST', skipLoading: true });
 }
 
 export type ActiveChatVoiceCall = {
@@ -519,6 +520,8 @@ export type ActiveChatVoiceCall = {
   conversationTitle: string | null;
   isGroup: boolean;
   joinedCount: number;
+  /** First few people in the call, for the banner avatar stack. */
+  participants?: VoiceCallPeer[];
   canJoin: boolean;
   /** Already on the server join list (e.g. dropped client still listed). */
   isJoined?: boolean;
@@ -540,6 +543,7 @@ export function acceptChatVoiceCall(conversationId: string, callId: string) {
   }>(`/chats/${conversationId}/voice/accept`, {
     method: 'POST',
     body: { callId },
+    skipLoading: true,
   });
 }
 
@@ -551,6 +555,7 @@ export function joinChatVoiceCall(conversationId: string, callId?: string) {
   }>(`/chats/${conversationId}/voice/join`, {
     method: 'POST',
     body: callId ? { callId } : {},
+    skipLoading: true,
   });
 }
 
@@ -558,6 +563,7 @@ export function declineChatVoiceCall(conversationId: string, callId: string) {
   return apiRequest<{ ok: true }>(`/chats/${conversationId}/voice/decline`, {
     method: 'POST',
     body: { callId },
+    skipLoading: true,
   });
 }
 
@@ -565,5 +571,6 @@ export function endChatVoiceCall(conversationId: string, callId: string) {
   return apiRequest<{ ok: true }>(`/chats/${conversationId}/voice/end`, {
     method: 'POST',
     body: { callId },
+    skipLoading: true,
   });
 }

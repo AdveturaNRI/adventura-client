@@ -25,7 +25,7 @@ type IndexedRoute = { title: string; description: string };
 /** Public app sections worth ranking. Titles are final, brand included. */
 const INDEXED_ROUTES: Record<string, IndexedRoute> = {
   '/games': {
-    title: 'Игры по D&D и другим НРИ — найти игру | Adventura',
+    title: 'Игры | Adventura',
     description:
       'Ищи игры по D&D, Pathfinder и другим НРИ. Выбирай систему, формат, время и стоимость, знакомься с мастерами и записывайся в подходящую группу.',
   },
@@ -50,7 +50,7 @@ const INDEXED_ROUTES: Record<string, IndexedRoute> = {
       'Открывай публикации авторов для настольно-ролевых игр: иллюстрации, игровые карты, токены и другие материалы для подготовки и проведения приключений.',
   },
   '/news': {
-    title: 'Новости НРИ: обновления Adventura и события сообщества',
+    title: 'Новости | Adventura',
     description:
       'Читайте новости Adventura, узнавайте об обновлениях платформы, новых возможностях, событиях и проектах партнёров из мира настольно-ролевых игр.',
   },

@@ -1587,7 +1587,6 @@ function CinemaRailPersonTile({
         {showCam && tile.videoTrack ? (
           <CallVideoView
             track={tile.videoTrack}
-            mirror={tile.isLocal}
             objectFit="cover"
             style={{ width, height }}
           />
@@ -1914,7 +1913,6 @@ function CinemaDockPersonTile({
       {showCam && tile.videoTrack ? (
         <CallVideoView
           track={tile.videoTrack}
-          mirror={tile.isLocal}
           objectFit="cover"
         />
       ) : showCam && tile.mock ? (
@@ -2339,7 +2337,6 @@ function ParticipantTile({
                   ) : (
                     <CallVideoView
                       track={displayTrack}
-                      mirror={tile.isLocal && !showingScreenShare}
                       objectFit={showingScreenShare ? 'contain' : 'cover'}
                     />
                   )}
@@ -2358,54 +2355,6 @@ function ParticipantTile({
                       <Ionicons name="desktop-outline" size={12} color="#FFFFFF" />
                     </View>
                   ) : null}
-                  {showPinBtn ? (
-                    <Pressable
-                      accessibilityRole="button"
-                      accessibilityLabel={
-                        pinned
-                          ? 'Снять закрепление приоритета'
-                          : 'Закрепить в приоритете'
-                      }
-                      hitSlop={8}
-                      onPress={onTogglePin}
-                      style={({ pressed }) => [
-                        styles.videoPinBtn,
-                        pinned && styles.videoPinBtnActive,
-                        pressed && styles.pressed,
-                      ]}>
-                      <Ionicons
-                        name={pinned ? 'pin' : 'pin-outline'}
-                        size={15}
-                        color="#FFFFFF"
-                      />
-                    </Pressable>
-                  ) : null}
-                  {showingScreenShare && onExpandStream ? (
-                    <Pressable
-                      accessibilityRole="button"
-                      accessibilityLabel="Развернуть стрим на весь экран"
-                      hitSlop={8}
-                      onPress={onExpandStream}
-                      style={({ pressed }) => [
-                        styles.videoExpandBtn,
-                        pressed && styles.pressed,
-                      ]}>
-                      <Ionicons name="expand" size={16} color="#FFFFFF" />
-                    </Pressable>
-                  ) : null}
-                  {!showingScreenShare && onExpandPriority ? (
-                    <Pressable
-                      accessibilityRole="button"
-                      accessibilityLabel="Развернуть приоритет на весь экран"
-                      hitSlop={8}
-                      onPress={onExpandPriority}
-                      style={({ pressed }) => [
-                        styles.videoExpandBtn,
-                        pressed && styles.pressed,
-                      ]}>
-                      <Ionicons name="expand" size={16} color="#FFFFFF" />
-                    </Pressable>
-                  ) : null}
                   {tile.muted ? (
                     <View style={styles.videoMuteBadge}>
                       <Ionicons name="mic-off" size={12} color="#FFFFFF" />
@@ -2418,6 +2367,57 @@ function ParticipantTile({
                   ) : null}
                 </View>,
               )}
+              {/* Siblings of the menu hit-target, not children: no <button> inside <button>. */}
+              <View style={styles.videoControlsOverlay} pointerEvents="box-none">
+                {showPinBtn ? (
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel={
+                      pinned
+                        ? 'Снять закрепление приоритета'
+                        : 'Закрепить в приоритете'
+                    }
+                    hitSlop={8}
+                    onPress={onTogglePin}
+                    style={({ pressed }) => [
+                      styles.videoPinBtn,
+                      pinned && styles.videoPinBtnActive,
+                      pressed && styles.pressed,
+                    ]}>
+                    <Ionicons
+                      name={pinned ? 'pin' : 'pin-outline'}
+                      size={15}
+                      color="#FFFFFF"
+                    />
+                  </Pressable>
+                ) : null}
+                {showingScreenShare && onExpandStream ? (
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel="Развернуть стрим на весь экран"
+                    hitSlop={8}
+                    onPress={onExpandStream}
+                    style={({ pressed }) => [
+                      styles.videoExpandBtn,
+                      pressed && styles.pressed,
+                    ]}>
+                    <Ionicons name="expand" size={16} color="#FFFFFF" />
+                  </Pressable>
+                ) : null}
+                {!showingScreenShare && onExpandPriority ? (
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel="Развернуть приоритет на весь экран"
+                    hitSlop={8}
+                    onPress={onExpandPriority}
+                    style={({ pressed }) => [
+                      styles.videoExpandBtn,
+                      pressed && styles.pressed,
+                    ]}>
+                    <Ionicons name="expand" size={16} color="#FFFFFF" />
+                  </Pressable>
+                ) : null}
+              </View>
             </View>
           ) : (
             <View
@@ -2631,9 +2631,15 @@ function ParticipantTile({
               (showVideo || matchVideoSlot) && styles.tileCaptionVideo,
             ]}>
             {showVideo ? (
-              <Text style={[styles.tileName, styles.tileNameUnderVideo]} numberOfLines={1}>
-                {displayName}
-              </Text>
+              // Badges sit on the frame; still reserve their row so video and avatar tiles level.
+              <NameWithBadges
+                name={displayName}
+                textStyle={[styles.tileName, styles.tileNameUnderVideo]}
+                badgeSize={12}
+                layout="stack"
+                align="center"
+                reserveBadgeSlot
+              />
             ) : (
               <NameWithBadges
                 name={displayName}
@@ -5805,7 +5811,6 @@ export function VoiceCallOverlay({
                 ) : (
                   <CallVideoView
                     track={priorityCinemaTrack!}
-                    mirror={spotlightTile.isLocal}
                     objectFit="cover"
                     style={styles.cinemaVideoFill}
                   />
@@ -8358,6 +8363,10 @@ const styles = StyleSheet.create({
   tileMediaMenuHit: {
     alignItems: 'center',
     width: '100%',
+  },
+  videoControlsOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 3,
   },
   bardRing: {
     borderWidth: 2.5,

@@ -490,6 +490,7 @@ export function useChatLiveVoice(conversationId: string | null): UseChatLiveVoic
   const intentionalLeaveRef = useRef(false);
   /** Session still wants media (join started; not hangup / leave). */
   const expectConnectedRef = useRef(false);
+  const tornDownByCleanupRef = useRef(false);
   const conversationIdRef = useRef(conversationId);
   conversationIdRef.current = conversationId;
   const prevConversationIdRef = useRef(conversationId);
@@ -1066,6 +1067,11 @@ export function useChatLiveVoice(conversationId: string | null): UseChatLiveVoic
       if (connectTimedOut) {
         return;
       }
+      // leave() / unmount aborted this attempt ("Client initiated disconnect") —
+      // they already tore the room down and own the status.
+      if (intentionalLeaveRef.current || roomRef.current !== room) {
+        return;
+      }
       roomRef.current = null;
       await teardownRoom(room);
       setStatus('error');
@@ -1334,7 +1340,17 @@ export function useChatLiveVoice(conversationId: string | null): UseChatLiveVoic
   }, [setUrgent, status]);
 
   useEffect(() => {
+    // Fast Refresh runs cleanup + setup with state intact: the session still wants media.
+    if (tornDownByCleanupRef.current) {
+      tornDownByCleanupRef.current = false;
+      const id = conversationIdRef.current;
+      if (id) {
+        void joinRef.current(id);
+      }
+    }
     return () => {
+      tornDownByCleanupRef.current =
+        expectConnectedRef.current && !intentionalLeaveRef.current;
       intentionalLeaveRef.current = true;
       expectConnectedRef.current = false;
       joiningRef.current = false;

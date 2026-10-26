@@ -671,6 +671,42 @@ function createStyles(colors: ThemeColors, bottomPad: number, isDark: boolean) {
       backgroundColor: 'rgba(21, 122, 254, 0.16)',
       flexShrink: 0,
     },
+    voiceJoinAvatars: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      flexShrink: 0,
+    },
+    voiceJoinAvatar: {
+      width: 30,
+      height: 30,
+      borderRadius: 15,
+      borderWidth: 2,
+      borderColor: colors.background,
+      backgroundColor: colors.primary,
+      alignItems: 'center',
+      justifyContent: 'center',
+      overflow: 'hidden',
+    },
+    voiceJoinAvatarOverlap: {
+      marginLeft: -10,
+    },
+    voiceJoinAvatarImage: {
+      width: '100%',
+      height: '100%',
+    },
+    voiceJoinAvatarInitial: {
+      fontSize: 12,
+      fontWeight: '700',
+      color: '#FFFFFF',
+    },
+    voiceJoinAvatarMore: {
+      backgroundColor: 'rgba(21, 122, 254, 0.22)',
+    },
+    voiceJoinAvatarMoreLabel: {
+      fontSize: 11,
+      fontWeight: '700',
+      color: colors.primary,
+    },
     voiceJoinCopy: {
       flex: 1,
       minWidth: 0,
@@ -1428,8 +1464,9 @@ export default function ChatThreadScreen() {
     startCall,
     joinOngoingCall,
     presentIncomingFromActive,
-    hangup: hangupLiveVoice,
     minimized: voiceMinimized,
+    expand: expandVoiceCall,
+    pendingCallConversationId,
   } = useVoiceCall();
   const voiceActiveHere =
     Boolean(conversationId) && voiceConversationId === conversationId && voicePhase !== 'idle' && voicePhase !== 'incoming';
@@ -1438,6 +1475,9 @@ export default function ChatThreadScreen() {
     Boolean(conversationId) && voiceConversationId === conversationId && voicePhase === 'incoming';
   const [ongoingVoiceCall, setOngoingVoiceCall] = useState<ActiveChatVoiceCall | null>(null);
   const [joiningOngoingVoice, setJoiningOngoingVoice] = useState(false);
+  const voiceCallPendingHere =
+    !voiceActiveHere &&
+    (joiningOngoingVoice || (Boolean(conversationId) && pendingCallConversationId === conversationId));
 
   useEffect(() => {
     if (!conversationId || voiceActiveHere || voiceIncomingHere) {
@@ -1459,8 +1499,13 @@ export default function ChatThreadScreen() {
         if (cancelled) {
           return;
         }
-        // Hangup on this device — don't flash «Вернуться» if /active is briefly stale.
-        if (active && wasVoiceCallLocallyEnded(active.callId)) {
+        // Hangup on this device — don't flash «Вернуться» while /active is briefly stale.
+        // A group call goes on without us: once the server dropped us, offer the rejoin.
+        if (
+          active &&
+          wasVoiceCallLocallyEnded(active.callId) &&
+          (!active.isGroup || active.isJoined)
+        ) {
           setOngoingVoiceCall(null);
           return;
         }
@@ -3840,8 +3885,16 @@ export default function ChatThreadScreen() {
             <Pressable
               accessibilityRole="button"
               accessibilityLabel={
-                voiceActiveHere ? 'Покинуть голосовой чат' : ongoingVoiceCall ? 'Присоединиться к голосовому чату' : 'Позвонить'
+                voiceCallPendingHere
+                  ? 'Подключаемся к звонку'
+                  : voiceActiveHere
+                    ? 'Открыть звонок'
+                    : ongoingVoiceCall
+                      ? 'Присоединиться к голосовому чату'
+                      : 'Позвонить'
               }
+              accessibilityState={{ busy: voiceCallPendingHere, disabled: voiceCallPendingHere }}
+              disabled={voiceCallPendingHere}
               hitSlop={8}
               onPressIn={() => {
                 if (Platform.OS === 'web' && !voiceActiveHere) {
@@ -3853,7 +3906,7 @@ export default function ChatThreadScreen() {
                   return;
                 }
                 if (voiceActiveHere) {
-                  void hangupLiveVoice();
+                  expandVoiceCall();
                   return;
                 }
                 // Live multi-party lobby → rejoin. Solo/zombie lobby → fall through to
@@ -3925,13 +3978,20 @@ export default function ChatThreadScreen() {
                   await callPromise;
                 })();
               }}
-              style={[styles.headerCallButton, voiceActiveHere || ongoingVoiceCall ? styles.headerCallButtonActive : null]}
+              style={[
+                styles.headerCallButton,
+                voiceActiveHere || ongoingVoiceCall || voiceCallPendingHere ? styles.headerCallButtonActive : null,
+              ]}
             >
-              <Ionicons
-                name={voiceActiveHere || ongoingVoiceCall ? 'call' : 'call-outline'}
-                size={18}
-                color={voiceActiveHere || ongoingVoiceCall ? colors.primary : colors.textSubtle}
-              />
+              {voiceCallPendingHere ? (
+                <ActivityIndicator size="small" color={colors.primary} />
+              ) : (
+                <Ionicons
+                  name={voiceActiveHere || ongoingVoiceCall ? 'call' : 'call-outline'}
+                  size={18}
+                  color={voiceActiveHere || ongoingVoiceCall ? colors.primary : colors.textSubtle}
+                />
+              )}
             </Pressable>
             <Pressable
               accessibilityRole="button"
@@ -3946,9 +4006,39 @@ export default function ChatThreadScreen() {
 
           {ongoingVoiceCall && !voiceActiveHere ? (
             <View style={styles.voiceJoinBanner}>
-              <View style={styles.voiceJoinIcon}>
-                <Ionicons name="headset" size={18} color={colors.primary} />
-              </View>
+              {ongoingVoiceCall.participants?.length ? (
+                <View style={styles.voiceJoinAvatars}>
+                  {ongoingVoiceCall.participants.map((peer, index) => (
+                    <View
+                      key={peer.userId}
+                      style={[
+                        styles.voiceJoinAvatar,
+                        index > 0 && styles.voiceJoinAvatarOverlap,
+                        { zIndex: ongoingVoiceCall.participants!.length - index },
+                      ]}
+                    >
+                      {peer.avatarUrl ? (
+                        <Image source={{ uri: peer.avatarUrl }} style={styles.voiceJoinAvatarImage} />
+                      ) : (
+                        <Text style={styles.voiceJoinAvatarInitial}>
+                          {([...peer.nickname.trim()][0] ?? '?').toUpperCase()}
+                        </Text>
+                      )}
+                    </View>
+                  ))}
+                  {ongoingVoiceCall.joinedCount > ongoingVoiceCall.participants.length ? (
+                    <View style={[styles.voiceJoinAvatar, styles.voiceJoinAvatarOverlap, styles.voiceJoinAvatarMore]}>
+                      <Text style={styles.voiceJoinAvatarMoreLabel}>
+                        +{ongoingVoiceCall.joinedCount - ongoingVoiceCall.participants.length}
+                      </Text>
+                    </View>
+                  ) : null}
+                </View>
+              ) : (
+                <View style={styles.voiceJoinIcon}>
+                  <Ionicons name="headset" size={18} color={colors.primary} />
+                </View>
+              )}
               <View style={styles.voiceJoinCopy}>
                 <Text style={styles.voiceJoinTitle} numberOfLines={1}>
                   {ongoingVoiceCall.isGroup
@@ -3956,7 +4046,7 @@ export default function ChatThreadScreen() {
                     : ongoingVoiceCall.fromNickname?.trim() || 'Голосовой чат'}
                 </Text>
                 <Text style={styles.voiceJoinHint} numberOfLines={1}>
-                  {ongoingVoiceCall.joinedCount > 1
+                  {ongoingVoiceCall.joinedCount > 0
                     ? `${ongoingVoiceCall.joinedCount} в эфире`
                     : 'Можно присоединиться'}
                 </Text>

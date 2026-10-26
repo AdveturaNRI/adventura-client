@@ -32,6 +32,7 @@ import {
   inviteChatVoiceCall,
   joinChatVoiceCall,
   listChatMembers,
+  type ActiveChatVoiceCall,
   type VoiceCallPeer,
 } from '@/services/chats/chatsApi';
 import type { CallInvitePayload } from '@/services/realtime/socket';
@@ -82,6 +83,8 @@ type VoiceCallContextValue = {
   selectedScreenIdentity: string | null;
   screenStreams: ChatLiveScreenStream[];
   participants: ChatLiveVoiceParticipant[];
+  /** Chat where a call is being started / joined but the call UI isn't up yet. */
+  pendingCallConversationId: string | null;
   startCall: (
     conversationId: string,
     peerName?: string | null,
@@ -215,6 +218,11 @@ export function VoiceCallProvider({ children }: { children: ReactNode }) {
   const [minimized, setMinimized] = useState(false);
   const ringingStartedAtRef = useRef<number | null>(null);
   const switchingCallRef = useRef(false);
+  /** startCall / joinOngoingCall in flight — repeat taps on a slow network must not stack. */
+  const callOpInFlightRef = useRef(false);
+  /** Chat whose call button is waiting on startCall / joinOngoingCall — drives its spinner. */
+  const [pendingCallConversationId, setPendingCallConversationId] = useState<string | null>(null);
+  const acceptingRef = useRef(false);
 
   // Drop any leftover gesture-primed mic from a previous session / cancelled tap.
   useEffect(() => {
@@ -255,6 +263,8 @@ export function VoiceCallProvider({ children }: { children: ReactNode }) {
     publishRoomData,
     subscribeRoomData,
   } = useChatLiveVoice(liveConversationId);
+  const liveStatusRef = useRef(liveStatus);
+  liveStatusRef.current = liveStatus;
 
   const canControlMusic =
     !session?.isGroup || session.myRole === 'owner' || session.myRole === 'admin';
@@ -341,12 +351,8 @@ export function VoiceCallProvider({ children }: { children: ReactNode }) {
 
   const enterCallFromInvite = useCallback(
     async (invite: PendingInvite) => {
-      // Prefer stream started in onPressIn; fall back to getUserMedia now.
-      const primedMic = await takePrimedMicrophone();
-      let myRole = invite.myRole;
-      if (invite.isGroup && !myRole) {
-        myRole = await resolveGroupRole(invite.conversationId, user?.id);
-      }
+      // Switch UI before any await: on a slow network the Accept tap must land visibly,
+      // otherwise people tap again and again while the modal looks frozen.
       const next: Session = {
         callId: invite.callId,
         conversationId: invite.conversationId,
@@ -355,7 +361,7 @@ export function VoiceCallProvider({ children }: { children: ReactNode }) {
         peerAvatarUrl: invite.peerAvatarUrl,
         callerName: invite.callerName,
         isGroup: invite.isGroup,
-        myRole: invite.isGroup ? myRole ?? 'member' : null,
+        myRole: invite.isGroup ? invite.myRole ?? 'member' : null,
         ringingPeers: [],
         phase: 'active',
       };
@@ -363,19 +369,56 @@ export function VoiceCallProvider({ children }: { children: ReactNode }) {
       setSession(next);
       setMinimized(false);
       ringingStartedAtRef.current = null;
+
+      if (invite.isGroup && !invite.myRole) {
+        void resolveGroupRole(invite.conversationId, user?.id).then((role) => {
+          const latest = sessionRef.current;
+          if (latest?.conversationId !== invite.conversationId || latest.myRole === role) {
+            return;
+          }
+          const patched: Session = { ...latest, myRole: role };
+          sessionRef.current = patched;
+          setSession(patched);
+        });
+      }
+
+      // Prefer stream started in onPressIn; join() falls back to getUserMedia itself.
+      const primedMic = await takePrimedMicrophone().catch(() => null);
+
       try {
         await acceptChatVoiceCall(invite.conversationId, invite.callId);
-        await join(invite.conversationId, { primedMic });
       } catch (error) {
-        stopMediaStream(primedMic);
-        await clearSession();
-        toast.error(localizeErrorMessage(error, 'Не удалось принять звонок'));
+        // This invite's call may be gone while a newer one runs in the same chat — join that.
+        try {
+          const joined = await joinChatVoiceCall(invite.conversationId);
+          const latest = sessionRef.current;
+          if (latest?.conversationId === invite.conversationId && latest.callId !== joined.callId) {
+            clearVoiceCallLocallyEnded(joined.callId);
+            const patched: Session = { ...latest, callId: joined.callId };
+            sessionRef.current = patched;
+            setSession(patched);
+          }
+        } catch {
+          stopMediaStream(primedMic);
+          if (sessionRef.current?.conversationId === invite.conversationId) {
+            await clearSession();
+          }
+          toast.error(localizeErrorMessage(error, 'Не удалось принять звонок'));
+          return;
+        }
       }
+
+      // Call ended / replaced while we were accepting.
+      if (sessionRef.current?.conversationId !== invite.conversationId) {
+        stopMediaStream(primedMic);
+        return;
+      }
+      await join(invite.conversationId, { primedMic });
     },
     [clearSession, join, user?.id],
   );
 
-  const joinOngoingCall = useCallback(
+  const enterOngoingCall = useCallback(
     async (
       conversationId: string,
       callId: string,
@@ -424,6 +467,29 @@ export function VoiceCallProvider({ children }: { children: ReactNode }) {
       }
     },
     [join, leave, user?.id],
+  );
+
+  const joinOngoingCall = useCallback(
+    async (
+      conversationId: string,
+      callId: string,
+      peerName?: string | null,
+      peerAvatarUrl?: string | null,
+      opts?: { isGroup?: boolean; myRole?: VoiceCallGroupRole | null },
+    ): Promise<boolean> => {
+      if (callOpInFlightRef.current) {
+        return false;
+      }
+      callOpInFlightRef.current = true;
+      setPendingCallConversationId(conversationId);
+      try {
+        return await enterOngoingCall(conversationId, callId, peerName, peerAvatarUrl, opts);
+      } finally {
+        callOpInFlightRef.current = false;
+        setPendingCallConversationId(null);
+      }
+    },
+    [enterOngoingCall],
   );
 
   const presentIncomingFromActive = useCallback(
@@ -497,79 +563,102 @@ export function VoiceCallProvider({ children }: { children: ReactNode }) {
         toast.info('Сначала завершите текущий звонок');
         return;
       }
+      if (callOpInFlightRef.current) {
+        return;
+      }
+      callOpInFlightRef.current = true;
+      setPendingCallConversationId(conversationId);
 
-      // Existing lobby: reconnect if we're already in a live multi-party call;
-      // solo/zombie lobby → kill and ring fresh so the peer gets Accept UI again.
+      const joinActive = (active: ActiveChatVoiceCall) => {
+        const group = opts?.isGroup ?? active.isGroup;
+        return enterOngoingCall(
+          conversationId,
+          active.callId,
+          peerName?.trim() ||
+            (group ? active.conversationTitle : active.fromNickname) ||
+            null,
+          peerAvatarUrl ?? active.fromAvatarUrl,
+          { isGroup: group, myRole: opts?.myRole ?? null },
+        );
+      };
+
       try {
-        const active = await getActiveChatVoiceCall(conversationId);
-        if (active?.callId) {
-          const group = opts?.isGroup ?? active.isGroup;
-          const aloneLobby = Boolean(active.isJoined) && active.joinedCount <= 1;
-          if (aloneLobby) {
+        // Existing lobby: reconnect if we're already in a live multi-party call;
+        // solo/zombie lobby → kill and ring fresh so the peer gets Accept UI again.
+        try {
+          const active = await getActiveChatVoiceCall(conversationId);
+          if (active?.callId) {
+            const group = opts?.isGroup ?? active.isGroup;
+            const aloneLobby = Boolean(active.isJoined) && active.joinedCount <= 1;
+            if (!aloneLobby) {
+              await joinActive(active);
+              return;
+            }
             markVoiceCallLocallyEnded(active.callId);
             try {
               await endChatVoiceCall(conversationId, active.callId);
             } catch {
               // already gone
             }
+            // Group: the server keeps the call while others are still in the LiveKit room.
+            if (group) {
+              const still = await getActiveChatVoiceCall(conversationId).catch(() => null);
+              if (still?.callId) {
+                clearVoiceCallLocallyEnded(still.callId);
+                await joinActive(still);
+                return;
+              }
+            }
             // Fall through → fresh inviteChatVoiceCall.
-          } else {
-            await joinOngoingCall(
-              conversationId,
-              active.callId,
-              peerName?.trim() ||
-                (group ? active.conversationTitle : active.fromNickname) ||
-                null,
-              peerAvatarUrl ?? active.fromAvatarUrl,
-              { isGroup: group, myRole: opts?.myRole ?? null },
-            );
-            return;
           }
+        } catch {
+          // Active check failed — fall through to a fresh invite.
         }
-      } catch {
-        // Active check failed — fall through to a fresh invite.
-      }
 
-      const primedMic = await takePrimedMicrophone();
-      try {
-        const { callId, isGroup, ringing } = await inviteChatVoiceCall(conversationId);
-        const ringingPeers =
-          mapInviteRinging(ringing).length > 0
-            ? mapInviteRinging(ringing)
-            : mapInviteRinging(opts?.ringingPeers);
-        const group = opts?.isGroup ?? Boolean(isGroup);
-        let myRole: VoiceCallGroupRole | null = group ? opts?.myRole ?? null : null;
-        if (group && !myRole) {
-          myRole = await resolveGroupRole(conversationId, user?.id);
+        const primedMic = await takePrimedMicrophone();
+        try {
+          const { callId, isGroup, ringing } = await inviteChatVoiceCall(conversationId);
+          // Empty `ringing` is real: everyone else is already in the room.
+          const ringingPeers = mapInviteRinging(ringing ?? opts?.ringingPeers);
+          const group = opts?.isGroup ?? Boolean(isGroup);
+          let myRole: VoiceCallGroupRole | null = group ? opts?.myRole ?? null : null;
+          if (group && !myRole) {
+            myRole = await resolveGroupRole(conversationId, user?.id);
+          }
+          const next: Session = {
+            callId,
+            conversationId,
+            role: 'caller',
+            peerName: peerName?.trim() || 'Собеседник',
+            peerAvatarUrl: peerAvatarUrl ?? null,
+            callerName: null,
+            isGroup: group,
+            myRole: group ? myRole ?? 'member' : null,
+            ringingPeers,
+            phase: 'outgoing',
+          };
+          sessionRef.current = next;
+          setSession(next);
+          setMinimized(false);
+          ringingStartedAtRef.current = ringingPeers.length > 0 ? Date.now() : null;
+          if (ringingPeers.length > 0) {
+            startCallRingback();
+          }
+          await join(conversationId, { primedMic });
+        } catch (error) {
+          stopMediaStream(primedMic);
+          stopCallRingtone();
+          await leave();
+          sessionRef.current = null;
+          setSession(null);
+          toast.error(localizeErrorMessage(error, 'Не удалось начать звонок'));
         }
-        const next: Session = {
-          callId,
-          conversationId,
-          role: 'caller',
-          peerName: peerName?.trim() || 'Собеседник',
-          peerAvatarUrl: peerAvatarUrl ?? null,
-          callerName: null,
-          isGroup: group,
-          myRole: group ? myRole ?? 'member' : null,
-          ringingPeers,
-          phase: 'outgoing',
-        };
-        sessionRef.current = next;
-        setSession(next);
-        setMinimized(false);
-        ringingStartedAtRef.current = ringingPeers.length > 0 ? Date.now() : null;
-        startCallRingback();
-        await join(conversationId, { primedMic });
-      } catch (error) {
-        stopMediaStream(primedMic);
-        stopCallRingtone();
-        await leave();
-        sessionRef.current = null;
-        setSession(null);
-        toast.error(localizeErrorMessage(error, 'Не удалось начать звонок'));
+      } finally {
+        callOpInFlightRef.current = false;
+        setPendingCallConversationId(null);
       }
     },
-    [join, joinOngoingCall, leave, user?.id],
+    [enterOngoingCall, join, leave, user?.id],
   );
 
   const hangup = useCallback(async () => {
@@ -577,11 +666,15 @@ export function VoiceCallProvider({ children }: { children: ReactNode }) {
   }, [clearSession]);
 
   const acceptIncoming = useCallback(async () => {
+    if (acceptingRef.current) {
+      return;
+    }
     const parked = pendingInviteRef.current;
     const current = sessionRef.current;
 
     // Already in another call — leave it, then join the parked invite.
     if (parked && current && current.phase !== 'incoming') {
+      acceptingRef.current = true;
       stopCallRingtone();
       clearPendingInvite();
       switchingCallRef.current = true;
@@ -590,6 +683,7 @@ export function VoiceCallProvider({ children }: { children: ReactNode }) {
         await enterCallFromInvite(parked);
       } finally {
         switchingCallRef.current = false;
+        acceptingRef.current = false;
       }
       return;
     }
@@ -597,6 +691,7 @@ export function VoiceCallProvider({ children }: { children: ReactNode }) {
     if (!current || current.phase !== 'incoming') {
       return;
     }
+    acceptingRef.current = true;
     stopCallRingtone();
     clearPendingInvite();
     const invite: PendingInvite = {
@@ -608,7 +703,11 @@ export function VoiceCallProvider({ children }: { children: ReactNode }) {
       isGroup: current.isGroup,
       myRole: current.myRole,
     };
-    await enterCallFromInvite(invite);
+    try {
+      await enterCallFromInvite(invite);
+    } finally {
+      acceptingRef.current = false;
+    }
   }, [clearPendingInvite, clearSession, enterCallFromInvite]);
 
   const declineIncoming = useCallback(async () => {
@@ -714,13 +813,37 @@ export function VoiceCallProvider({ children }: { children: ReactNode }) {
           return;
         }
 
-        // Ghost/stale UI for an older call in this chat — drop it so the new ring can show.
-        if (
+        const sameChatOtherCall =
           current &&
           (current.phase === 'outgoing' || current.phase === 'active') &&
           current.conversationId === invite.conversationId &&
-          current.callId !== invite.callId
+          current.callId !== invite.callId;
+
+        // Still in this chat's LiveKit room (the room is per chat, not per call) —
+        // switch to the new callId in place instead of dropping a live conversation.
+        if (
+          sameChatOtherCall &&
+          (liveStatusRef.current === 'connected' || liveStatusRef.current === 'connecting')
         ) {
+          markVoiceCallLocallyEnded(current.callId);
+          clearVoiceCallLocallyEnded(invite.callId);
+          stopCallRingtone();
+          ringingStartedAtRef.current = null;
+          const next: Session = {
+            ...current,
+            callId: invite.callId,
+            role: 'callee',
+            ringingPeers: [],
+            phase: 'active',
+          };
+          sessionRef.current = next;
+          setSession(next);
+          void acceptChatVoiceCall(invite.conversationId, invite.callId).catch(() => undefined);
+          return;
+        }
+
+        // Ghost/stale UI for an older call in this chat — drop it so the new ring can show.
+        if (sameChatOtherCall) {
           stopCallRingtone();
           void leave();
           ringingStartedAtRef.current = null;
@@ -1135,6 +1258,7 @@ export function VoiceCallProvider({ children }: { children: ReactNode }) {
       selectedScreenIdentity,
       screenStreams,
       participants,
+      pendingCallConversationId,
       startCall,
       joinOngoingCall,
       presentIncomingFromActive,
@@ -1169,6 +1293,7 @@ export function VoiceCallProvider({ children }: { children: ReactNode }) {
       selectedScreenIdentity,
       screenStreams,
       participants,
+      pendingCallConversationId,
       startCall,
       joinOngoingCall,
       presentIncomingFromActive,
