@@ -58,6 +58,7 @@ export function isPublicAppPath(pathname: string): boolean {
   if (/^\/authors\/[^/]+$/.test(path)) return true;
   if (/^\/authors\/[^/]+\/posts\/[^/]+$/.test(path)) return true;
   if (/^\/news\/[^/]+$/.test(path)) return true;
+  if (/^\/news\/partner\/[^/]+$/.test(path)) return true;
   if (/^\/handbook\/[^/]+$/.test(path)) return true;
 
   return false;

@@ -138,8 +138,25 @@ export function getPartnerNewsCache(): PartnerNews[] | null {
   return newsCache;
 }
 
+let feedCache: PartnerNews[] | null = null;
+
+/** Все опубликованные новости партнёров, свежие сверху: вкладка «Партнёры» в «Новостях». */
+export async function listPartnerNewsFeed(): Promise<PartnerNews[]> {
+  const rows = await apiRequest<PartnerNews[]>('/partners/news/feed', {
+    skipLoading: true,
+    skipAuthRefresh: true,
+  });
+  feedCache = Array.isArray(rows) ? rows : [];
+  return feedCache;
+}
+
+export function getPartnerNewsFeedCache(): PartnerNews[] | null {
+  return feedCache;
+}
+
 export function getPartnerNews(id: string): Promise<PartnerNews> {
-  const cached = newsCache?.find((item) => item.id === id);
+  const cached =
+    newsCache?.find((item) => item.id === id) ?? feedCache?.find((item) => item.id === id);
   if (cached) return Promise.resolve(cached);
   return apiRequest<PartnerNews>(`/partners/news/${encodeURIComponent(id)}`, {
     skipLoading: true,

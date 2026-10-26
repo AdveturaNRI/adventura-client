@@ -20,6 +20,7 @@ import {
 import { MobileBackButton } from '@/components/navigation/MobileBackButton';
 import { MobileScreenHeader } from '@/components/navigation/MobileScreenHeader';
 import { ScreenTransition } from '@/components/navigation/ScreenTransition';
+import { AuthorRichText } from '@/components/authors/AuthorRichText';
 import { FadeInImage } from '@/components/ui/media/FadeInImage';
 import { FontSize, Spacing, type ThemeColors } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
@@ -29,6 +30,7 @@ import {
   trackPartnerNews,
   type PartnerNews,
 } from '@/services/partners/partnersApi';
+import { markPartnerNewsSeen } from '@/utils/partner-news-seen-storage';
 
 import { useMainScreenStyles } from './main-screen.styles';
 
@@ -107,7 +109,23 @@ function createLocalStyles(colors: ThemeColors, isDesktopWeb: boolean) {
     partnerRow: {
       flexDirection: 'row',
       alignItems: 'center',
+      alignSelf: 'flex-start',
+      maxWidth: '100%',
       gap: 10,
+      paddingVertical: 6,
+      paddingLeft: 6,
+      paddingRight: 12,
+      marginLeft: -6,
+      borderRadius: 14,
+    },
+    partnerRowHovered: {
+      backgroundColor: 'rgba(21, 122, 254, 0.08)',
+    },
+    partnerNameRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 5,
+      minWidth: 0,
     },
     logo: {
       width: LOGO_SIZE,
@@ -130,14 +148,18 @@ function createLocalStyles(colors: ThemeColors, isDesktopWeb: boolean) {
       color: '#FFFFFF',
     },
     partnerText: {
-      flex: 1,
+      flexShrink: 1,
       minWidth: 0,
       gap: 2,
     },
     partnerName: {
+      flexShrink: 1,
       fontSize: FontSize.label,
       fontWeight: '700',
       color: colors.text,
+    },
+    partnerNameHovered: {
+      color: colors.primary,
     },
     partnerDate: {
       fontSize: FontSize.caption,
@@ -159,14 +181,6 @@ function createLocalStyles(colors: ThemeColors, isDesktopWeb: boolean) {
       letterSpacing: 0.4,
       textTransform: 'uppercase',
       color: colors.primary,
-    },
-    body: {
-      gap: Spacing.sm,
-    },
-    paragraph: {
-      fontSize: FontSize.label,
-      lineHeight: FontSize.label * 1.55,
-      color: colors.textSecondary,
     },
     cta: {
       alignSelf: 'flex-start',
@@ -224,6 +238,7 @@ export default function PartnerNewsDetailScreen() {
     let alive = true;
     getPartnerNews(id)
       .then((item) => {
+        void markPartnerNewsSeen(item.id);
         if (alive) setState({ status: 'ready', item });
       })
       .catch(() => {
@@ -283,10 +298,6 @@ export default function PartnerNewsDetailScreen() {
   const { partner } = item;
   const ctaUrl = item.actionUrl || partner.href;
   const ctaLabel = item.actionLabel?.trim() || 'Подробнее на сайте';
-  const paragraphs = item.body
-    .split(/\n{2,}/)
-    .map((block) => block.trim())
-    .filter(Boolean);
   const dateLabel = formatDate(item.publishedAt);
 
   return (
@@ -313,36 +324,54 @@ export default function PartnerNewsDetailScreen() {
             {item.title}
           </Text>
 
-          <View style={styles.partnerRow}>
-            {partner.logoUrl ? (
-              <Image
-                source={{ uri: partner.logoUrl }}
-                style={styles.logo}
-                contentFit="contain"
-                accessibilityIgnoresInvertColors
-              />
-            ) : (
-              <View style={[styles.mark, { backgroundColor: partner.accent || colors.primary }]}>
-                <Text style={styles.markText}>{partner.name.slice(0, 2).toUpperCase()}</Text>
-              </View>
+          <Pressable
+            accessibilityRole="link"
+            accessibilityLabel={`Сайт партнёра ${partner.name}`}
+            accessibilityHint="Открывает сайт партнёра в новой вкладке"
+            disabled={!partner.href}
+            onPress={() => {
+              trackPartnerNews(item.id, 'click');
+              openExternal(partner.href);
+            }}
+            style={({ pressed, hovered }: { pressed: boolean; hovered?: boolean }) => [
+              styles.partnerRow,
+              (hovered || pressed) && styles.partnerRowHovered,
+            ]}>
+            {({ hovered }: { pressed: boolean; hovered?: boolean }) => (
+              <>
+                {partner.logoUrl ? (
+                  <Image
+                    source={{ uri: partner.logoUrl }}
+                    style={styles.logo}
+                    contentFit="contain"
+                    accessibilityIgnoresInvertColors
+                  />
+                ) : (
+                  <View
+                    style={[styles.mark, { backgroundColor: partner.accent || colors.primary }]}>
+                    <Text style={styles.markText}>
+                      {partner.name.slice(0, 2).toUpperCase()}
+                    </Text>
+                  </View>
+                )}
+                <View style={styles.partnerText}>
+                  <View style={styles.partnerNameRow}>
+                    <Text
+                      style={[styles.partnerName, hovered && styles.partnerNameHovered]}
+                      numberOfLines={1}>
+                      {partner.name}
+                    </Text>
+                    {partner.href ? (
+                      <Ionicons name="open-outline" size={14} color={colors.primary} />
+                    ) : null}
+                  </View>
+                  {dateLabel ? <Text style={styles.partnerDate}>{dateLabel}</Text> : null}
+                </View>
+              </>
             )}
-            <View style={styles.partnerText}>
-              <Text style={styles.partnerName} numberOfLines={1}>
-                {partner.name}
-              </Text>
-              {dateLabel ? <Text style={styles.partnerDate}>{dateLabel}</Text> : null}
-            </View>
-          </View>
+          </Pressable>
 
-          {paragraphs.length ? (
-            <View style={styles.body}>
-              {paragraphs.map((paragraph, index) => (
-                <Text key={index} style={styles.paragraph} selectable>
-                  {paragraph}
-                </Text>
-              ))}
-            </View>
-          ) : null}
+          <AuthorRichText value={item.body} />
 
           {ctaUrl ? (
             <Pressable

@@ -4,6 +4,7 @@ import { router } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   AccessibilityInfo,
+  AppState,
   Linking,
   Platform,
   Pressable,
@@ -33,13 +34,20 @@ import {
   trackPartnerNews,
   type PartnerNews,
 } from '@/services/partners/partnersApi';
+import {
+  markPartnerNewsSeen,
+  useSeenPartnerNews,
+} from '@/utils/partner-news-seen-storage';
 
 const ROTATE_MS = 4_000;
+const POLL_MS = 15_000;
 const RESUME_DELAY_MS = 600;
 const FADE_OUT_MS = 140;
 const FADE_IN_MS = 200;
 const SHIFT_PX = 4;
 const LOGO_SIZE = 38;
+const NEWS_TINT = 'rgba(21, 122, 254, 0.08)';
+const NEWS_BORDER = 'rgba(21, 122, 254, 0.45)';
 /** Лого + название (до 2 строк) + слоган в одну строку. */
 const CONTENT_MIN_HEIGHT = 44;
 /** Имя партнёра + заголовок новости в две строки: держим высоту, чтобы карточка не прыгала. */
@@ -60,6 +68,20 @@ function indexNews(rows: PartnerNews[] | null): Map<string, PartnerNews> {
 function partnerTagline(partner: Partner): string | null {
   const tagline = partner.tagline?.trim() ?? '';
   return tagline || null;
+}
+
+function publishedAgo(iso: string | null | undefined): string | null {
+  const time = iso ? Date.parse(iso) : NaN;
+  if (Number.isNaN(time)) return null;
+  const minutes = Math.max(0, Math.floor((Date.now() - time) / 60_000));
+  if (minutes < 1) return 'только что';
+  if (minutes < 60) return `${minutes} мин назад`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours} ч назад`;
+  const days = Math.floor(hours / 24);
+  if (days === 1) return 'вчера';
+  if (days < 7) return `${days} дн назад`;
+  return null;
 }
 
 function openPartnerUrl(href: string) {
@@ -118,6 +140,39 @@ function createStyles(colors: ThemeColors) {
       textTransform: 'uppercase',
       color: colors.textMuted,
     },
+    rootNews: {
+      borderWidth: 1,
+      borderColor: NEWS_BORDER,
+      backgroundColor: NEWS_TINT,
+    },
+    rootNewsHovered: {
+      borderColor: colors.primary,
+    },
+    eyebrowNews: {
+      fontSize: 10,
+      fontWeight: '700',
+      letterSpacing: 0.3,
+      textTransform: 'none',
+      color: colors.primary,
+    },
+    eyebrowTime: {
+      flexShrink: 0,
+      fontSize: 10,
+      fontWeight: '500',
+      color: colors.primary,
+      opacity: 0.7,
+    },
+    newsCta: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      alignSelf: 'flex-start',
+      gap: 2,
+    },
+    newsCtaText: {
+      fontSize: 12,
+      fontWeight: '600',
+      color: colors.primary,
+    },
     content: {
       minHeight: CONTENT_MIN_HEIGHT,
       justifyContent: 'center',
@@ -168,39 +223,18 @@ function createStyles(colors: ThemeColors) {
     contentNews: {
       minHeight: NEWS_CONTENT_MIN_HEIGHT,
     },
-    newsChip: {
-      flexShrink: 0,
-      paddingHorizontal: 6,
-      paddingVertical: 2,
-      borderRadius: 999,
-      backgroundColor: 'rgba(21, 122, 254, 0.12)',
-    },
-    newsChipText: {
-      fontSize: 9,
-      fontWeight: '700',
-      letterSpacing: 0.4,
-      textTransform: 'uppercase',
-      color: colors.primary,
-    },
-    newsMeta: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 6,
-      minWidth: 0,
-    },
-    newsPartner: {
-      flexShrink: 1,
-      fontSize: 11,
-      fontWeight: '600',
-      color: colors.textSecondary,
-      lineHeight: 14,
-    },
     newsTitle: {
       fontSize: 13,
       fontWeight: '600',
       color: colors.text,
       letterSpacing: -0.1,
       lineHeight: 17,
+    },
+    newsSource: {
+      fontSize: 11,
+      fontWeight: '500',
+      color: colors.primary,
+      lineHeight: 14,
     },
   });
 }
@@ -216,6 +250,7 @@ export function SidebarPartnerCard() {
   const [hovered, setHovered] = useState(false);
   const [focused, setFocused] = useState(false);
   const [reduceMotion, setReduceMotion] = useState(false);
+  const seenNews = useSeenPartnerNews();
 
   const partnersRef = useRef(partners);
   const indexRef = useRef(index);
@@ -251,7 +286,19 @@ export function SidebarPartnerCard() {
 
   useEffect(() => {
     let alive = true;
-    void (async () => {
+    let inflight = false;
+
+    const load = async () => {
+      if (inflight) return;
+      inflight = true;
+      try {
+        await refresh();
+      } finally {
+        inflight = false;
+      }
+    };
+
+    const refresh = async () => {
       const newsPromise = listPartnerNews({ force: true });
       let rows = await listSidebarPartners({ force: true });
       // Нет галочки «в сайдбаре» — всё равно показываем активных, блок не должен пропадать.
@@ -286,9 +333,32 @@ export function SidebarPartnerCard() {
         return;
       }
       setIndex(0);
-    })();
+    };
+
+    const isVisible = () =>
+      Platform.OS === 'web'
+        ? typeof document === 'undefined' || document.visibilityState === 'visible'
+        : AppState.currentState === 'active';
+    const onVisible = () => {
+      if (isVisible()) void load();
+    };
+
+    void load();
+    // Правки из админки подтягиваются сами: опрос, пока вкладка видна, и сразу при возврате на неё.
+    const pollId = setInterval(onVisible, POLL_MS);
+    const appStateSub = AppState.addEventListener('change', onVisible);
+    if (Platform.OS === 'web' && typeof window !== 'undefined') {
+      document.addEventListener('visibilitychange', onVisible);
+      window.addEventListener('focus', onVisible);
+    }
     return () => {
       alive = false;
+      clearInterval(pollId);
+      appStateSub.remove();
+      if (Platform.OS === 'web' && typeof window !== 'undefined') {
+        document.removeEventListener('visibilitychange', onVisible);
+        window.removeEventListener('focus', onVisible);
+      }
     };
   }, []);
 
@@ -369,8 +439,11 @@ export function SidebarPartnerCard() {
   }, [advance, partners.length, paused]);
 
   const partner = partners[index] ?? partners[0] ?? null;
-  const news = partner ? (newsByPartner.get(partner.id) ?? null) : null;
+  const partnerNews = partner ? (newsByPartner.get(partner.id) ?? null) : null;
+  /** Прочитанная новость из карточки уходит: дальше там снова описание партнёра. */
+  const news = partnerNews && !seenNews.has(partnerNews.id) ? partnerNews : null;
   const newsId = news?.id ?? null;
+  const unread = Boolean(news);
 
   useEffect(() => {
     if (newsId) trackPartnerNews(newsId, 'view');
@@ -386,8 +459,10 @@ export function SidebarPartnerCard() {
       ? `${tagline}. Открывает сайт партнёра в новой вкладке`
       : 'Открывает сайт партнёра в новой вкладке';
   const hoverTitle = news?.title ?? tagline;
+  const ago = unread ? publishedAgo(news?.publishedAt) : null;
   const onPress = () => {
     if (news) {
+      void markPartnerNewsSeen(news.id);
       router.push({ pathname: '/news/partner/[id]', params: { id: news.id } });
       return;
     }
@@ -395,12 +470,19 @@ export function SidebarPartnerCard() {
   };
 
   return (
-    <View style={[styles.root, hovered && styles.rootHovered, focused && styles.rootFocused]}>
+    <View
+      style={[
+        styles.root,
+        hovered && styles.rootHovered,
+        unread && styles.rootNews,
+        unread && hovered && styles.rootNewsHovered,
+        focused && styles.rootFocused,
+      ]}>
       <Pressable
         accessibilityRole="link"
         accessibilityLabel={
           news
-            ? `Новость партнёра ${partner.name}: ${news.title}`
+            ? `Новая новость партнёра ${partner.name}: ${news.title}`
             : `Наши партнёры: ${partner.name}`
         }
         accessibilityHint={a11yHint}
@@ -416,11 +498,20 @@ export function SidebarPartnerCard() {
         style={({ pressed }) => [styles.pressable, pressed && styles.pressed]}>
         <View style={styles.eyebrowRow}>
           <View style={styles.eyebrowLeft}>
-            <Ionicons name="sparkles" size={10} color={colors.primary} />
-            <Text style={styles.eyebrow} numberOfLines={1}>
-              Наши партнёры
+            <Ionicons
+              name={unread ? 'megaphone' : 'sparkles'}
+              size={unread ? 12 : 10}
+              color={colors.primary}
+            />
+            <Text style={[styles.eyebrow, unread && styles.eyebrowNews]} numberOfLines={1}>
+              {unread ? 'Новая новость' : 'Наши партнёры'}
             </Text>
           </View>
+          {ago ? (
+            <Text style={styles.eyebrowTime} numberOfLines={1}>
+              {ago}
+            </Text>
+          ) : null}
         </View>
 
         <Animated.View
@@ -446,16 +537,11 @@ export function SidebarPartnerCard() {
             )}
             {news ? (
               <View style={styles.textCol}>
-                <View style={styles.newsMeta}>
-                  <View style={styles.newsChip}>
-                    <Text style={styles.newsChipText}>Новость</Text>
-                  </View>
-                  <Text style={styles.newsPartner} numberOfLines={1}>
-                    {partner.name}
-                  </Text>
-                </View>
                 <Text style={styles.newsTitle} numberOfLines={2}>
                   {news.title}
+                </Text>
+                <Text style={styles.newsSource} numberOfLines={1}>
+                  {partner.name}
                 </Text>
               </View>
             ) : (
@@ -472,6 +558,13 @@ export function SidebarPartnerCard() {
             )}
           </View>
         </Animated.View>
+
+        {unread ? (
+          <View style={styles.newsCta}>
+            <Text style={styles.newsCtaText}>Читать</Text>
+            <Ionicons name="arrow-forward" size={13} color={colors.primary} />
+          </View>
+        ) : null}
       </Pressable>
     </View>
   );

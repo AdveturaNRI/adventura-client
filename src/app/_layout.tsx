@@ -1,5 +1,7 @@
 import 'react-native-gesture-handler';
 
+import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
+import { FontDisplay, useFonts, type FontSource } from 'expo-font';
 import { Stack, usePathname } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { Platform, StyleSheet, View } from 'react-native';
@@ -28,6 +30,17 @@ import { isWelcomeLandingPath } from '@/services/marketing/welcome';
 
 registerLivekitGlobals();
 
+/**
+ * Icon fonts registered at the root: the static export inlines @font-face + preload into the HTML,
+ * and `block` keeps glyphs invisible (not tofu squares) until the file arrives.
+ */
+const ICON_FONTS: Record<string, FontSource> = Object.fromEntries(
+  Object.entries({ ...Ionicons.font, ...MaterialCommunityIcons.font }).map(([family, asset]) => [
+    family,
+    { uri: asset, display: FontDisplay.BLOCK },
+  ]),
+);
+
 function RootNavigator() {
   const colors = useTheme();
   const { colorScheme } = useThemePreference();
@@ -50,6 +63,8 @@ function RootNavigator() {
 }
 
 export default function RootLayout() {
+  useFonts(ICON_FONTS);
+
   return (
     <GestureHandlerRootView style={rootStyles.container}>
       <SafeAreaProvider>
