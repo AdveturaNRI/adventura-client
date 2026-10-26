@@ -34,6 +34,7 @@ import {
 import { localizeErrorMessage } from '@/utils/localizeError';
 import { trackEntityTransition } from '@/services/analytics/analytics';
 import { clubSeo } from '@/seo/entity-meta';
+import { withBrand } from '@/seo/site';
 
 function getTodaySchedule(schedule: ClubScheduleDay[]) {
   const jsDay = new Date().getDay();
@@ -450,10 +451,15 @@ export default function ClubDetailScreen() {
     ? `${club.city.name}${club.city.region ? `, ${club.city.region}` : ''}`
     : null;
   const schedule = [...(club?.schedule ?? [])].sort((a, b) => a.day - b.day);
+  const seo = club && club.id === clubId ? clubSeo(club) : null;
 
   return (
     <ScreenTransition>
-      {club ? <SeoHead {...clubSeo(club)} /> : null}
+      {seo ? (
+        <SeoHead {...seo} />
+      ) : error ? (
+        <SeoHead title={withBrand('Клуб недоступен')} noindex />
+      ) : null}
       <View style={styles.root}>
         <View style={styles.inner}>
           <View style={styles.headerRow}>

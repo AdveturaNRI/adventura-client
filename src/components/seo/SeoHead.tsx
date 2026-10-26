@@ -16,7 +16,14 @@ export function SeoHead(overrides: Props) {
   const base = resolveRouteSeo(pathname);
   if (!base) return null;
 
-  const seo = { ...base, ...stripUndefined(overrides) };
+  const own = stripUndefined(overrides);
+  // A screen with its own text must not inherit the route's generic preview.
+  const ownsText = own.title !== undefined || own.description !== undefined;
+  const seo = {
+    ...base,
+    ...(ownsText ? { ogTitle: undefined, ogDescription: undefined } : null),
+    ...own,
+  };
   const tags = [
     <title key="title">{seo.title}</title>,
     <meta key="description" name="description" content={seo.description} />,
@@ -28,14 +35,18 @@ export function SeoHead(overrides: Props) {
     <meta key="og:type" property="og:type" content="website" />,
     <meta key="og:site_name" property="og:site_name" content={SITE_NAME} />,
     <meta key="og:locale" property="og:locale" content="ru_RU" />,
-    <meta key="og:title" property="og:title" content={seo.title} />,
-    <meta key="og:description" property="og:description" content={seo.description} />,
+    <meta key="og:title" property="og:title" content={seo.ogTitle ?? seo.title} />,
+    <meta
+      key="og:description"
+      property="og:description"
+      content={seo.ogDescription ?? seo.description}
+    />,
     <meta key="og:image" property="og:image" content={SITE_OG_IMAGE} />,
     <meta key="og:image:width" property="og:image:width" content="1200" />,
     <meta key="og:image:height" property="og:image:height" content="630" />,
     <meta key="twitter:card" name="twitter:card" content="summary_large_image" />,
   ];
-  if (seo.canonical) {
+  if (seo.canonical && !seo.noindex) {
     tags.push(
       <link key="canonical" rel="canonical" href={seo.canonical} />,
       <meta key="og:url" property="og:url" content={seo.canonical} />,

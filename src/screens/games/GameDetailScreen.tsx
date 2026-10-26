@@ -39,6 +39,7 @@ import { localizeErrorMessage } from '@/utils/localizeError';
 import { trackEntityTransition } from '@/services/analytics/analytics';
 import { trackVkEvent, VK_PIXEL_EVENTS } from '@/services/analytics/vk-pixel';
 import { gameSeo } from '@/seo/entity-meta';
+import { withBrand } from '@/seo/site';
 
 function createStyles(
   colors: ThemeColors,
@@ -366,10 +367,15 @@ export default function GameDetailScreen() {
   }, [busy, item]);
 
   const title = item?.title ?? 'Игра';
+  const seo = item && item.id === gameId ? gameSeo(item) : null;
 
   return (
     <ScreenTransition animateOnFocus>
-      {item ? <SeoHead {...gameSeo(item)} /> : notFound ? <SeoHead noindex /> : null}
+      {seo ? (
+        <SeoHead {...seo} />
+      ) : notFound ? (
+        <SeoHead title={withBrand('Игра недоступна')} noindex />
+      ) : null}
       <View style={styles.root}>
         <View style={styles.inner}>
           <View style={styles.headerRow}>

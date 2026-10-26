@@ -3,7 +3,10 @@ import {
   SITE_DEFAULT_DESCRIPTION,
   SITE_DEFAULT_TITLE,
   SITE_NAME,
+  SITE_OG_DESCRIPTION,
+  SITE_OG_TITLE,
   absoluteUrl,
+  withBrand,
 } from '@/seo/site';
 
 export type RouteSeo = {
@@ -12,40 +15,44 @@ export type RouteSeo = {
   /** Absent for routes whose real URL isn't known at render time. */
   canonical?: string;
   noindex?: boolean;
+  /** Link preview text; falls back to title / description. */
+  ogTitle?: string;
+  ogDescription?: string;
 };
 
 type IndexedRoute = { title: string; description: string };
 
-/** Public app sections worth ranking. Titles carry the search phrase first. */
+/** Public app sections worth ranking. Titles are final, brand included. */
 const INDEXED_ROUTES: Record<string, IndexedRoute> = {
   '/games': {
-    title: 'Игры по D&D и НРИ: набор игроков онлайн и вживую',
+    title: 'Игры по D&D и другим НРИ — найти игру | Adventura',
     description:
-      'Найди свою следующую НРИ! Выбирай игры по системе, формату, расписанию и стоимости, знакомься с мастерами и присоединяйся к приключениям.',
+      'Ищи игры по D&D, Pathfinder и другим НРИ. Выбирай систему, формат, время и стоимость, знакомься с мастерами и записывайся в подходящую группу.',
   },
   '/dice': {
-    title: 'Кубики для D&D онлайн: бросить d20, d6, d100',
+    title: 'Онлайн-кубики для D&D и НРИ — 3D d20, d6, d100 | Adventura',
     description:
-      'Бросайте d4, d6, d8, d10, d12, d20 и d100 с 3D-анимацией. Модификатор, преимущество и помеха, история бросков. Без регистрации.',
+      'Бросай виртуальные кубики d4, d6, d8, d10, d12, d20 и d100 с 3D-анимацией. Используй модификаторы, преимущество и помеху, просматривай историю бросков.',
   },
   '/generators': {
-    title: 'Генератор NPC, таверн и подземелий для D&D',
+    title: 'Генераторы для мастера D&D и НРИ: NPC, таверны, подземелья | Adventura',
     description:
-      'NPC с именем и секретом, таверны, королевства, поселения и подземелья для мастера D&D. 32 расы, копирование в чат. Без регистрации.',
+      'Создавай NPC с именами и секретами, генерируй таверны, королевства, поселения и подземелья для своих приключений. Инструменты для мастеров НРИ с быстрым копированием результатов.',
   },
   '/clubs': {
-    title: 'Клубы НРИ на карте: где играть в D&D вживую',
+    title: 'Клубы настольных ролевых игр — найти клуб НРИ | Adventura',
     description:
-      'Клубы для настольных ролевых игр с адресами, часами работы, числом столов и фото. Найдите место для игры в своём городе.',
+      'Ищи клубы настольно-ролевых игр в своём городе. Изучай адреса, часы работы, фотографии и информацию об игровых столах, чтобы найти место для партии в D&D и других НРИ.',
   },
   '/authors': {
-    title: 'Карты, арты и материалы для НРИ от авторов',
+    title: 'Материалы для НРИ: арты, карты и ассеты авторов | Adventura',
     description:
-      'Публикации авторов для настольных ролевых игр: арты, карты, игровые материалы и ассеты.',
+      'Открывай публикации авторов для настольно-ролевых игр: иллюстрации, игровые карты, токены и другие материалы для подготовки и проведения приключений.',
   },
   '/news': {
-    title: 'Новости НРИ и Adventura',
-    description: 'Новости Adventura и партнёров из мира настольных ролевых игр.',
+    title: 'Новости НРИ: обновления Adventura и события сообщества',
+    description:
+      'Читайте новости Adventura, узнавайте об обновлениях платформы, новых возможностях, событиях и проектах партнёров из мира настольно-ролевых игр.',
   },
 };
 
@@ -73,9 +80,7 @@ const PRIVATE_TITLES: Record<string, string> = {
 /** Sections with placeholder data: indexing them now would only add thin pages. */
 const NOINDEX_PUBLIC_PREFIXES = ['/handbook', '/ui-lib'];
 
-function withBrand(title: string): string {
-  return `${title} — ${SITE_NAME}`;
-}
+const GENERIC_PREVIEW = { ogTitle: SITE_OG_TITLE, ogDescription: SITE_OG_DESCRIPTION };
 
 function normalizePath(pathname: string): string {
   const path = (pathname.split(/[?#]/)[0] ?? '/').replace(/\/+$/, '');
@@ -101,16 +106,13 @@ export function resolveRouteSeo(pathname: string): RouteSeo | null {
       title: SITE_DEFAULT_TITLE,
       description: SITE_DEFAULT_DESCRIPTION,
       canonical: absoluteUrl('/'),
+      ...GENERIC_PREVIEW,
     };
   }
 
   const indexed = INDEXED_ROUTES[path];
   if (indexed) {
-    return {
-      title: withBrand(indexed.title),
-      description: indexed.description,
-      canonical: absoluteUrl(path),
-    };
+    return { ...indexed, canonical: absoluteUrl(path) };
   }
 
   const privateTitle = PRIVATE_TITLES[path];
@@ -124,6 +126,7 @@ export function resolveRouteSeo(pathname: string): RouteSeo | null {
       title: SITE_NAME,
       description: SITE_DEFAULT_DESCRIPTION,
       canonical: isUnresolvedDynamicPath(path) ? undefined : absoluteUrl(path),
+      ...GENERIC_PREVIEW,
     };
   }
 
@@ -131,5 +134,6 @@ export function resolveRouteSeo(pathname: string): RouteSeo | null {
     title: privateTitle ? withBrand(privateTitle) : SITE_NAME,
     description: SITE_DEFAULT_DESCRIPTION,
     noindex: true,
+    ...GENERIC_PREVIEW,
   };
 }
