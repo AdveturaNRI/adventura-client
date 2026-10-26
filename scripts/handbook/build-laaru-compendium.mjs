@@ -124,6 +124,80 @@ function shortBlurb(html, max = 110) {
   return `${(sp > 50 ? cut.slice(0, sp) : cut).trim()}…`;
 }
 
+const RACE_BLURB_MAX = 180;
+const RACE_BLURB_HARD_MAX = 240;
+
+/** `@Compendium[id]{скальными гномами}` → «скальными гномами», броски `[[/r d8]]` — прочь. */
+function stripFoundryRefs(text) {
+  return String(text)
+    .replace(/@\w+\[[^\]]*\]\{([^}]*)\}/g, '$1')
+    .replace(/@\w+\[[^\]]*\]/g, '')
+    .replace(/\[\[[^\]]*\]\]/g, '');
+}
+
+function htmlParagraphs(html) {
+  const source = String(html || '');
+  // Описание лежит в <details>; после него идут таблицы особенностей — их не трогаем.
+  const details = source.match(/<details\b[^>]*>([\s\S]*?)<\/details>/i);
+  const body = (details ? details[1] : source)
+    .replace(/<summary[\s\S]*?<\/summary>/gi, '')
+    .replace(/<table[\s\S]*?<\/table>/gi, '');
+  const blocks = body.match(/<p\b[^>]*>[\s\S]*?<\/p>/gi) || [];
+  return blocks.map((raw) => {
+    const inner = raw.replace(/^<p\b[^>]*>/i, '').replace(/<\/p>$/i, '');
+    const text = stripHtml(stripFoundryRefs(inner.replace(/<br\s*\/?>/gi, ' ')))
+      .replace(/\u00ad/g, '')
+      .replace(/\s+/g, ' ')
+      .replace(/ —(?=\S)/g, ' — ')
+      .trim();
+    return {
+      text,
+      alignedRight: /text-align:\s*right/i.test(raw),
+      italicOnly: /^\s*["«“]?\s*<em>[\s\S]*<\/em>\s*["»”]?\s*$/i.test(inner),
+    };
+  }).filter((p) => p.text);
+}
+
+/** Первый абзац самого описания: без эпиграфа, подписи к нему и «нажмите…». */
+function raceLeadParagraph(html) {
+  const ps = htmlParagraphs(html);
+  const isAttribution = (p) => p && (p.alignedRight || /^[—–]\s/.test(p.text));
+  // Подпись без выравнивания («Ричард Ли Байерс „Чёрный букет“») и заголовки-абзацы.
+  const isCaption = (p) => p.text.length < 80 && !/[.!?…:]/.test(p.text);
+  for (let i = 0; i < ps.length; i += 1) {
+    const p = ps[i];
+    if (p.text.length < 25 || isAttribution(p) || isCaption(p)) continue;
+    if (p.italicOnly || /^["«“]/.test(p.text) || /нажмите/i.test(p.text)) continue;
+    if (isAttribution(ps[i + 1])) continue;
+    return p.text.endsWith(':') && ps[i + 1] ? `${p.text} ${ps[i + 1].text}` : p.text;
+  }
+  return '';
+}
+
+function splitSentences(text) {
+  return (text.match(/[^.!?…]+(?:[.!?…]+["»”)]*|$)/g) || []).map((s) => s.trim()).filter(Boolean);
+}
+
+/**
+ * Лид расы для плитки: целые предложения до ~180 символов.
+ * Слишком длинное первое предложение режем по «;», и только в крайнем случае — по слову.
+ */
+function raceBlurb(html) {
+  const sentences = splitSentences(raceLeadParagraph(html));
+  let out = '';
+  for (const sentence of sentences) {
+    const next = out ? `${out} ${sentence}` : sentence;
+    const tooShort = out.length > 0 && out.length < 60 && next.length <= 220;
+    if (out && next.length > RACE_BLURB_MAX && !tooShort) break;
+    out = next;
+  }
+  if (out.length <= RACE_BLURB_HARD_MAX) return out;
+  const clause = out.slice(0, RACE_BLURB_HARD_MAX).lastIndexOf(';');
+  if (clause > 60) return `${out.slice(0, clause).trim()}.`;
+  const cut = out.slice(0, RACE_BLURB_HARD_MAX - 1);
+  return `${cut.slice(0, cut.lastIndexOf(' ')).replace(/[\s,;:—–-]+$/, '')}…`;
+}
+
 /** Латинские «двойники» кириллицы в заголовках (Mетка → Метка). */
 function fixLookalikeCyrillic(text) {
   return String(text || '')
@@ -437,7 +511,7 @@ const races = sortEntries(
           category: 'races',
           title: ruTitle(d.name),
           ...(subtitle ? { subtitle } : {}),
-          summary: shortBlurb(d.system?.description?.value, 100),
+          summary: raceBlurb(d.system?.description?.value),
           tags,
         };
       })

@@ -112,6 +112,11 @@ function createStyles(colors: ThemeColors, isDark: boolean) {
       color: colors.textMuted,
       lineHeight: 15,
     },
+    summary: {
+      fontSize: 12,
+      lineHeight: 16,
+      color: colors.textSecondary,
+    },
     metaRow: {
       flexDirection: 'row',
       alignItems: 'center',
@@ -189,8 +194,12 @@ export function HandbookRaceTile({ entry, onPress, onOpenVariants }: HandbookRac
   const layout = layoutForWidth(cardWidth);
   const source = raceSourceLabel(entry);
   const subtitle = usableRaceSubtitle(entry.title, entry.subtitle);
+  const summary = entry.summary?.trim();
   const variantCount = entry.variants?.length ?? 0;
   const a11y = [entry.title, subtitle, source].filter(Boolean).join(', ');
+  const showVariantChip = variantCount > 0 && onOpenVariants != null;
+  // On web role="button" renders <button>, which can't contain the chip's own <button>.
+  const cardRole = Platform.OS === 'web' && showVariantChip ? undefined : 'button';
 
   const onLayout = (event: LayoutChangeEvent) => {
     const next = Math.round(event.nativeEvent.layout.width);
@@ -199,7 +208,7 @@ export function HandbookRaceTile({ entry, onPress, onOpenVariants }: HandbookRac
 
   return (
     <Pressable
-      accessibilityRole="button"
+      accessibilityRole={cardRole}
       accessibilityLabel={a11y}
       accessibilityHint={variantCount > 0 ? 'Открыть базовую расу' : undefined}
       onPress={onPress}
@@ -231,9 +240,10 @@ export function HandbookRaceTile({ entry, onPress, onOpenVariants }: HandbookRac
               {subtitle}
             </Text>
           ) : null}
+          {summary ? <Text style={styles.summary}>{summary}</Text> : null}
           <View style={styles.metaRow}>
             {source ? <Text style={styles.source}>{source}</Text> : null}
-            {variantCount > 0 && onOpenVariants ? (
+            {showVariantChip ? (
               <Pressable
                 accessibilityRole="button"
                 accessibilityLabel={variantCountLabel(variantCount)}
@@ -241,7 +251,7 @@ export function HandbookRaceTile({ entry, onPress, onOpenVariants }: HandbookRac
                 hitSlop={8}
                 onPress={(event) => {
                   event?.stopPropagation?.();
-                  onOpenVariants();
+                  onOpenVariants?.();
                 }}
                 style={({ pressed }) => [styles.variantChip, pressed && styles.variantChipPressed]}>
                 <Text style={styles.variantChipText}>{variantCountLabel(variantCount)}</Text>
