@@ -88,6 +88,78 @@ export function listSidebarPartners(options?: {
   return sidebarInflight;
 }
 
+export type PartnerNews = {
+  id: string;
+  partnerId: string;
+  title: string;
+  body: string;
+  coverUrl: string | null;
+  actionLabel: string | null;
+  actionUrl: string | null;
+  publishedAt: string;
+  partner: {
+    id: string;
+    name: string;
+    href: string;
+    accent: string;
+    logoUrl: string | null;
+  };
+};
+
+let newsCache: PartnerNews[] | null = null;
+let newsInflight: Promise<PartnerNews[]> | null = null;
+const viewedNews = new Set<string>();
+
+/** Свежие новости партнёров для карточки в меню: по одной на партнёра. */
+export function listPartnerNews(options?: { force?: boolean }): Promise<PartnerNews[]> {
+  if (!options?.force && newsCache) return Promise.resolve(newsCache);
+  if (!options?.force && newsInflight) return newsInflight;
+
+  newsInflight = apiRequest<PartnerNews[]>('/partners/news', {
+    skipLoading: true,
+    skipAuthRefresh: true,
+  })
+    .then((rows) => {
+      newsCache = Array.isArray(rows) ? rows : [];
+      return newsCache;
+    })
+    .catch(() => {
+      newsCache = [];
+      return [];
+    })
+    .finally(() => {
+      newsInflight = null;
+    });
+
+  return newsInflight;
+}
+
+export function getPartnerNewsCache(): PartnerNews[] | null {
+  return newsCache;
+}
+
+export function getPartnerNews(id: string): Promise<PartnerNews> {
+  const cached = newsCache?.find((item) => item.id === id);
+  if (cached) return Promise.resolve(cached);
+  return apiRequest<PartnerNews>(`/partners/news/${encodeURIComponent(id)}`, {
+    skipLoading: true,
+    skipAuthRefresh: true,
+  });
+}
+
+/** Показ считается раз за сессию; переход по кнопке — каждый раз. */
+export function trackPartnerNews(id: string, kind: 'view' | 'click'): void {
+  if (kind === 'view') {
+    if (viewedNews.has(id)) return;
+    viewedNews.add(id);
+  }
+  void apiRequest(`/partners/news/${encodeURIComponent(id)}/${kind}`, {
+    method: 'POST',
+    skipLoading: true,
+    skipAuthRefresh: true,
+  }).catch(() => undefined);
+}
+
 export function getPartnersCache(): Partner[] | null {
   return cache;
 }

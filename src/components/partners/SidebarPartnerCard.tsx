@@ -1,5 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
+import { router } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   AccessibilityInfo,
@@ -23,10 +24,14 @@ import { type ThemeColors } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { useThemedStyles } from '@/hooks/use-themed-styles';
 import {
+  getPartnerNewsCache,
   getPartnersCache,
   getSidebarPartnersCache,
+  listPartnerNews,
   listPartners,
   listSidebarPartners,
+  trackPartnerNews,
+  type PartnerNews,
 } from '@/services/partners/partnersApi';
 
 const ROTATE_MS = 4_000;
@@ -37,6 +42,20 @@ const SHIFT_PX = 4;
 const LOGO_SIZE = 38;
 /** Лого + название (до 2 строк) + слоган в одну строку. */
 const CONTENT_MIN_HEIGHT = 44;
+/** Имя партнёра + заголовок новости в две строки: держим высоту, чтобы карточка не прыгала. */
+const NEWS_CONTENT_MIN_HEIGHT = 50;
+
+/** Партнёры со свежей новостью идут в ротации первыми, порядок внутри групп сохраняется. */
+function newsFirst(partners: Partner[], newsByPartner: Map<string, PartnerNews>): Partner[] {
+  return [
+    ...partners.filter((partner) => newsByPartner.has(partner.id)),
+    ...partners.filter((partner) => !newsByPartner.has(partner.id)),
+  ];
+}
+
+function indexNews(rows: PartnerNews[] | null): Map<string, PartnerNews> {
+  return new Map((rows ?? []).map((row) => [row.partnerId, row]));
+}
 
 function partnerTagline(partner: Partner): string | null {
   const tagline = partner.tagline?.trim() ?? '';
@@ -146,14 +165,52 @@ function createStyles(colors: ThemeColors) {
       color: colors.textSecondary,
       lineHeight: 14,
     },
+    contentNews: {
+      minHeight: NEWS_CONTENT_MIN_HEIGHT,
+    },
+    newsChip: {
+      flexShrink: 0,
+      paddingHorizontal: 6,
+      paddingVertical: 2,
+      borderRadius: 999,
+      backgroundColor: 'rgba(21, 122, 254, 0.12)',
+    },
+    newsChipText: {
+      fontSize: 9,
+      fontWeight: '700',
+      letterSpacing: 0.4,
+      textTransform: 'uppercase',
+      color: colors.primary,
+    },
+    newsMeta: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+      minWidth: 0,
+    },
+    newsPartner: {
+      flexShrink: 1,
+      fontSize: 11,
+      fontWeight: '600',
+      color: colors.textSecondary,
+      lineHeight: 14,
+    },
+    newsTitle: {
+      fontSize: 13,
+      fontWeight: '600',
+      color: colors.text,
+      letterSpacing: -0.1,
+      lineHeight: 17,
+    },
   });
 }
 
 export function SidebarPartnerCard() {
   const colors = useTheme();
   const styles = useThemedStyles(createStyles);
-  const [partners, setPartners] = useState<Partner[]>(
-    () => getSidebarPartnersCache() ?? getPartnersCache() ?? [],
+  const [newsByPartner, setNewsByPartner] = useState(() => indexNews(getPartnerNewsCache()));
+  const [partners, setPartners] = useState<Partner[]>(() =>
+    newsFirst(getSidebarPartnersCache() ?? getPartnersCache() ?? [], newsByPartner),
   );
   const [index, setIndex] = useState(0);
   const [hovered, setHovered] = useState(false);
@@ -195,13 +252,29 @@ export function SidebarPartnerCard() {
   useEffect(() => {
     let alive = true;
     void (async () => {
+      const newsPromise = listPartnerNews({ force: true });
       let rows = await listSidebarPartners({ force: true });
       // Нет галочки «в сайдбаре» — всё равно показываем активных, блок не должен пропадать.
       if (!rows.length) {
         rows = await listPartners({ force: true });
       }
+      const news = indexNews(await newsPromise);
       if (!alive) return;
+      // Свежая новость выводит партнёра в ротацию, даже если он не отмечен «в сайдбаре».
+      const known = new Set(rows.map((row) => row.id));
+      const fromNews: Partner[] = [...news.values()]
+        .filter((item) => !known.has(item.partnerId))
+        .map((item) => ({
+          id: item.partner.id,
+          name: item.partner.name,
+          href: item.partner.href,
+          mark: item.partner.name,
+          accent: item.partner.accent,
+          logoUrl: item.partner.logoUrl,
+        }));
+      rows = newsFirst([...rows, ...fromNews], news);
       const currentId = partnersRef.current[indexRef.current]?.id;
+      setNewsByPartner(news);
       setPartners(rows);
       if (!rows.length) {
         setIndex(0);
@@ -296,29 +369,49 @@ export function SidebarPartnerCard() {
   }, [advance, partners.length, paused]);
 
   const partner = partners[index] ?? partners[0] ?? null;
+  const news = partner ? (newsByPartner.get(partner.id) ?? null) : null;
+  const newsId = news?.id ?? null;
+
+  useEffect(() => {
+    if (newsId) trackPartnerNews(newsId, 'view');
+  }, [newsId]);
 
   if (!partner) return null;
 
   const accent = partner.accent || colors.primary;
   const tagline = partnerTagline(partner);
-  const a11yHint = tagline
-    ? `${tagline}. Открывает сайт партнёра в новой вкладке`
-    : 'Открывает сайт партнёра в новой вкладке';
+  const a11yHint = news
+    ? 'Открывает новость партнёра'
+    : tagline
+      ? `${tagline}. Открывает сайт партнёра в новой вкладке`
+      : 'Открывает сайт партнёра в новой вкладке';
+  const hoverTitle = news?.title ?? tagline;
+  const onPress = () => {
+    if (news) {
+      router.push({ pathname: '/news/partner/[id]', params: { id: news.id } });
+      return;
+    }
+    openPartnerUrl(partner.href);
+  };
 
   return (
     <View style={[styles.root, hovered && styles.rootHovered, focused && styles.rootFocused]}>
       <Pressable
         accessibilityRole="link"
-        accessibilityLabel={`Наши партнёры: ${partner.name}`}
+        accessibilityLabel={
+          news
+            ? `Новость партнёра ${partner.name}: ${news.title}`
+            : `Наши партнёры: ${partner.name}`
+        }
         accessibilityHint={a11yHint}
         accessibilityLiveRegion="none"
-        onPress={() => openPartnerUrl(partner.href)}
+        onPress={onPress}
         onHoverIn={Platform.OS === 'web' ? () => setHovered(true) : undefined}
         onHoverOut={Platform.OS === 'web' ? () => setHovered(false) : undefined}
         onFocus={() => setFocused(true)}
         onBlur={() => setFocused(false)}
-        {...(Platform.OS === 'web' && tagline
-          ? ({ title: tagline } as object)
+        {...(Platform.OS === 'web' && hoverTitle
+          ? ({ title: hoverTitle } as object)
           : null)}
         style={({ pressed }) => [styles.pressable, pressed && styles.pressed]}>
         <View style={styles.eyebrowRow}>
@@ -330,7 +423,12 @@ export function SidebarPartnerCard() {
           </View>
         </View>
 
-        <Animated.View style={[styles.content, animatedContentStyle]}>
+        <Animated.View
+          style={[
+            styles.content,
+            newsByPartner.size > 0 && styles.contentNews,
+            animatedContentStyle,
+          ]}>
           <View style={styles.body}>
             {partner.logoUrl ? (
               <Image
@@ -346,16 +444,32 @@ export function SidebarPartnerCard() {
                 </Text>
               </View>
             )}
-            <View style={styles.textCol}>
-              <Text style={styles.name} numberOfLines={2}>
-                {partner.name}
-              </Text>
-              {tagline ? (
-                <Text style={styles.tagline} numberOfLines={3}>
-                  {tagline}
+            {news ? (
+              <View style={styles.textCol}>
+                <View style={styles.newsMeta}>
+                  <View style={styles.newsChip}>
+                    <Text style={styles.newsChipText}>Новость</Text>
+                  </View>
+                  <Text style={styles.newsPartner} numberOfLines={1}>
+                    {partner.name}
+                  </Text>
+                </View>
+                <Text style={styles.newsTitle} numberOfLines={2}>
+                  {news.title}
                 </Text>
-              ) : null}
-            </View>
+              </View>
+            ) : (
+              <View style={styles.textCol}>
+                <Text style={styles.name} numberOfLines={2}>
+                  {partner.name}
+                </Text>
+                {tagline ? (
+                  <Text style={styles.tagline} numberOfLines={3}>
+                    {tagline}
+                  </Text>
+                ) : null}
+              </View>
+            )}
           </View>
         </Animated.View>
       </Pressable>
