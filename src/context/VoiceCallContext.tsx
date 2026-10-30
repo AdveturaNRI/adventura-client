@@ -220,15 +220,12 @@ export function VoiceCallProvider({ children }: { children: ReactNode }) {
   const [minimized, setMinimized] = useState(false);
   const ringingStartedAtRef = useRef<number | null>(null);
   const switchingCallRef = useRef(false);
-<<<<<<< HEAD
   /** startCall / joinOngoingCall in flight — repeat taps on a slow network must not stack. */
   const callOpInFlightRef = useRef(false);
   /** Chat whose call button is waiting on startCall / joinOngoingCall — drives its spinner. */
   const [pendingCallConversationId, setPendingCallConversationId] = useState<string | null>(null);
   const acceptingRef = useRef(false);
-=======
   const [activeSinceMs, setActiveSinceMs] = useState<number | null>(null);
->>>>>>> 6092018 (feat(desktop): Linux Electron shell with tray, PiP calls, auto-update)
 
   // Drop any leftover gesture-primed mic from a previous session / cancelled tap.
   useEffect(() => {
