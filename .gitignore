@@ -45,3 +45,5 @@ example
 /ios
 /android
 build/
+!desktop/build/
+!desktop/build/**
