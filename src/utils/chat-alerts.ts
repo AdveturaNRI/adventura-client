@@ -1,5 +1,9 @@
 import { Platform } from 'react-native';
 
+import {
+  isElectronShell,
+  notifyElectronDesktop,
+} from '@/services/desktop/electronBridge';
 import type { PortalNotification } from '@/services/notifications/notificationsApi';
 import {
   getEffectiveNotificationSoundUrl,
@@ -302,19 +306,44 @@ export function stopNewMessageTitleBlink(options?: { broadcast?: boolean }) {
   }
 }
 
-export function notifyIncomingChatMessage(conversationId?: string) {
+export type IncomingChatAlertOptions = {
+  title?: string;
+  body?: string;
+};
+
+function previewMessageBody(body: string | null | undefined, hasMedia?: boolean): string {
+  const trimmed = (body ?? '').trim();
+  if (trimmed) {
+    return trimmed.length > 160 ? `${trimmed.slice(0, 157)}…` : trimmed;
+  }
+  return hasMedia ? 'Вложение' : 'Новое сообщение в чате';
+}
+
+export function notifyIncomingChatMessage(
+  conversationId?: string,
+  options?: IncomingChatAlertOptions,
+) {
   if (conversationId && isChatConversationFocused(conversationId)) {
     return;
   }
+  const title = options?.title?.trim() || MESSAGE_ALERT_TITLE;
+  const body = options?.body?.trim() || 'Новое сообщение в чате';
   playIncomingMessageSound();
   startTitleBlink(MESSAGE_ALERT_TITLE);
+  showDesktopPush(title, body, conversationId ? `/chats/${conversationId}` : '/chats');
 }
 
-function showDesktopPush(title: string, body: string) {
-  if (!canUseWebAlerts() || typeof Notification === 'undefined') {
+function showDesktopPush(title: string, body: string, url?: string) {
+  if (!canUseWebAlerts()) {
     return;
   }
-  if (Notification.permission !== 'granted') {
+
+  if (isElectronShell()) {
+    void notifyElectronDesktop({ title, body, url });
+    return;
+  }
+
+  if (typeof Notification === 'undefined' || Notification.permission !== 'granted') {
     return;
   }
   try {
@@ -322,6 +351,24 @@ function showDesktopPush(title: string, body: string) {
   } catch {
     // ignore unsupported notification payloads
   }
+}
+
+export function notifyIncomingVoiceCall(options: {
+  peerName?: string | null;
+  conversationId?: string;
+}) {
+  if (!canUseWebAlerts()) {
+    return;
+  }
+  const peer = options.peerName?.trim() || 'Собеседник';
+  const title = 'Входящий звонок';
+  const body = peer;
+  startTitleBlink(title);
+  showDesktopPush(
+    title,
+    body,
+    options.conversationId ? `/chats/${options.conversationId}` : '/chats',
+  );
 }
 
 export function notifyIncomingPortalNotification(options?: {
@@ -348,5 +395,8 @@ export function notifyIncomingPortalNotification(options?: {
   });
 
   startTitleBlink(title);
-  showDesktopPush(title, body);
+  showDesktopPush(title, body, '/notifications');
 }
+
+export { previewMessageBody };
+

@@ -10,6 +10,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { stackScreenOptions } from '@/constants/navigation.config';
 import { AppToast } from '@/components/ui';
+import { DesktopBridge } from '@/components/desktop/DesktopBridge';
 import { GlobalLoadingOverlay } from '@/components/ui/feedback/GlobalLoadingOverlay';
 import { YandexMetrikaTracker } from '@/components/analytics/YandexMetrikaTracker';
 import { SeoHead } from '@/components/seo/SeoHead';
@@ -89,6 +90,7 @@ function AppRouteProviders() {
       <SeoHead />
       <YandexMetrikaTracker />
       <VkPixelTracker />
+      {!isPublicLanding ? <DesktopBridge /> : null}
       <RootNavigator />
       {!isPublicLanding ? <AppToast /> : null}
       {!isPublicLanding ? <GlobalLoadingOverlay /> : null}

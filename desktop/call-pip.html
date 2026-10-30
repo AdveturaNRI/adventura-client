@@ -1,0 +1,391 @@
+<!DOCTYPE html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; img-src data: https: http:; style-src 'unsafe-inline'; script-src 'unsafe-inline'"
+    />
+    <title>Adventura Call</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #0b111b;
+        --panel: #111827;
+        --line: rgba(255, 255, 255, 0.12);
+        --text: #f3f4f6;
+        --muted: #9ca3af;
+        --accent: #38bdf8;
+        --danger: #ef4444;
+        --ok: #22c55e;
+      }
+      * {
+        box-sizing: border-box;
+        user-select: none;
+      }
+      html,
+      body {
+        margin: 0;
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        background: var(--panel);
+        font-family: 'Segoe UI', system-ui, sans-serif;
+      }
+      #root {
+        width: 100%;
+        height: 100%;
+        display: none;
+        flex-direction: column;
+        border-radius: 14px;
+        overflow: hidden;
+        background: var(--panel);
+        border: 1px solid var(--line);
+      }
+      #root.visible {
+        display: flex;
+      }
+      #root.collapsed .media,
+      #root.collapsed .actions-full {
+        display: none !important;
+      }
+      #root.collapsed .meta {
+        padding: 6px 10px 8px;
+        border-top: 0;
+      }
+      #root.collapsed .chrome {
+        border-bottom: 0;
+      }
+      .chrome {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        height: 34px;
+        padding: 0 8px 0 12px;
+        border-bottom: 1px solid var(--line);
+        background: rgba(0, 0, 0, 0.25);
+        -webkit-app-region: drag;
+        cursor: grab;
+      }
+      .chrome-title {
+        flex: 1;
+        min-width: 0;
+        color: var(--muted);
+        font-size: 11px;
+        font-weight: 600;
+        letter-spacing: 0.02em;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .chrome-btn {
+        -webkit-app-region: no-drag;
+        width: 26px;
+        height: 26px;
+        border: 0;
+        border-radius: 8px;
+        background: rgba(255, 255, 255, 0.08);
+        color: var(--text);
+        font-size: 14px;
+        line-height: 1;
+        cursor: pointer;
+        flex: 0 0 auto;
+      }
+      .chrome-btn:hover {
+        background: rgba(255, 255, 255, 0.16);
+      }
+      .media {
+        position: relative;
+        flex: 1;
+        min-height: 0;
+        background: var(--bg);
+        -webkit-app-region: drag;
+      }
+      .media img.frame,
+      .media img.avatar {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        background: #000;
+        pointer-events: none;
+      }
+      .media img.avatar {
+        object-fit: cover;
+        width: 42%;
+        height: auto;
+        aspect-ratio: 1;
+        border-radius: 50%;
+        inset: auto;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -55%);
+        border: 2px solid rgba(255, 255, 255, 0.2);
+      }
+      .placeholder {
+        position: absolute;
+        inset: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: var(--muted);
+        font-size: 42px;
+        font-weight: 700;
+        letter-spacing: 0.02em;
+        pointer-events: none;
+      }
+      .badge {
+        position: absolute;
+        top: 10px;
+        left: 10px;
+        padding: 4px 8px;
+        border-radius: 999px;
+        background: rgba(0, 0, 0, 0.55);
+        color: #fff;
+        font-size: 11px;
+        letter-spacing: 0.02em;
+        -webkit-app-region: no-drag;
+      }
+      .badge .dot {
+        display: inline-block;
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: var(--ok);
+        margin-right: 6px;
+        vertical-align: middle;
+      }
+      .meta {
+        padding: 10px 12px 8px;
+        border-top: 1px solid var(--line);
+        -webkit-app-region: drag;
+      }
+      .title {
+        color: var(--text);
+        font-size: 13px;
+        font-weight: 600;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .subtitle {
+        margin-top: 2px;
+        color: var(--muted);
+        font-size: 11px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .actions {
+        display: flex;
+        gap: 8px;
+        padding: 0 12px 12px;
+        -webkit-app-region: no-drag;
+      }
+      button.action {
+        flex: 1;
+        height: 34px;
+        border: 0;
+        border-radius: 10px;
+        background: rgba(255, 255, 255, 0.08);
+        color: var(--text);
+        font-size: 12px;
+        font-weight: 600;
+        cursor: pointer;
+      }
+      button.action:hover {
+        background: rgba(255, 255, 255, 0.14);
+      }
+      button.action.danger {
+        background: rgba(239, 68, 68, 0.9);
+      }
+      button.action.ok {
+        background: rgba(34, 197, 94, 0.9);
+      }
+      button.action.active {
+        background: rgba(56, 189, 248, 0.25);
+        color: var(--accent);
+      }
+      .collapsed-actions {
+        display: none;
+        gap: 6px;
+        padding: 0 10px 10px;
+        -webkit-app-region: no-drag;
+      }
+      #root.collapsed .collapsed-actions {
+        display: flex;
+      }
+      .collapsed-actions button.action {
+        height: 30px;
+        font-size: 11px;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root">
+      <div class="chrome" title="Перетащите окно">
+        <div class="chrome-title" id="chromeTitle">Adventura · звонок</div>
+        <button class="chrome-btn" id="btnCollapse" title="Свернуть / развернуть" type="button">–</button>
+        <button class="chrome-btn" id="btnExpandApp" title="Открыть Adventura" type="button">↗</button>
+      </div>
+      <div class="media" id="media">
+        <div class="placeholder" id="placeholder">A</div>
+        <img class="avatar" id="avatar" alt="" hidden />
+        <img class="frame" id="frame" alt="" hidden />
+        <div class="badge" id="badge"><span class="dot"></span><span id="badgeText">Звонок</span></div>
+      </div>
+      <div class="meta">
+        <div class="title" id="title">Adventura</div>
+        <div class="subtitle" id="subtitle"> </div>
+      </div>
+      <div class="actions actions-full" id="actions"></div>
+      <div class="collapsed-actions" id="collapsedActions"></div>
+    </div>
+    <script>
+      const root = document.getElementById('root');
+      const titleEl = document.getElementById('title');
+      const subtitleEl = document.getElementById('subtitle');
+      const chromeTitle = document.getElementById('chromeTitle');
+      const badgeText = document.getElementById('badgeText');
+      const placeholder = document.getElementById('placeholder');
+      const avatar = document.getElementById('avatar');
+      const frame = document.getElementById('frame');
+      const actions = document.getElementById('actions');
+      const collapsedActions = document.getElementById('collapsedActions');
+      const btnCollapse = document.getElementById('btnCollapse');
+      const btnExpandApp = document.getElementById('btnExpandApp');
+
+      let lastMode = '';
+      let lastMuted = '';
+      let collapsed = false;
+
+      function send(action) {
+        window.adventuraCallPip?.sendAction?.(action);
+      }
+
+      function setCollapsed(next) {
+        collapsed = Boolean(next);
+        root.classList.toggle('collapsed', collapsed);
+        btnCollapse.textContent = collapsed ? '+' : '–';
+        btnCollapse.title = collapsed ? 'Развернуть карточку' : 'Свернуть карточку';
+        void window.adventuraCallPip?.setCollapsed?.(collapsed);
+      }
+
+      function formatDuration(sec) {
+        if (sec == null || sec < 0) return '';
+        const m = Math.floor(sec / 60);
+        const s = Math.floor(sec % 60);
+        return `${m}:${String(s).padStart(2, '0')}`;
+      }
+
+      function mkButton(label, action, cls) {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'action' + (cls ? ' ' + cls : '');
+        btn.textContent = label;
+        btn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          send(action);
+        });
+        return btn;
+      }
+
+      function renderActions(mode, muted) {
+        const sig = mode + ':' + Boolean(muted);
+        if (sig === lastMode + ':' + lastMuted && actions.childNodes.length) {
+          return;
+        }
+        lastMode = mode;
+        lastMuted = String(Boolean(muted));
+        actions.innerHTML = '';
+        collapsedActions.innerHTML = '';
+        root.classList.toggle('incoming', mode === 'incoming');
+
+        if (mode === 'incoming') {
+          actions.appendChild(mkButton('Отклонить', 'decline', 'danger'));
+          actions.appendChild(mkButton('Принять', 'accept', 'ok'));
+          collapsedActions.appendChild(mkButton('Нет', 'decline', 'danger'));
+          collapsedActions.appendChild(mkButton('Да', 'accept', 'ok'));
+          return;
+        }
+
+        actions.appendChild(mkButton(muted ? 'Мик вкл' : 'Мик выкл', 'mute', muted ? 'active' : ''));
+        actions.appendChild(mkButton('Открыть', 'expand'));
+        actions.appendChild(mkButton('Сброс', 'hangup', 'danger'));
+        collapsedActions.appendChild(
+          mkButton(muted ? 'Мик' : 'Мик', 'mute', muted ? 'active' : ''),
+        );
+        collapsedActions.appendChild(mkButton('Сброс', 'hangup', 'danger'));
+      }
+
+      function applyState(state) {
+        if (!state || !state.visible) {
+          root.classList.remove('visible');
+          return;
+        }
+        root.classList.add('visible');
+
+        const peer = state.peerName || 'Собеседник';
+        const title = state.title || peer;
+        titleEl.textContent = title;
+        chromeTitle.textContent = collapsed ? title : 'Adventura · звонок';
+
+        const duration = formatDuration(state.durationSec);
+        const bits = [];
+        if (state.subtitle) bits.push(state.subtitle);
+        if (duration) bits.push(duration);
+        if (state.muted) bits.push('микрофон выкл');
+        subtitleEl.textContent = bits.join(' · ') || ' ';
+
+        if (state.mode === 'incoming') badgeText.textContent = 'Входящий';
+        else if (state.mode === 'outgoing') badgeText.textContent = 'Вызов…';
+        else badgeText.textContent = duration || 'В эфире';
+
+        placeholder.textContent = (peer.trim()[0] || 'A').toUpperCase();
+
+        const hasFrame = Boolean(state.frameDataUrl);
+        const hasAvatar = Boolean(state.avatarUrl);
+
+        if (hasFrame) {
+          frame.hidden = false;
+          frame.src = state.frameDataUrl;
+          avatar.hidden = true;
+          placeholder.hidden = true;
+        } else if (hasAvatar) {
+          frame.hidden = true;
+          frame.removeAttribute('src');
+          avatar.hidden = false;
+          avatar.src = state.avatarUrl;
+          placeholder.hidden = true;
+        } else {
+          frame.hidden = true;
+          frame.removeAttribute('src');
+          avatar.hidden = true;
+          avatar.removeAttribute('src');
+          placeholder.hidden = false;
+        }
+
+        renderActions(state.mode || 'active', Boolean(state.muted));
+      }
+
+      btnCollapse.addEventListener('click', (e) => {
+        e.stopPropagation();
+        setCollapsed(!collapsed);
+      });
+      btnExpandApp.addEventListener('click', (e) => {
+        e.stopPropagation();
+        send('expand');
+      });
+
+      window.adventuraCallPip?.onState?.(applyState);
+      root.addEventListener('dblclick', () => {
+        if (collapsed) {
+          setCollapsed(false);
+        } else {
+          send('expand');
+        }
+      });
+    </script>
+  </body>
+</html>

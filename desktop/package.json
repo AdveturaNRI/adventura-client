@@ -1,0 +1,74 @@
+{
+  "name": "adventura-desktop",
+  "productName": "Adventura",
+  "version": "0.5.0",
+  "description": "Adventura desktop shell (Electron + tray + call PiP + auto-update)",
+  "author": "Adventura <admin@adventu.ru>",
+  "homepage": "https://adventu.ru",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/AdveturaNRI/adventura-client.git"
+  },
+  "main": "main.js",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "pack": "electron-builder --dir",
+    "dist:linux": "electron-builder --linux AppImage deb",
+    "dist:publish": "electron-builder --linux AppImage deb --publish always"
+  },
+  "build": {
+    "appId": "ru.adventu.desktop",
+    "productName": "Adventura",
+    "copyright": "Copyright © Adventura",
+    "directories": {
+      "output": "release",
+      "buildResources": "build"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "call-pip.html",
+      "call-pip-preload.js",
+      "call-presence-inject.js",
+      "package.json",
+      "build/icon.png"
+    ],
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "AdveturaNRI",
+        "repo": "adventura-client",
+        "releaseType": "release"
+      }
+    ],
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "category": "Network",
+      "executableName": "adventura",
+      "maintainer": "Adventura <admin@adventu.ru>",
+      "synopsis": "Настольные ролевые игры — десктопный клиент",
+      "description": "Официальный десктоп-клиент Adventura для Linux: tray, уведомления, PiP звонков, автообновление.",
+      "icon": "build/icon.png",
+      "artifactName": "${productName}-${version}.${ext}"
+    },
+    "appImage": {
+      "artifactName": "${productName}-${version}.AppImage"
+    },
+    "deb": {
+      "artifactName": "${productName}-${version}.deb",
+      "priority": "optional",
+      "packageCategory": "net"
+    }
+  },
+  "dependencies": {
+    "electron-updater": "^6.8.11"
+  },
+  "devDependencies": {
+    "electron": "^37.2.6",
+    "electron-builder": "^26.0.12"
+  }
+}

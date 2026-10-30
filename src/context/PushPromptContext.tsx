@@ -289,6 +289,12 @@ export function PushPromptProvider({ children }: { children: ReactNode }) {
           );
           return;
         }
+        if (result.reason === 'electron') {
+          toast.info(
+            'В десктоп-клиенте фоновые push недоступны. Сообщения приходят, пока приложение открыто.',
+          );
+          return;
+        }
         if (result.reason === 'subscribe_failed') {
           toast.error('Браузер не смог оформить подписку на уведомления');
           return;

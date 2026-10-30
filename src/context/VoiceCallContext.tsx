@@ -12,6 +12,7 @@ import { StyleSheet, View, Platform } from 'react-native';
 
 import { IncomingCallModal } from '@/components/chats/IncomingCallModal';
 import { VoiceCallOverlay } from '@/components/chats/VoiceCallOverlay';
+import { DesktopCallPipController } from '@/components/desktop/DesktopCallPipController';
 import { toast } from '@/components/ui';
 import { useAuth } from '@/context/AuthContext';
 import { useRealtime } from '@/context/RealtimeContext';
@@ -37,6 +38,7 @@ import {
 } from '@/services/chats/chatsApi';
 import type { CallInvitePayload } from '@/services/realtime/socket';
 import { startCallRingback, startCallRingtone, stopCallRingtone, playHangupSound } from '@/utils/call-ringtone';
+import { notifyIncomingVoiceCall } from '@/utils/chat-alerts';
 import { localizeErrorMessage } from '@/utils/localizeError';
 import {
   beginMicrophonePrimeFromGesture,
@@ -218,11 +220,15 @@ export function VoiceCallProvider({ children }: { children: ReactNode }) {
   const [minimized, setMinimized] = useState(false);
   const ringingStartedAtRef = useRef<number | null>(null);
   const switchingCallRef = useRef(false);
+<<<<<<< HEAD
   /** startCall / joinOngoingCall in flight — repeat taps on a slow network must not stack. */
   const callOpInFlightRef = useRef(false);
   /** Chat whose call button is waiting on startCall / joinOngoingCall — drives its spinner. */
   const [pendingCallConversationId, setPendingCallConversationId] = useState<string | null>(null);
   const acceptingRef = useRef(false);
+=======
+  const [activeSinceMs, setActiveSinceMs] = useState<number | null>(null);
+>>>>>>> 6092018 (feat(desktop): Linux Electron shell with tray, PiP calls, auto-update)
 
   // Drop any leftover gesture-primed mic from a previous session / cancelled tap.
   useEffect(() => {
@@ -860,6 +866,10 @@ export function VoiceCallProvider({ children }: { children: ReactNode }) {
           pendingInviteRef.current = nextInvite;
           setPendingInvite(nextInvite);
           startCallRingtone();
+          notifyIncomingVoiceCall({
+            peerName: nextInvite.callerName || nextInvite.peerName,
+            conversationId: nextInvite.conversationId,
+          });
           return;
         }
 
@@ -892,6 +902,10 @@ export function VoiceCallProvider({ children }: { children: ReactNode }) {
         ringingStartedAtRef.current = null;
         clearPendingInvite();
         startCallRingtone();
+        notifyIncomingVoiceCall({
+          peerName: nextInvite.callerName || nextInvite.peerName,
+          conversationId: nextInvite.conversationId,
+        });
         return;
       }
 
@@ -1321,6 +1335,14 @@ export function VoiceCallProvider({ children }: { children: ReactNode }) {
     return () => setVoiceCallOwnsDice(false);
   }, [overlayVisible]);
 
+  useEffect(() => {
+    if (session?.phase === 'active') {
+      setActiveSinceMs((prev) => prev ?? Date.now());
+      return;
+    }
+    setActiveSinceMs(null);
+  }, [session?.phase]);
+
   const overlayTitle = session?.isGroup
     ? session.peerName
       ? `Группа · ${session.peerName}`
@@ -1329,9 +1351,58 @@ export function VoiceCallProvider({ children }: { children: ReactNode }) {
       ? `Звонок · ${session.peerName}`
       : 'Голосовой чат';
 
+  const desktopPipMode =
+    pendingInvite || session?.phase === 'incoming'
+      ? 'incoming'
+      : session?.phase === 'outgoing'
+        ? 'outgoing'
+        : session?.phase === 'active' ||
+            (session != null && (liveStatus === 'connected' || liveStatus === 'error'))
+          ? 'active'
+          : 'idle';
+
+  const desktopPipPeer =
+    pendingInvite?.peerName ||
+    (session?.phase === 'incoming' ? session.peerName : null) ||
+    session?.peerName ||
+    null;
+  const desktopPipAvatar =
+    pendingInvite?.peerAvatarUrl ||
+    (session?.phase === 'incoming' ? session.peerAvatarUrl : null) ||
+    session?.peerAvatarUrl ||
+    null;
+
   return (
     <VoiceCallContext.Provider value={value}>
       <View style={providerStyles.root}>
+        <DesktopCallPipController
+          mode={desktopPipMode}
+          title={
+            desktopPipMode === 'incoming'
+              ? desktopPipPeer || 'Входящий звонок'
+              : overlayTitle
+          }
+          peerName={desktopPipPeer}
+          peerAvatarUrl={desktopPipAvatar}
+          muted={muted}
+          participants={participants}
+          activeSinceMs={activeSinceMs}
+          onExpand={() => {
+            expand();
+          }}
+          onHangup={() => {
+            void hangup();
+          }}
+          onMute={() => {
+            void toggleMute();
+          }}
+          onAccept={() => {
+            void acceptIncoming();
+          }}
+          onDecline={() => {
+            void declineIncoming();
+          }}
+        />
         <VoiceCallOverlay
           visible={Boolean(overlayVisible)}
           minimized={minimized}

@@ -1,11 +1,14 @@
 import { Platform } from 'react-native';
 
+import { isElectronShell } from '@/services/desktop/electronBridge';
 import { apiRequest } from '@/services/api/client';
 import {
   firebaseWebConfig,
   firebaseWebVapidKey,
   isFirebaseWebConfigured,
 } from '@/services/push/firebase-config';
+
+export { isElectronShell };
 
 const SW_PATH = '/service-worker.js';
 const FCM_TOKEN_KEY = '@adventura/fcm-device-token';
@@ -42,12 +45,13 @@ function canUseWebPushApis(): boolean {
 
 /** Low-level browser APIs only (no Firebase / VAPID). */
 function canUseWebPush(): boolean {
-  return canUseWebPushApis() && Boolean(window.isSecureContext);
+  return canUseWebPushApis() && Boolean(window.isSecureContext) && !isElectronShell();
 }
 
 export type WebPushBlockReason =
   | null
   | 'unsupported'
+  | 'electron'
   | 'insecure'
   | 'firebase_unconfigured';
 
@@ -55,6 +59,9 @@ export type WebPushBlockReason =
 export function getWebPushBlockReason(): WebPushBlockReason {
   if (Platform.OS !== 'web' || typeof window === 'undefined') {
     return 'unsupported';
+  }
+  if (isElectronShell()) {
+    return 'electron';
   }
   if (!window.isSecureContext) {
     return 'insecure';
@@ -78,6 +85,8 @@ export function webPushBlockHint(reason: WebPushBlockReason): string | null {
       return 'Уведомления сейчас недоступны.';
     case 'firebase_unconfigured':
       return 'Уведомления сейчас недоступны.';
+    case 'electron':
+      return 'В десктоп-клиенте фоновые web-push недоступны (ограничение Electron). Пока приложение открыто, сообщения приходят по сокету.';
     case 'unsupported':
       return 'Этот браузер не поддерживает уведомления.';
     default:
@@ -325,6 +334,9 @@ export async function syncWebPushToUser(): Promise<boolean> {
 export async function enableWebPush(): Promise<{ ok: boolean; reason?: string }> {
   if (!WEB_PUSH_OPT_IN_ENABLED) {
     return { ok: false, reason: 'unsupported' };
+  }
+  if (isElectronShell()) {
+    return { ok: false, reason: 'electron' };
   }
   if (!canUseWebPush() || !isFirebaseWebConfigured()) {
     return { ok: false, reason: 'unsupported' };

@@ -23,6 +23,7 @@ import {
 import { startPresenceTracking } from '@/services/realtime/presence';
 import {
   notifyIncomingChatMessage,
+  previewMessageBody,
   notifyIncomingPortalNotification,
   stopNewMessageTitleBlink,
   unlockChatAlerts,
@@ -169,14 +170,27 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
           message.kind !== 'user_blocked' &&
           message.kind !== 'missed_voice_call'
         ) {
-          notifyIncomingChatMessage(message.conversationId);
+          notifyIncomingChatMessage(message.conversationId, {
+            title: message.sender?.nickname || 'Новое сообщение',
+            body: previewMessageBody(
+              message.body,
+              Boolean(
+                message.image ||
+                  message.attachment ||
+                  (message.attachments?.length ?? 0) > 0,
+              ),
+            ),
+          });
         }
       },
       onMessageReaction: (event) => {
         setLastMessageReaction(event);
         reactionListenersRef.current.forEach((listener) => listener(event));
         if (event.actorId !== userIdRef.current) {
-          notifyIncomingChatMessage(event.conversationId);
+          notifyIncomingChatMessage(event.conversationId, {
+            title: 'Реакция в чате',
+            body: event.emoji ? `Реакция ${event.emoji}` : 'Новая реакция',
+          });
         }
       },
       onReactionUnreadSync: setLastReactionUnread,
