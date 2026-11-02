@@ -21,6 +21,7 @@ import { ProfileProvider } from '@/context/ProfileContext';
 import { PushPromptProvider } from '@/context/PushPromptContext';
 import { RealtimeProvider } from '@/context/RealtimeContext';
 import { VoiceCallProvider } from '@/context/VoiceCallContext';
+import { VoicePlaybackProvider } from '@/context/VoicePlaybackContext';
 import { MusicPlayerProvider } from '@/context/MusicPlayerContext';
 import { AuthorsProvider } from '@/context/AuthorsContext';
 import { NewsProvider } from '@/context/NewsContext';
@@ -104,13 +105,15 @@ function AppRouteProviders() {
           <ProfileProvider>
             <AuthorsProvider>
               <NewsProvider>
-                <VoiceCallProvider>
-                  <MusicPlayerProvider>
-                    <PushPromptProvider>
-                      <AnnouncementProvider>{navigator}</AnnouncementProvider>
-                    </PushPromptProvider>
-                  </MusicPlayerProvider>
-                </VoiceCallProvider>
+                <VoicePlaybackProvider>
+                  <VoiceCallProvider>
+                    <MusicPlayerProvider>
+                      <PushPromptProvider>
+                        <AnnouncementProvider>{navigator}</AnnouncementProvider>
+                      </PushPromptProvider>
+                    </MusicPlayerProvider>
+                  </VoiceCallProvider>
+                </VoicePlaybackProvider>
               </NewsProvider>
             </AuthorsProvider>
           </ProfileProvider>

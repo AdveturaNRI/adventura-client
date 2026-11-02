@@ -523,6 +523,17 @@ function createStyles(colors: ThemeColors, bottomPad: number, isDark: boolean) {
       backgroundColor: colors.background,
       position: 'relative',
     },
+    rootEmbedded: {
+      backgroundColor: colors.background,
+    },
+    embeddedRoot: {
+      flex: 1,
+      minWidth: 0,
+      minHeight: 0,
+      width: '100%',
+      height: '100%',
+      backgroundColor: colors.background,
+    },
     dropZone: {
       flex: 1,
       minHeight: 0,
@@ -1390,14 +1401,26 @@ function createStyles(colors: ThemeColors, bottomPad: number, isDark: boolean) {
   });
 }
 
-export default function ChatThreadScreen() {
+export type ChatThreadScreenProps = {
+  /** Встроить тред (панель в звонке) — id не из роута. */
+  conversationId?: string;
+  embedded?: boolean;
+  onClose?: () => void;
+};
+
+export default function ChatThreadScreen({
+  conversationId: conversationIdProp,
+  embedded = false,
+  onClose,
+}: ChatThreadScreenProps = {}) {
   const { id, returnTo, returnToId } = useLocalSearchParams<{
     id: string;
     returnTo?: string | string[];
     returnToId?: string | string[];
   }>();
-  const conversationId = Array.isArray(id) ? id[0] : id;
-  const backHref = resolveChatReturnHref(returnTo, returnToId);
+  const routeConversationId = Array.isArray(id) ? id[0] : id;
+  const conversationId = conversationIdProp ?? routeConversationId;
+  const backHref = embedded ? undefined : resolveChatReturnHref(returnTo, returnToId);
   const router = useRouter();
   const colors = useTheme();
   const { colorScheme } = useThemePreference();
@@ -1421,7 +1444,11 @@ export default function ChatThreadScreen() {
     subscribeCallEvents,
     publishConversationUpdate,
   } = useRealtime();
-  const bottomSafe = hasDesktopSidebar ? Spacing.md : Math.max(insets.bottom, Spacing.sm);
+  const bottomSafe = embedded
+    ? Spacing.md
+    : hasDesktopSidebar
+      ? Spacing.md
+      : Math.max(insets.bottom, Spacing.sm);
   const keyboardInset = useWebKeyboardBottomInset();
   // Клавиатура уже перекрывает home indicator — не суммируем safe-area с inset.
   const bottomPad = keyboardInset > 0 ? keyboardInset : bottomSafe;
@@ -2316,6 +2343,10 @@ export default function ChatThreadScreen() {
       if (message) {
         toast.error(message);
       }
+      if (embedded) {
+        onClose?.();
+        return;
+      }
       router.replace('/chats');
     }
 
@@ -2428,7 +2459,7 @@ export default function ChatThreadScreen() {
       localDiceRollResolveRef.current = null;
       resolveLocal?.(null);
     };
-  }, [conversationId, router]);
+  }, [conversationId, embedded, onClose, router]);
 
   useEffect(() => {
     return subscribeMessages((message) => {
@@ -3680,13 +3711,15 @@ export default function ChatThreadScreen() {
     }
   }, [conversationId, nextCursor, peerLastReadAt]);
 
-  const headerPadTop = isDesktopWeb
-    ? Spacing.md
-    : voiceActiveHere && voiceMinimized
-      ? Spacing.sm
-      : voicePlayerVisible
+  const headerPadTop = embedded
+    ? Spacing.sm
+    : isDesktopWeb
+      ? Spacing.md
+      : voiceActiveHere && voiceMinimized
         ? Spacing.sm
-        : insets.top + Spacing.sm;
+        : voicePlayerVisible
+          ? Spacing.sm
+          : insets.top + Spacing.sm;
   const peerReadMs = !isGroup && peerLastReadAt ? new Date(peerLastReadAt).getTime() : 0;
   const myReadMs = unreadBoundaryAt ? new Date(unreadBoundaryAt).getTime() : 0;
   const renderedMessages = useMemo(() => {
@@ -3804,9 +3837,13 @@ export default function ChatThreadScreen() {
     !conversation.blockedMe,
   );
 
-  return (
-    <ScreenTransition animateOnFocus>
-      <KeyboardAvoidingView style={styles.root} behavior={Platform.OS === 'ios' ? 'padding' : undefined} keyboardVerticalOffset={0}>
+  const threadBody = (
+    <>
+      <KeyboardAvoidingView
+        style={[styles.root, embedded ? styles.rootEmbedded : null]}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        keyboardVerticalOffset={0}
+      >
         <View ref={dropZoneRef} style={styles.dropZone} collapsable={false}>
           <ChatBackgroundLayer
             isDark={isDark}
@@ -3828,7 +3865,19 @@ export default function ChatThreadScreen() {
             </View>
           ) : null}
           <View style={[styles.header, { paddingTop: headerPadTop }]}>
-            {!hasDesktopSidebar || backHref ? <MobileBackButton backHref={backHref} /> : null}
+            {embedded ? (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Закрыть чат"
+                hitSlop={8}
+                onPress={() => onClose?.()}
+                style={styles.headerMenuButton}
+              >
+                <Ionicons name="close" size={20} color={colors.textSubtle} />
+              </Pressable>
+            ) : !hasDesktopSidebar || backHref ? (
+              <MobileBackButton backHref={backHref} />
+            ) : null}
             <Pressable
               accessibilityRole="button"
               accessibilityLabel={isGroup ? `Участники ${title}` : `Анкета ${title}`}
@@ -3882,117 +3931,121 @@ export default function ChatThreadScreen() {
                 ) : null}
               </View>
             </Pressable>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={
-                voiceCallPendingHere
-                  ? 'Подключаемся к звонку'
-                  : voiceActiveHere
-                    ? 'Открыть звонок'
-                    : ongoingVoiceCall
-                      ? 'Присоединиться к голосовому чату'
-                      : 'Позвонить'
-              }
-              accessibilityState={{ busy: voiceCallPendingHere, disabled: voiceCallPendingHere }}
-              disabled={voiceCallPendingHere}
-              hitSlop={8}
-              onPressIn={() => {
-                if (Platform.OS === 'web' && !voiceActiveHere) {
-                  beginMicrophonePrimeFromGesture();
+            {!embedded ? (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={
+                  voiceCallPendingHere
+                    ? 'Подключаемся к звонку'
+                    : voiceActiveHere
+                      ? 'Открыть звонок'
+                      : ongoingVoiceCall
+                        ? 'Присоединиться к голосовому чату'
+                        : 'Позвонить'
                 }
-              }}
-              onPress={() => {
-                if (!conversationId) {
-                  return;
-                }
-                if (voiceActiveHere) {
-                  expandVoiceCall();
-                  return;
-                }
-                // Live multi-party lobby → rejoin. Solo/zombie lobby → fall through to
-                // startCall (kills lobby + fresh invite) so the peer gets Accept + ringtone.
-                if (ongoingVoiceCall) {
-                  const aloneLobby =
-                    Boolean(ongoingVoiceCall.isJoined) && ongoingVoiceCall.joinedCount <= 1;
-                  if (!aloneLobby) {
-                    const callSnapshot = ongoingVoiceCall;
-                    setJoiningOngoingVoice(true);
-                    void joinOngoingCall(
-                      conversationId,
-                      callSnapshot.callId,
-                      callSnapshot.isGroup
-                        ? callSnapshot.conversationTitle || title
-                        : callSnapshot.fromNickname,
-                      callSnapshot.fromAvatarUrl,
-                      {
-                        isGroup: callSnapshot.isGroup,
-                        myRole: callSnapshot.isGroup ? myGroupRole : null,
-                      },
-                    )
-                      .then((ok) => {
-                        if (!ok) {
-                          setOngoingVoiceCall((prev) =>
-                            prev?.callId === callSnapshot.callId ? null : prev,
-                          );
-                        }
-                      })
-                      .finally(() => setJoiningOngoingVoice(false));
+                accessibilityState={{ busy: voiceCallPendingHere, disabled: voiceCallPendingHere }}
+                disabled={voiceCallPendingHere}
+                hitSlop={8}
+                onPressIn={() => {
+                  if (Platform.OS === 'web' && !voiceActiveHere) {
+                    beginMicrophonePrimeFromGesture();
+                  }
+                }}
+                onPress={() => {
+                  if (!conversationId) {
                     return;
                   }
-                  setOngoingVoiceCall(null);
-                }
-                void (async () => {
-                  // Mic prime already started in onPressIn — do not await network before takePrimedMicrophone inside startCall.
-                  let ringingPeers = isGroup
-                    ? members
-                        .filter((member) => member.id !== user?.id)
-                        .map((member) => ({
-                          userId: member.id,
-                          nickname: member.nickname,
-                          avatarUrl: member.avatarUrl,
-                        }))
-                    : conversation?.peer
-                      ? [
-                          {
-                            userId: conversation.peer.id,
-                            nickname: conversation.peer.nickname,
-                            avatarUrl: conversation.peer.avatarUrl,
-                          },
-                        ]
-                      : [];
-                  // Kick off the call immediately; fill ringing peers if we already have them.
-                  // Loading members must not block the mic gesture — startCall takes primed mic first.
-                  const callPromise = startCall(conversationId, title, conversation?.peer?.avatarUrl ?? null, {
-                    isGroup,
-                    ringingPeers,
-                    myRole: isGroup ? myGroupRole : null,
-                  });
-                  if (isGroup && ringingPeers.length === 0) {
-                    try {
-                      const loaded = await listChatMembers(conversationId);
-                      setMembers(loaded);
-                    } catch {
-                      // invite response still carries ringing peers
-                    }
+                  if (voiceActiveHere) {
+                    expandVoiceCall();
+                    return;
                   }
-                  await callPromise;
-                })();
-              }}
-              style={[
-                styles.headerCallButton,
-                voiceActiveHere || ongoingVoiceCall || voiceCallPendingHere ? styles.headerCallButtonActive : null,
-              ]}
-            >
-              {voiceCallPendingHere ? (
-                <ActivityIndicator size="small" color={colors.primary} />
-              ) : (
-                <Ionicons
-                  name={voiceActiveHere || ongoingVoiceCall ? 'call' : 'call-outline'}
-                  size={18}
-                  color={voiceActiveHere || ongoingVoiceCall ? colors.primary : colors.textSubtle}
-                />
-              )}
-            </Pressable>
+                  // Live multi-party lobby → rejoin. Solo/zombie lobby → fall through to
+                  // startCall (kills lobby + fresh invite) so the peer gets Accept + ringtone.
+                  if (ongoingVoiceCall) {
+                    const aloneLobby =
+                      Boolean(ongoingVoiceCall.isJoined) && ongoingVoiceCall.joinedCount <= 1;
+                    if (!aloneLobby) {
+                      const callSnapshot = ongoingVoiceCall;
+                      setJoiningOngoingVoice(true);
+                      void joinOngoingCall(
+                        conversationId,
+                        callSnapshot.callId,
+                        callSnapshot.isGroup
+                          ? callSnapshot.conversationTitle || title
+                          : callSnapshot.fromNickname,
+                        callSnapshot.fromAvatarUrl,
+                        {
+                          isGroup: callSnapshot.isGroup,
+                          myRole: callSnapshot.isGroup ? myGroupRole : null,
+                        },
+                      )
+                        .then((ok) => {
+                          if (!ok) {
+                            setOngoingVoiceCall((prev) =>
+                              prev?.callId === callSnapshot.callId ? null : prev,
+                            );
+                          }
+                        })
+                        .finally(() => setJoiningOngoingVoice(false));
+                      return;
+                    }
+                    setOngoingVoiceCall(null);
+                  }
+                  void (async () => {
+                    // Mic prime already started in onPressIn — do not await network before takePrimedMicrophone inside startCall.
+                    let ringingPeers = isGroup
+                      ? members
+                          .filter((member) => member.id !== user?.id)
+                          .map((member) => ({
+                            userId: member.id,
+                            nickname: member.nickname,
+                            avatarUrl: member.avatarUrl,
+                          }))
+                      : conversation?.peer
+                        ? [
+                            {
+                              userId: conversation.peer.id,
+                              nickname: conversation.peer.nickname,
+                              avatarUrl: conversation.peer.avatarUrl,
+                            },
+                          ]
+                        : [];
+                    // Kick off the call immediately; fill ringing peers if we already have them.
+                    // Loading members must not block the mic gesture — startCall takes primed mic first.
+                    const callPromise = startCall(conversationId, title, conversation?.peer?.avatarUrl ?? null, {
+                      isGroup,
+                      ringingPeers,
+                      myRole: isGroup ? myGroupRole : null,
+                    });
+                    if (isGroup && ringingPeers.length === 0) {
+                      try {
+                        const loaded = await listChatMembers(conversationId);
+                        setMembers(loaded);
+                      } catch {
+                        // invite response still carries ringing peers
+                      }
+                    }
+                    await callPromise;
+                  })();
+                }}
+                style={[
+                  styles.headerCallButton,
+                  voiceActiveHere || ongoingVoiceCall || voiceCallPendingHere
+                    ? styles.headerCallButtonActive
+                    : null,
+                ]}
+              >
+                {voiceCallPendingHere ? (
+                  <ActivityIndicator size="small" color={colors.primary} />
+                ) : (
+                  <Ionicons
+                    name={voiceActiveHere || ongoingVoiceCall ? 'call' : 'call-outline'}
+                    size={18}
+                    color={voiceActiveHere || ongoingVoiceCall ? colors.primary : colors.textSubtle}
+                  />
+                )}
+              </Pressable>
+            ) : null}
             <Pressable
               accessibilityRole="button"
               accessibilityLabel="Ещё"
@@ -4004,7 +4057,7 @@ export default function ChatThreadScreen() {
             </Pressable>
           </View>
 
-          {ongoingVoiceCall && !voiceActiveHere ? (
+          {ongoingVoiceCall && !voiceActiveHere && !embedded ? (
             <View style={styles.voiceJoinBanner}>
               {ongoingVoiceCall.participants?.length ? (
                 <View style={styles.voiceJoinAvatars}>
@@ -5182,6 +5235,12 @@ export default function ChatThreadScreen() {
         onReveal={revealHeldDiceMessage}
         onAdvance={advanceDiceAnimationQueue}
       />
-    </ScreenTransition>
+    </>
   );
+
+  if (embedded) {
+    return <View style={styles.embeddedRoot}>{threadBody}</View>;
+  }
+
+  return <ScreenTransition animateOnFocus>{threadBody}</ScreenTransition>;
 }

@@ -33,6 +33,7 @@ import { UserAvatar } from '@/components/navigation/UserAvatar';
 import type { RewardBadgeType } from '@/data/rewards/catalog';
 import { VoiceCallDiceLayer } from '@/components/chats/VoiceCallDiceLayer';
 import { CallBardSheet } from '@/components/chats/CallBardSheet';
+import ChatThreadScreen from '@/screens/main/ChatThreadScreen';
 import type { CallMusicLayerLive, CallMusicQueueEntry } from '@/hooks/use-call-shared-music';
 import { CallVideoView } from '@/components/chats/CallVideoView';
 import { FontSize, Radius, Spacing } from '@/constants/theme';
@@ -317,6 +318,39 @@ const mobileScrollBarStyle =
     : null;
 
 const PRIORITY_RESIZE_HANDLE_W = 20;
+const CHAT_PANEL_DEFAULT_W = 400;
+const CHAT_PANEL_MIN_W = 280;
+const CHAT_PANEL_MAX_W = 720;
+const CHAT_PANEL_WIDTH_KEY = 'adventura.callChatPanelWidth';
+const CHAT_RESIZE_HANDLE_W = 14;
+
+function readSavedChatPanelWidth(): number {
+  if (typeof window === 'undefined') {
+    return CHAT_PANEL_DEFAULT_W;
+  }
+  try {
+    const raw = window.localStorage.getItem(CHAT_PANEL_WIDTH_KEY);
+    const parsed = raw ? Number(raw) : NaN;
+    if (Number.isFinite(parsed)) {
+      return Math.max(CHAT_PANEL_MIN_W, Math.min(CHAT_PANEL_MAX_W, Math.round(parsed)));
+    }
+  } catch {
+    // ignore
+  }
+  return CHAT_PANEL_DEFAULT_W;
+}
+
+function persistChatPanelWidth(width: number) {
+  if (typeof window === 'undefined') {
+    return;
+  }
+  try {
+    window.localStorage.setItem(CHAT_PANEL_WIDTH_KEY, String(Math.round(width)));
+  } catch {
+    // ignore
+  }
+}
+
 /** Soft floor — real min also keeps the rail grid from clipping. */
 const PRIORITY_PANE_MIN_W = 360;
 /** Name row under priority video (must fit in stage height). */
@@ -802,6 +836,8 @@ type Props = {
 
 /** Survives expand/collapse while the call is up. */
 let savedMiniOffset = { x: 0, y: 0 };
+/** Survives call sessions in-memory; also mirrored to localStorage. */
+let savedChatPanelWidth = CHAT_PANEL_DEFAULT_W;
 
 function clampMiniOffset(
   offset: { x: number; y: number },
@@ -2829,6 +2865,15 @@ export function VoiceCallOverlay({
   const suppressExpandRef = useRef(false);
   const [volumeOpenId, setVolumeOpenId] = useState<string | null>(null);
   const [bardSheetOpen, setBardSheetOpen] = useState(false);
+  const [chatPanelOpen, setChatPanelOpen] = useState(false);
+  const [chatPanelWidth, setChatPanelWidth] = useState(() => {
+    const stored = readSavedChatPanelWidth();
+    savedChatPanelWidth = stored;
+    return stored;
+  });
+  const [chatResizeHot, setChatResizeHot] = useState(false);
+  const [chatResizing, setChatResizing] = useState(false);
+  const chatDragRef = useRef<{ startX: number; startW: number } | null>(null);
   const failed = status === 'error';
   const mediaReady = status === 'connected';
   const linking = status === 'connecting';
@@ -2908,6 +2953,8 @@ export function VoiceCallOverlay({
   const connectPulse = useRef(new Animated.Value(1)).current;
   // Пока звонок на экране — не ждём LiveKit `connected` / ответ собеседника.
   const canRollDice = Boolean(conversationId?.trim()) && status !== 'error';
+  /** In-call chat side panel — desktop only; mobile uses minimize → thread. */
+  const showChatControl = isDesktop && Boolean(conversationId?.trim());
   const showMusicControls = canControlMusic && mediaReady;
   /** Non-controllers open the sheet via the note button when Bard is already present. */
   const showBardOpenButton = mediaReady && bardPresent && !canControlMusic;
@@ -2923,6 +2970,7 @@ export function VoiceCallOverlay({
     (canRollDice ? 1 : 0) +
     (showBardControl ? 1 : 0) +
     (showUrgentControl ? 1 : 0) +
+    (showChatControl ? 1 : 0) +
     (showMockControls ? 1 : 0);
 
   const primaryControlsCount =
@@ -3082,6 +3130,10 @@ export function VoiceCallOverlay({
       setDiceOpen(false);
       setVolumeOpenId(null);
       setBardSheetOpen(false);
+      setChatPanelOpen(false);
+      setChatResizing(false);
+      setChatResizeHot(false);
+      chatDragRef.current = null;
       setSpotlightKey(null);
       if (spotlightHoldRef.current) {
         clearTimeout(spotlightHoldRef.current);
@@ -3127,8 +3179,89 @@ export function VoiceCallOverlay({
     leaveOsFullscreenForOverlay();
   }, [bardPresent, leaveOsFullscreenForOverlay, onResumeBardAudio, onSummonBard]);
 
+  const openChatPanel = useCallback(() => {
+    if (!isDesktop || !conversationId?.trim()) {
+      return;
+    }
+    setControlsOverflowOpen(false);
+    // Overlay chat stays inside the call host — do not drop OS fullscreen.
+    setChatPanelOpen((open) => !open);
+  }, [conversationId, isDesktop]);
+
+  const clampChatPanelWidth = useCallback(
+    (next: number) => {
+      const viewportCap = Math.max(
+        CHAT_PANEL_MIN_W,
+        Math.min(CHAT_PANEL_MAX_W, Math.floor(width * 0.72)),
+      );
+      return Math.max(CHAT_PANEL_MIN_W, Math.min(viewportCap, Math.round(next)));
+    },
+    [width],
+  );
+
+  useEffect(() => {
+    setChatPanelWidth((current) => {
+      const next = clampChatPanelWidth(current);
+      savedChatPanelWidth = next;
+      return next;
+    });
+  }, [clampChatPanelWidth]);
+
+  const moveChatResize = useCallback(
+    (clientX: number) => {
+      const drag = chatDragRef.current;
+      if (!drag) {
+        return;
+      }
+      // Dragging the left edge: move left → wider panel.
+      const next = clampChatPanelWidth(drag.startW + (drag.startX - clientX));
+      savedChatPanelWidth = next;
+      setChatPanelWidth(next);
+    },
+    [clampChatPanelWidth],
+  );
+
+  const endChatResize = useCallback(() => {
+    chatDragRef.current = null;
+    setChatResizing(false);
+    setChatResizeHot(false);
+    persistChatPanelWidth(savedChatPanelWidth);
+  }, []);
+
+  const beginChatResize = useCallback(
+    (clientX: number) => {
+      chatDragRef.current = {
+        startX: clientX,
+        startW: chatPanelWidth,
+      };
+      setChatResizing(true);
+
+      if (Platform.OS !== 'web' || typeof window === 'undefined') {
+        return;
+      }
+
+      const onMove = (event: PointerEvent) => moveChatResize(event.clientX);
+      const onUp = () => {
+        endChatResize();
+        window.removeEventListener('pointermove', onMove);
+        window.removeEventListener('pointerup', onUp);
+      };
+      window.addEventListener('pointermove', onMove);
+      window.addEventListener('pointerup', onUp);
+    },
+    [chatPanelWidth, endChatResize, moveChatResize],
+  );
+
   const toggleFullscreen = useCallback(() => {
-    setFullscreen((prev) => !prev);
+    setFullscreen((prev) => {
+      const next = !prev;
+      if (next) {
+        void requestOsFullscreen(getWebHostNode(cinemaHostRef.current));
+      } else if (!streamCinemaRef.current && !priorityCinemaRef.current) {
+        void exitOsFullscreen();
+      }
+      return next;
+    });
   }, []);
 
   const enterStreamCinema = useCallback(() => {
@@ -3178,6 +3311,7 @@ export function VoiceCallOverlay({
         if (priorityCinemaRef.current) {
           setPriorityCinema(false);
         }
+        setFullscreen(false);
       }
     };
     document.addEventListener('fullscreenchange', onFsChange);
@@ -5592,6 +5726,7 @@ export function VoiceCallOverlay({
             (fullscreen || cinemaStageReady || !isDesktop) && styles.shellFullscreen,
             cinemaStageReady && styles.shellStreamCinema,
           ]}>
+          <View style={styles.callMainColumn}>
           {!cinemaStageReady ? (
             <View
               style={[
@@ -5654,10 +5789,24 @@ export function VoiceCallOverlay({
                   <Ionicons name="scan-outline" size={20} color="#F2F3F5" />
                 </Pressable>
               ) : null}
+              {showChatControl ? (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={chatPanelOpen ? 'Скрыть чат' : 'Открыть чат'}
+                  accessibilityState={{ selected: chatPanelOpen }}
+                  onPress={openChatPanel}
+                  style={({ pressed }) => [
+                    styles.headerAction,
+                    chatPanelOpen && styles.headerActionActive,
+                    pressed && styles.pressed,
+                  ]}>
+                  <Ionicons name="chatbubbles" size={20} color="#F2F3F5" />
+                </Pressable>
+              ) : null}
               <Pressable
                 accessibilityRole="button"
                 accessibilityLabel={
-                  fullscreen ? 'Свернуть звонок в окно' : 'Развернуть звонок на окно сайта'
+                  fullscreen ? 'Свернуть звонок в окно' : 'Развернуть звонок на весь экран'
                 }
                 onPress={toggleFullscreen}
                 style={({ pressed }) => [styles.headerAction, pressed && styles.pressed]}>
@@ -6636,6 +6785,22 @@ export function VoiceCallOverlay({
               </Pressable>
             ) : null}
 
+            {!controlsCompact && showChatControl ? (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={chatPanelOpen ? 'Скрыть чат' : 'Открыть чат'}
+                accessibilityState={{ selected: chatPanelOpen }}
+                onPress={openChatPanel}
+                style={({ pressed }) => [
+                  styles.controlBtn,
+                  cinemaMobileBtnStyle,
+                  chatPanelOpen ? styles.controlBtnScreenOn : styles.controlBtnSecondary,
+                  pressed && styles.pressed,
+                ]}>
+                <Ionicons name="chatbubbles" size={18} color="#FFFFFF" />
+              </Pressable>
+            ) : null}
+
             {!controlsCompact && showMockControls ? (
               <Pressable
                 accessibilityRole="button"
@@ -6714,6 +6879,26 @@ export function VoiceCallOverlay({
                         <Ionicons name="flash" size={18} color="#FFFFFF" />
                         <Text style={styles.controlsOverflowLabel}>
                           {localUrgent ? 'Снять срочное' : 'Срочная заявка'}
+                        </Text>
+                      </Pressable>
+                    ) : null}
+                    {showChatControl ? (
+                      <Pressable
+                        accessibilityRole="menuitem"
+                        accessibilityLabel={chatPanelOpen ? 'Скрыть чат' : 'Открыть чат'}
+                        accessibilityState={{ selected: chatPanelOpen }}
+                        onPress={() => {
+                          setControlsOverflowOpen(false);
+                          openChatPanel();
+                        }}
+                        style={({ pressed }) => [
+                          styles.controlsOverflowItem,
+                          chatPanelOpen && styles.controlsOverflowItemActive,
+                          pressed && styles.pressed,
+                        ]}>
+                        <Ionicons name="chatbubbles" size={18} color="#FFFFFF" />
+                        <Text style={styles.controlsOverflowLabel}>
+                          {chatPanelOpen ? 'Скрыть чат' : 'Чат'}
                         </Text>
                       </Pressable>
                     ) : null}
@@ -6834,6 +7019,71 @@ export function VoiceCallOverlay({
               onPress={() => setControlsOverflowOpen(false)}
               style={styles.controlsOverflowBackdrop}
             />
+          ) : null}
+          </View>
+
+          {showChatControl && chatPanelOpen && conversationId ? (
+            <View style={styles.chatPanelOverlay} pointerEvents="box-none">
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Закрыть чат"
+                onPress={() => setChatPanelOpen(false)}
+                style={styles.chatPanelScrim}
+              />
+              <View style={[styles.chatPanelDock, { width: chatPanelWidth }]}>
+                <View
+                  accessibilityRole="adjustable"
+                  accessibilityLabel="Ширина чата"
+                  accessibilityHint="Потяни, чтобы изменить ширину панели чата"
+                  onStartShouldSetResponder={() => true}
+                  onResponderGrant={(event) => {
+                    beginChatResize(event.nativeEvent.pageX);
+                  }}
+                  onResponderMove={(event) => {
+                    if (Platform.OS !== 'web') {
+                      moveChatResize(event.nativeEvent.pageX);
+                    }
+                  }}
+                  onResponderRelease={endChatResize}
+                  onResponderTerminate={endChatResize}
+                  // @ts-expect-error RN Web pointer
+                  onPointerDown={(event: { clientX: number; preventDefault?: () => void }) => {
+                    event.preventDefault?.();
+                    beginChatResize(event.clientX);
+                  }}
+                  style={[
+                    styles.chatResizeHandle,
+                    (chatResizeHot || chatResizing) && styles.chatResizeHandleHot,
+                  ]}
+                  {...(Platform.OS === 'web'
+                    ? ({
+                        onMouseEnter: () => setChatResizeHot(true),
+                        onMouseLeave: () => {
+                          if (!chatResizing) {
+                            setChatResizeHot(false);
+                          }
+                        },
+                      } as object)
+                    : null)}>
+                  <View
+                    style={[
+                      styles.chatResizeGrip,
+                      (chatResizeHot || chatResizing) && styles.chatResizeGripHot,
+                    ]}>
+                    <Ionicons name="caret-back" size={11} color="#DCDDDE" />
+                    <View style={styles.chatResizeBar} />
+                    <Ionicons name="caret-forward" size={11} color="#DCDDDE" />
+                  </View>
+                </View>
+                <View style={styles.chatPanelBody}>
+                  <ChatThreadScreen
+                    conversationId={conversationId}
+                    embedded
+                    onClose={() => setChatPanelOpen(false)}
+                  />
+                </View>
+              </View>
+            </View>
           ) : null}
         </View>
       </View>
@@ -7095,6 +7345,80 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.06)',
     zIndex: 1,
+  },
+  callMainColumn: {
+    flex: 1,
+    minWidth: 0,
+    minHeight: 0,
+    flexDirection: 'column',
+    position: 'relative',
+  },
+  /** Chat floats over the call — stage keeps full width. */
+  chatPanelOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 80,
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+  },
+  chatPanelScrim: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0, 0, 0, 0.35)',
+  },
+  chatPanelDock: {
+    maxWidth: '100%',
+    height: '100%',
+    minHeight: 0,
+    flexDirection: 'row',
+    backgroundColor: '#111214',
+    borderLeftWidth: 1,
+    borderLeftColor: 'rgba(255,255,255,0.1)',
+    overflow: 'hidden',
+    zIndex: 81,
+    // @ts-expect-error RN Web
+    boxShadow: '-16px 0 40px rgba(0,0,0,0.45)',
+    elevation: 20,
+  },
+  chatPanelBody: {
+    flex: 1,
+    minWidth: 0,
+    minHeight: 0,
+  },
+  chatResizeHandle: {
+    width: CHAT_RESIZE_HANDLE_W,
+    alignSelf: 'stretch',
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 2,
+    ...Platform.select({
+      web: { cursor: 'col-resize', userSelect: 'none' } as object,
+      default: {},
+    }),
+  },
+  chatResizeHandleHot: {
+    backgroundColor: 'rgba(88, 101, 242, 0.12)',
+  },
+  chatResizeGrip: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 2,
+    paddingVertical: 10,
+    paddingHorizontal: 1,
+    borderRadius: 999,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.12)',
+    opacity: 0.65,
+  },
+  chatResizeGripHot: {
+    opacity: 1,
+    backgroundColor: 'rgba(88, 101, 242, 0.35)',
+    borderColor: 'rgba(88, 101, 242, 0.55)',
+  },
+  chatResizeBar: {
+    width: 2,
+    height: 22,
+    borderRadius: 1,
+    backgroundColor: 'rgba(220,221,222,0.7)',
   },
   shellDesktop: {
     maxWidth: 900,
@@ -7623,6 +7947,9 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     backgroundColor: 'rgba(255,255,255,0.08)',
     marginTop: 0,
+  },
+  headerActionActive: {
+    backgroundColor: '#5865F2',
   },
   title: {
     color: '#F2F3F5',

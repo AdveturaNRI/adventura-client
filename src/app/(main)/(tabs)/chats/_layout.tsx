@@ -4,11 +4,10 @@ import { StyleSheet, View } from 'react-native';
 import { ChatVoicePlaybackBar } from '@/components/chats/ChatVoicePlaybackBar';
 import { useIsDesktopWeb } from '@/components/navigation/DesktopThemeToggle';
 import { stackScreenOptions } from '@/constants/navigation.config';
-import { VoicePlaybackProvider } from '@/context/VoicePlaybackContext';
 import { useTheme } from '@/hooks/use-theme';
 import ChatsScreen from '@/screens/main/ChatsScreen';
 
-function ChatsShell() {
+export default function ChatsLayout() {
   const colors = useTheme();
   const isDesktopWeb = useIsDesktopWeb();
 
@@ -36,14 +35,6 @@ function ChatsShell() {
         </View>
       )}
     </View>
-  );
-}
-
-export default function ChatsLayout() {
-  return (
-    <VoicePlaybackProvider>
-      <ChatsShell />
-    </VoicePlaybackProvider>
   );
 }
 
