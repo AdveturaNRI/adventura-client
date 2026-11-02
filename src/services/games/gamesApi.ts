@@ -1,4 +1,6 @@
-import { apiRequest, apiUpload } from '@/services/api/client';
+import { Platform } from 'react-native';
+
+import { apiMultipart, apiRequest, apiUpload } from '@/services/api/client';
 import type { ImageUrls } from '@/services/api/types';
 
 export type GameKind = 'ONESHOT' | 'CAMPAIGN';
@@ -33,6 +35,8 @@ export type GameListItem = {
   anyAge: boolean;
   systemName: string;
   cover: ImageUrls | null;
+  /** Ordered screenshot URLs (card/original). */
+  galleryUrls?: string[];
   playersCount: number;
   pendingApplicationsCount: number;
   owner?: GameOwnerSummary | null;
@@ -250,4 +254,140 @@ export async function deleteGameCover(gameId: string): Promise<GameListItem> {
   return apiRequest<GameListItem>(`/games/${encodeURIComponent(gameId)}/cover`, {
     method: 'DELETE',
   });
+}
+
+export async function deleteGameGalleryItem(gameId: string, index: number) {
+  return apiRequest<GameListItem>(
+    `/games/${encodeURIComponent(gameId)}/gallery/${index}`,
+    { method: 'DELETE' },
+  );
+}
+
+export async function reorderGameGallery(gameId: string, order: number[]) {
+  return apiRequest<GameListItem>(`/games/${encodeURIComponent(gameId)}/gallery/order`, {
+    method: 'PATCH',
+    body: { order },
+  });
+}
+
+function isLocalGalleryUri(uri: string) {
+  return !/^https?:\/\//i.test(uri);
+}
+
+function sameUriList(left: string[], right: string[]) {
+  return left.length === right.length && left.every((uri, index) => uri === right[index]);
+}
+
+function isIdentityOrder(order: number[]) {
+  return order.every((value, index) => value === index);
+}
+
+export async function saveGameGallery(
+  gameId: string,
+  draftUris: string[],
+  originalUris: string[],
+) {
+  if (sameUriList(draftUris, originalUris)) {
+    return;
+  }
+
+  if (!draftUris.length) {
+    for (let index = originalUris.length - 1; index >= 0; index -= 1) {
+      await deleteGameGalleryItem(gameId, index);
+    }
+    return;
+  }
+
+  const locals = draftUris.filter(isLocalGalleryUri);
+  const keptRemotes = draftUris.filter((uri) => originalUris.includes(uri));
+  const unknownRemote = draftUris.some(
+    (uri) => !isLocalGalleryUri(uri) && !originalUris.includes(uri),
+  );
+
+  if (unknownRemote) {
+    throw new Error('Некоторые фото галереи нельзя сохранить. Загрузите их заново.');
+  }
+
+  if (!keptRemotes.length) {
+    await uploadGameGallery(gameId, locals);
+    return;
+  }
+
+  const keep = new Set(keptRemotes.map((uri) => originalUris.indexOf(uri)));
+  for (let index = originalUris.length - 1; index >= 0; index -= 1) {
+    if (!keep.has(index)) {
+      await deleteGameGalleryItem(gameId, index);
+    }
+  }
+
+  const remaining = originalUris.filter((_, index) => keep.has(index));
+  const remoteOrder = keptRemotes.map((uri) => remaining.indexOf(uri));
+  if (!isIdentityOrder(remoteOrder)) {
+    await reorderGameGallery(gameId, remoteOrder);
+  }
+
+  if (!locals.length) {
+    return;
+  }
+
+  await appendGameGallery(gameId, locals);
+  const afterAppend = [...keptRemotes, ...locals];
+  const finalOrder = draftUris.map((uri) => afterAppend.indexOf(uri));
+  if (!isIdentityOrder(finalOrder)) {
+    await reorderGameGallery(gameId, finalOrder);
+  }
+}
+
+async function buildGameGalleryFormData(localUris: string[]) {
+  if (localUris.some((uri) => !isLocalGalleryUri(uri))) {
+    throw new Error('Существующие фото галереи нельзя перезалить из браузера');
+  }
+
+  const formData = new FormData();
+
+  for (const [index, uri] of localUris.entries()) {
+    const fileName = uri.split('/').pop() || `gallery-${index}.jpg`;
+    const lower = fileName.toLowerCase();
+    const mimeType = lower.endsWith('.png')
+      ? 'image/png'
+      : lower.endsWith('.webp')
+        ? 'image/webp'
+        : 'image/jpeg';
+
+    if (Platform.OS === 'web') {
+      let blob: Blob;
+      try {
+        const response = await fetch(uri);
+        blob = await response.blob();
+      } catch {
+        throw new Error('Не удалось прочитать локальный файл галереи');
+      }
+      formData.append('gallery', blob, fileName);
+    } else {
+      formData.append(
+        'gallery',
+        {
+          uri,
+          name: fileName,
+          type: mimeType,
+        } as unknown as Blob,
+      );
+    }
+  }
+
+  return formData;
+}
+
+export async function uploadGameGallery(gameId: string, localUris: string[]) {
+  return apiMultipart<GameListItem>(
+    `/games/${encodeURIComponent(gameId)}/gallery`,
+    await buildGameGalleryFormData(localUris),
+  );
+}
+
+export async function appendGameGallery(gameId: string, localUris: string[]) {
+  return apiMultipart<GameListItem>(
+    `/games/${encodeURIComponent(gameId)}/gallery/items`,
+    await buildGameGalleryFormData(localUris),
+  );
 }

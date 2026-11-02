@@ -15,6 +15,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 
+import { ClubGalleryGrid, type FileDropTarget } from '@/components/clubs/ClubGalleryGrid';
 import { useIsDesktopSidebarVisible, useIsDesktopWeb } from '@/components/navigation/DesktopThemeToggle';
 import { MobileBackButton } from '@/components/navigation/MobileBackButton';
 import { ScreenTransition } from '@/components/navigation/ScreenTransition';
@@ -37,6 +38,7 @@ import {
   createGame,
   deleteGameCover,
   getGame,
+  saveGameGallery,
   updateGame,
   uploadGameCover,
   type GameKind,
@@ -66,6 +68,23 @@ import {
   wallTimeToUtcIso,
 } from '@/utils/timezones';
 import { normalizeUserGameSystemItem, normalizeUserGameSystemItems } from '@/utils/user-game-system';
+
+const MAX_GALLERY = 8;
+const GALLERY_MAX_FILE_BYTES = 5 * 1024 * 1024;
+
+function isGifFile(file: File) {
+  return file.type === 'image/gif' || isGifImage(file.name, file.type);
+}
+
+function isSupportedGalleryFile(file: File) {
+  if (isGifFile(file)) {
+    return false;
+  }
+  if (file.type === 'image/jpeg' || file.type === 'image/png' || file.type === 'image/webp') {
+    return true;
+  }
+  return /\.(jpe?g|png|webp)$/i.test(file.name);
+}
 
 type PendingCrop = {
   uri: string;
@@ -231,6 +250,14 @@ function createStyles(colors: ThemeColors, isDesktopWeb: boolean, topPadding: nu
       marginTop: -4,
     },
     coverSectionHint: {
+      fontSize: FontSize.caption,
+      color: colors.textMuted,
+      lineHeight: FontSize.caption * 1.45,
+    },
+    galleryDropWrap: {
+      width: '100%',
+    },
+    galleryHint: {
       fontSize: FontSize.caption,
       color: colors.textMuted,
       lineHeight: FontSize.caption * 1.45,
@@ -646,6 +673,10 @@ export default function CreateGameScreen() {
 
   const [draft, setDraft] = useState<Draft>(INITIAL_DRAFT);
   const [savedCoverUri, setSavedCoverUri] = useState<string | null>(null);
+  const [galleryUris, setGalleryUris] = useState<string[]>([]);
+  const [originalGalleryUrls, setOriginalGalleryUrls] = useState<string[]>([]);
+  const [galleryChanged, setGalleryChanged] = useState(false);
+  const [galleryDragging, setGalleryDragging] = useState(false);
   const [isLoadingGame, setIsLoadingGame] = useState(isEdit);
   const [isSaving, setIsSaving] = useState(false);
   const [pendingCrop, setPendingCrop] = useState<PendingCrop | null>(null);
@@ -658,6 +689,8 @@ export default function CreateGameScreen() {
     [],
   );
   const coverDropRef = useRef<View>(null);
+  const galleryUrisRef = useRef(galleryUris);
+  galleryUrisRef.current = galleryUris;
 
   const currentUserAuthor = useMemo(
     () =>
@@ -761,6 +794,10 @@ export default function CreateGameScreen() {
         const next = draftFromGame(game);
         setDraft(next);
         setSavedCoverUri(isRemoteImageUri(next.coverUri) ? next.coverUri : null);
+        const gallery = game.galleryUrls ?? [];
+        setGalleryUris(gallery);
+        setOriginalGalleryUrls(gallery);
+        setGalleryChanged(false);
       } catch (error) {
         if (!cancelled) {
           toast.error(localizeErrorMessage(error, 'Не удалось загрузить игру'));
@@ -925,6 +962,107 @@ export default function CreateGameScreen() {
 
     await openCoverFromUri(asset.uri, asset.mimeType);
   }, [openCoverFromUri]);
+
+  const appendGalleryUris = useCallback((uris: string[]) => {
+    if (!uris.length) {
+      return;
+    }
+    const base = galleryUrisRef.current;
+    const remaining = MAX_GALLERY - base.length;
+    if (remaining <= 0) {
+      toast.error(`В галерее уже ${MAX_GALLERY} фото`);
+      return;
+    }
+    setGalleryChanged(true);
+    setGalleryUris([...base, ...uris].slice(0, MAX_GALLERY));
+  }, []);
+
+  const acceptDroppedGallery = useCallback((target: FileDropTarget, files: File[]) => {
+    const images = files.filter(isSupportedGalleryFile);
+    if (!images.length) {
+      if (files.some(isGifFile)) {
+        toast.warning('GIF не подходит — выберите JPEG, PNG или WebP');
+        return;
+      }
+      toast.error('Нужны изображения JPEG, PNG или WebP до 5 МБ');
+      return;
+    }
+
+    const oversized = images.find((file) => file.size > GALLERY_MAX_FILE_BYTES);
+    if (oversized) {
+      toast.error('Файл слишком большой (максимум 5 МБ)');
+      return;
+    }
+
+    const base = galleryUrisRef.current;
+
+    if (target.mode === 'replace' && target.index >= 0 && target.index < base.length) {
+      const [first, ...rest] = images;
+      const next = [...base];
+      next[target.index] = URL.createObjectURL(first);
+      const remaining = Math.max(0, MAX_GALLERY - next.length);
+      next.splice(
+        target.index + 1,
+        0,
+        ...rest.slice(0, remaining).map((file) => URL.createObjectURL(file)),
+      );
+      setGalleryChanged(true);
+      setGalleryUris(next.slice(0, MAX_GALLERY));
+      return;
+    }
+
+    const remaining = MAX_GALLERY - base.length;
+    if (remaining <= 0) {
+      toast.error(`В галерее уже ${MAX_GALLERY} фото`);
+      return;
+    }
+
+    const uris = images.slice(0, remaining).map((file) => URL.createObjectURL(file));
+    const index = Math.max(0, Math.min(target.index, base.length));
+    const next = [...base];
+    next.splice(index, 0, ...uris);
+    setGalleryChanged(true);
+    setGalleryUris(next.slice(0, MAX_GALLERY));
+  }, []);
+
+  const pickGallery = useCallback(async () => {
+    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!permission.granted) {
+      toast.error('Нужен доступ к фото');
+      return;
+    }
+
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'],
+      allowsMultipleSelection: true,
+      quality: 0.9,
+      selectionLimit: MAX_GALLERY,
+    });
+
+    if (result.canceled || !result.assets?.length) {
+      return;
+    }
+
+    const uris = result.assets
+      .filter((asset) => !isGifImage(asset.uri, asset.mimeType))
+      .map((asset) => asset.uri);
+    if (!uris.length) {
+      toast.warning('GIF не подходит — выберите JPEG, PNG или WebP');
+      return;
+    }
+
+    appendGalleryUris(uris);
+  }, [appendGalleryUris]);
+
+  const reorderGalleryItems = useCallback((nextUris: string[]) => {
+    setGalleryUris(nextUris);
+    setGalleryChanged(true);
+  }, []);
+
+  const removeGalleryItem = useCallback((index: number) => {
+    setGalleryUris((current) => current.filter((_, item) => item !== index));
+    setGalleryChanged(true);
+  }, []);
 
   useEffect(() => {
     if (Platform.OS !== 'web' || typeof document === 'undefined') {
@@ -1127,11 +1265,19 @@ export default function CreateGameScreen() {
         } else if (!draft.coverUri && isRemoteImageUri(savedCoverUri)) {
           await deleteGameCover(gameId);
         }
+
+        if (galleryChanged) {
+          await saveGameGallery(gameId, galleryUris, originalGalleryUrls);
+        }
       } else {
         const created = await createGame(payload);
 
         if (draft.coverUri && isLocalImageUri(draft.coverUri)) {
           await uploadGameCover(created.id, draft.coverUri);
+        }
+
+        if (galleryUris.length) {
+          await saveGameGallery(created.id, galleryUris, []);
         }
         requestAfterCreateGame();
       }
@@ -1197,7 +1343,8 @@ export default function CreateGameScreen() {
       <ScrollView
         style={styles.scroll}
         contentContainerStyle={styles.content}
-        keyboardShouldPersistTaps="handled">
+        keyboardShouldPersistTaps="handled"
+        scrollEnabled={!galleryDragging}>
         <View style={styles.headerRow}>
           {!hasDesktopSidebar ? <MobileBackButton /> : null}
           <Text style={styles.headerTitle}>{isEdit ? 'Редактирование' : 'Новая игра'}</Text>
@@ -1294,6 +1441,30 @@ export default function CreateGameScreen() {
               </View>
             ) : null}
           </View>
+        </View>
+
+        <View style={styles.section}>
+          <Text style={styles.sectionLabel}>Скриншоты и материалы игры</Text>
+          <Text style={styles.coverSectionHint}>
+            До {MAX_GALLERY} фото (JPEG, PNG, WebP), до 5 МБ каждое. Battlemaps, арты NPC, стол —
+            всё, что покажет атмосферу партии.
+          </Text>
+          <View collapsable={false} style={styles.galleryDropWrap}>
+            <ClubGalleryGrid
+              uris={galleryUris}
+              disabled={isSaving}
+              canAdd={galleryUris.length < MAX_GALLERY}
+              onReorder={reorderGalleryItems}
+              onRemove={removeGalleryItem}
+              onAdd={() => void pickGallery()}
+              onDraggingChange={setGalleryDragging}
+              onDropFiles={acceptDroppedGallery}
+            />
+          </View>
+          <Text style={styles.galleryHint}>
+            Перетащите файлы на сетку или между снимками. Порядок и удаление сохраняются по кнопке
+            «Сохранить».
+          </Text>
         </View>
 
         <View style={styles.row}>
