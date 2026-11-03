@@ -1,3 +1,4 @@
+import { Image } from 'expo-image';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { type ComponentProps, useCallback, useState } from 'react';
 import {
@@ -13,6 +14,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 
+import { ChatImageLightbox } from '@/components/chats/ChatImageLightbox';
 import { DeleteGameDialog } from '@/components/games/DeleteGameDialog';
 import { useIsDesktopSidebarVisible, useIsDesktopWeb } from '@/components/navigation/DesktopThemeToggle';
 import { MobileBackButton } from '@/components/navigation/MobileBackButton';
@@ -21,6 +23,7 @@ import { UserAvatar } from '@/components/navigation/UserAvatar';
 import { Button, toast } from '@/components/ui';
 import { FadeInImage } from '@/components/ui/media/FadeInImage';
 import { FontSize, Radius, Spacing, type ThemeColors } from '@/constants/theme';
+import { useHorizontalWheelScroll } from '@/hooks/use-horizontal-wheel-scroll';
 import { useTheme } from '@/hooks/use-theme';
 import { useThemedStyles } from '@/hooks/use-themed-styles';
 import { openConversationWith, openGameChat } from '@/services/chats/chatsApi';
@@ -428,6 +431,25 @@ function createStyles(colors: ThemeColors, isDesktopWeb: boolean, topPadding: nu
       fontWeight: '800',
       color: '#FFFFFF',
     },
+    gallerySection: {
+      gap: Spacing.sm,
+    },
+    galleryTitle: {
+      fontSize: FontSize.label,
+      fontWeight: '600',
+      color: colors.text,
+    },
+    galleryContent: {
+      gap: Spacing.sm,
+      paddingVertical: 2,
+    },
+    galleryImage: {
+      width: 148,
+      height: 100,
+      borderRadius: Radius.md,
+      backgroundColor: colors.surfaceMuted,
+    },
+
     metaRow: {
       flexDirection: 'row',
       flexWrap: 'wrap',
@@ -791,6 +813,10 @@ export default function ManageGameScreen() {
   const [busy, setBusy] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
+  const galleryScrollRef = useHorizontalWheelScroll(
+    Boolean((payload?.game.galleryUrls ?? []).filter(Boolean).length),
+  );
 
   const applyPayload = useCallback((next: GameManagePayload) => {
     setPayload(next);
@@ -1078,6 +1104,7 @@ export default function ManageGameScreen() {
 
   const game = payload.game;
   const coverUrl = pickProfileCardUrl(game.cover, game.updatedAt);
+  const galleryUrls = (game.galleryUrls ?? []).filter(Boolean);
   const priceLabel = game.isFree
     ? 'Бесплатно'
     : game.priceRub != null
@@ -1211,6 +1238,28 @@ export default function ManageGameScreen() {
               </View>
             </View>
           </View>
+
+          {galleryUrls.length > 0 ? (
+            <View style={styles.gallerySection}>
+              <Text style={styles.galleryTitle}>Скриншоты и материалы</Text>
+              <ScrollView
+                ref={galleryScrollRef}
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.galleryContent}>
+                {galleryUrls.map((url, index) => (
+                  <Pressable
+                    key={`${url}-${index}`}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Открыть фото ${index + 1}`}
+                    onPress={() => setLightboxIndex(index)}
+                    style={({ pressed }) => [pressed && { opacity: 0.9 }]}>
+                    <Image source={{ uri: url }} style={styles.galleryImage} contentFit="cover" />
+                  </Pressable>
+                ))}
+              </ScrollView>
+            </View>
+          ) : null}
 
           <View style={styles.metaRow}>
             <MetaBadge
@@ -1503,6 +1552,14 @@ export default function ManageGameScreen() {
             }
           }}
         />
+
+        {lightboxIndex != null ? (
+          <ChatImageLightbox
+            uris={galleryUrls}
+            index={lightboxIndex}
+            onClose={() => setLightboxIndex(null)}
+          />
+        ) : null}
       </View>
     </ScreenTransition>
   );

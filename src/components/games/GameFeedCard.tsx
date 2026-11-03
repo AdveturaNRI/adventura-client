@@ -2,6 +2,7 @@ import { useState, type ComponentProps, type ReactNode } from 'react';
 import {
   Platform,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   View,
@@ -11,10 +12,12 @@ import {
 import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
 
+import { ChatImageLightbox } from '@/components/chats/ChatImageLightbox';
 import { FadeInImage } from '@/components/ui/media/FadeInImage';
 import { AnalyticsImpression } from '@/components/analytics/AnalyticsImpression';
 import { FontSize, Radius, Spacing, type ThemeColors } from '@/constants/theme';
 import { useProfile } from '@/context/ProfileContext';
+import { useHorizontalWheelScroll } from '@/hooks/use-horizontal-wheel-scroll';
 import { useTheme } from '@/hooks/use-theme';
 import { useThemedStyles } from '@/hooks/use-themed-styles';
 import type { GameListItem } from '@/services/games/gamesApi';
@@ -431,6 +434,25 @@ function createStyles(colors: ThemeColors, variant: GameFeedCardVariant) {
       color: isDetail ? colors.textSecondary : colors.textMuted,
       lineHeight: isDetail ? FontSize.label * 1.5 : FontSize.caption * 1.5,
     },
+    gallerySection: {
+      marginTop: Spacing.sm,
+      gap: Spacing.sm,
+    },
+    galleryTitle: {
+      fontSize: FontSize.label,
+      fontWeight: '600',
+      color: colors.text,
+    },
+    galleryContent: {
+      gap: Spacing.sm,
+      paddingVertical: 2,
+    },
+    galleryImage: {
+      width: isDetail ? 148 : 112,
+      height: isDetail ? 100 : 76,
+      borderRadius: Radius.md,
+      backgroundColor: colors.surfaceMuted,
+    },
     playersRow: {
       flexShrink: 0,
       flexDirection: 'row',
@@ -578,7 +600,12 @@ export function GameFeedCard({
   const { profile } = useProfile();
   const viewerTimezone = profile?.timezone?.trim() || DEFAULT_TIMEZONE;
   const [hovered, setHovered] = useState(false);
+  const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
   const isDetail = variant === 'detail';
+  const galleryUrls = (item.galleryUrls ?? []).filter(Boolean);
+  const galleryScrollRef = useHorizontalWheelScroll(
+    isDetail && galleryUrls.length > 0,
+  );
 
   const emitFilterBadge = (badge: GameFeedFilterBadge) => {
     if (!onFilterBadgePress) {
@@ -847,6 +874,28 @@ export function GameFeedCard({
           <Text style={styles.playersText}>{playersLabel}</Text>
         </View>
       </View>
+
+      {isDetail && galleryUrls.length > 0 ? (
+        <View style={styles.gallerySection}>
+          <Text style={styles.galleryTitle}>Скриншоты и материалы</Text>
+          <ScrollView
+            ref={galleryScrollRef}
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.galleryContent}>
+            {galleryUrls.map((url, index) => (
+              <Pressable
+                key={`${url}-${index}`}
+                accessibilityRole="button"
+                accessibilityLabel={`Открыть фото ${index + 1}`}
+                onPress={() => setLightboxIndex(index)}
+                style={({ pressed }) => [pressed && { opacity: 0.9 }]}>
+                <Image source={{ uri: url }} style={styles.galleryImage} contentFit="cover" />
+              </Pressable>
+            ))}
+          </ScrollView>
+        </View>
+      ) : null}
     </>
   );
 
@@ -932,6 +981,14 @@ export function GameFeedCard({
           <View style={styles.actionsWrap}>{actions}</View>
         </View>
       </AnalyticsImpression>
+
+      {lightboxIndex != null ? (
+        <ChatImageLightbox
+          uris={galleryUrls}
+          index={lightboxIndex}
+          onClose={() => setLightboxIndex(null)}
+        />
+      ) : null}
     </View>
   );
 }

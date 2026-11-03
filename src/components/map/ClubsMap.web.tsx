@@ -13,6 +13,7 @@ import {
   MAP_ATTRIBUTION_CSS,
   MAP_DEFAULT_CENTER,
   MAP_DEFAULT_ZOOM,
+  MAP_LEAFLET_OPTIONS,
   MAP_TILE_OPTIONS,
   MAP_TILE_URL,
 } from '@/constants/map.config';
@@ -177,6 +178,7 @@ export function ClubsMap({
           center: safeCenter,
           zoom: safeZoom,
           zoomControl: false,
+          ...MAP_LEAFLET_OPTIONS,
         });
         mapRef.current = instance;
 
