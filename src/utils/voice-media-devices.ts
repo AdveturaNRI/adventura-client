@@ -391,7 +391,7 @@ export async function applyAudioOutputToElement(
   el: HTMLMediaElement,
   deviceId: string | null,
 ): Promise<void> {
-  if (!deviceId || !supportsAudioOutputSelection()) {
+  if (!supportsAudioOutputSelection()) {
     return;
   }
   const withSink = el as HTMLMediaElement & {
@@ -401,7 +401,7 @@ export async function applyAudioOutputToElement(
     return;
   }
   try {
-    await withSink.setSinkId(deviceId);
+    await withSink.setSinkId(deviceId?.trim() || '');
   } catch {
     // browser may reject sink while element is idle
   }
@@ -534,9 +534,6 @@ export async function startMicrophoneTest(
   }
 
   const applyOutputSink = async (sinkId: string | null | undefined) => {
-    if (!sinkId?.trim() || !supportsAudioOutputSelection()) {
-      return;
-    }
     const withSink = ctx as AudioContext & {
       setSinkId?: (id: string) => Promise<void>;
     };
@@ -544,7 +541,7 @@ export async function startMicrophoneTest(
       return;
     }
     try {
-      await withSink.setSinkId(sinkId.trim());
+      await withSink.setSinkId(sinkId?.trim() || '');
     } catch {
       // keep current / default speakers
     }

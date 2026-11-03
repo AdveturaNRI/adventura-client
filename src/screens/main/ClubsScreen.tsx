@@ -14,6 +14,7 @@ import {
 } from '@/components/map/clubs-map.types';
 import {
   DEFAULT_CLUBS_CITY,
+  beginClubsMapInitialLocate,
   getClubsMapInitialCamera,
   getClubsMapSession,
   markClubsMapInitialCameraDone,
@@ -156,25 +157,19 @@ export default function ClubsScreen() {
   const [mapBounds, setMapBounds] = useState<ClubsMapBounds | null>(null);
   const [lockCamera, setLockCamera] = useState(session.didInitialCamera);
   const focusTokenRef = useRef(0);
-  const deniedToastShownRef = useRef(session.locationDenied);
+  const locationRequestInFlightRef = useRef(false);
   const mapSearchRef = useRef<MapSearchControlsHandle>(null);
   const applyUserLocationRef = useRef<
     (point: { lat: number; lng: number }, moveCamera?: boolean) => void
   >(() => undefined);
 
   const notifyGeolocationFallback = useCallback(
-    (denied = false, options?: { once?: boolean }) => {
+    (denied = false) => {
       if (denied) {
         setLocationDenied(true);
         setClubsMapLocationDenied(true);
       }
 
-      if (options?.once && deniedToastShownRef.current) {
-        mapSearchRef.current?.focusSearch();
-        return;
-      }
-
-      deniedToastShownRef.current = true;
       toast.info(GEOLOCATION_MANUAL_FALLBACK_MESSAGE, {
         title: 'Местоположение',
         duration: 4500,
@@ -242,7 +237,6 @@ export default function ClubsScreen() {
       const [lat, lng] = toLatLng(point.lat, point.lng);
       setLocationDenied(false);
       setClubsMapLocationDenied(false);
-      deniedToastShownRef.current = false;
       setUserLocation({ lat, lng });
       setClubsMapUserLocation({ lat, lng });
       if (moveCamera) {
@@ -282,7 +276,9 @@ export default function ClubsScreen() {
     },
     [flyTo, selectCity],
   );
-  applyUserLocationRef.current = applyUserLocation;
+  useEffect(() => {
+    applyUserLocationRef.current = applyUserLocation;
+  }, [applyUserLocation]);
 
   useEffect(() => {
     if (!session.selectedCity) {
@@ -321,22 +317,19 @@ export default function ClubsScreen() {
   }, [selectCity, session.userLocation]);
 
   useEffect(() => {
-    if (userLocation) {
-      setLocationDenied(false);
-      setClubsMapLocationDenied(false);
-    }
-  }, [userLocation]);
-
-  useEffect(() => {
     if (typeof navigator === 'undefined' || !navigator.permissions?.query) {
       return;
     }
 
     let cancelled = false;
+    let permissionStatus: PermissionStatus | null = null;
 
     const onGranted = (moveCamera: boolean) => {
       setLocationDenied(false);
       setClubsMapLocationDenied(false);
+      if (locationRequestInFlightRef.current) return;
+      locationRequestInFlightRef.current = true;
+      markClubsMapInitialLocateDone();
       void readDeviceLocation({ maximumAge: 0 })
         .then((point) => {
           if (!cancelled) {
@@ -346,7 +339,20 @@ export default function ClubsScreen() {
         })
         .catch(() => {
           // ignore
+        })
+        .finally(() => {
+          locationRequestInFlightRef.current = false;
         });
+    };
+
+    const onPermissionChange = () => {
+      if (cancelled || !permissionStatus) return;
+      if (permissionStatus.state === 'granted') {
+        onGranted(!getClubsMapSession().didInitialCamera);
+      } else if (permissionStatus.state === 'denied') {
+        setLocationDenied(true);
+        setClubsMapLocationDenied(true);
+      }
     };
 
     void navigator.permissions
@@ -355,17 +361,11 @@ export default function ClubsScreen() {
         if (cancelled) {
           return;
         }
+        permissionStatus = result;
         if (result.state === 'granted' && !getClubsMapSession().didInitialLocate) {
           onGranted(true);
         }
-        result.addEventListener('change', () => {
-          if (result.state === 'granted') {
-            onGranted(!getClubsMapSession().didInitialCamera);
-          } else if (result.state === 'denied') {
-            setLocationDenied(true);
-            setClubsMapLocationDenied(true);
-          }
-        });
+        result.addEventListener('change', onPermissionChange);
       })
       .catch(() => {
         // Permissions API может быть недоступен
@@ -373,6 +373,7 @@ export default function ClubsScreen() {
 
     return () => {
       cancelled = true;
+      permissionStatus?.removeEventListener('change', onPermissionChange);
     };
   }, []);
 
@@ -384,34 +385,38 @@ export default function ClubsScreen() {
         .then(setClubs)
         .catch(() => setClubs([]));
 
-      if (getClubsMapSession().didInitialLocate) {
+      if (!beginClubsMapInitialLocate() || locationRequestInFlightRef.current) {
         return () => {
           cancelled = true;
         };
       }
 
+      locationRequestInFlightRef.current = true;
       void readDeviceLocation({ maximumAge: 60_000 })
         .then((point) => {
           if (cancelled) {
             return;
           }
           applyUserLocation(point, !getClubsMapSession().didInitialCamera);
-          markClubsMapInitialLocateDone();
         })
         .catch((error) => {
           if (cancelled) {
             return;
           }
-          markClubsMapInitialLocateDone();
-          notifyGeolocationFallback(error instanceof GeolocationPermissionError, {
-            once: true,
-          });
+          // Automatic location is optional: keep the selected/default city quietly.
+          if (error instanceof GeolocationPermissionError) {
+            setLocationDenied(true);
+            setClubsMapLocationDenied(true);
+          }
+        })
+        .finally(() => {
+          locationRequestInFlightRef.current = false;
         });
 
       return () => {
         cancelled = true;
       };
-    }, [applyUserLocation, notifyGeolocationFallback]),
+    }, [applyUserLocation]),
   );
 
   const markers = useMemo(
@@ -534,7 +539,6 @@ export default function ClubsScreen() {
                 onRetryLocation={() => {
                   void readDeviceLocation({ maximumAge: 0 })
                     .then((point) => {
-                      deniedToastShownRef.current = false;
                       applyUserLocation(point, true);
                       markClubsMapInitialLocateDone();
                     })
@@ -543,7 +547,6 @@ export default function ClubsScreen() {
                     });
                 }}
                 onLocateMe={(point) => {
-                  deniedToastShownRef.current = false;
                   applyUserLocation(point, true);
                   markClubsMapInitialLocateDone();
                 }}

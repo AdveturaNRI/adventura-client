@@ -9,8 +9,10 @@ const {
   Notification,
   ipcMain,
   screen,
+  dialog,
 } = require('electron');
 const { autoUpdater } = require('electron-updater');
+const semver = require('semver');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -24,6 +26,7 @@ const CALL_PIP_HEIGHT = 392;
 const CALL_PIP_COLLAPSED_WIDTH = 280;
 const CALL_PIP_COLLAPSED_HEIGHT = 118;
 const UPDATE_CHECK_MS = 4 * 60 * 60 * 1000;
+const UPDATE_URL = (process.env.ADVENTURA_UPDATE_URL || 'https://api.adventu.ru/api/desktop-updates').replace(/\/$/, '');
 
 /** @type {BrowserWindow | null} */
 let mainWindow = null;
@@ -33,13 +36,33 @@ let callPipWindow = null;
 let tray = null;
 let isQuitting = false;
 let callPipCollapsed = false;
+let lastCallMode = null;
+let lastCallVisible = false;
+let mainFocusSignaled = false;
+let focusMisses = 0;
+let focusSyncTimer = null;
+const notificationWindows = new Set();
+const lastDetailedNotificationAt = { chat: 0, portal: 0 };
+let latestCallPipState = { visible: false };
+let callPipLoadPending = false;
 /** @type {string | null} */
 let callPresenceScript = null;
 
-/** @type {'idle' | 'checking' | 'available' | 'downloaded' | 'error'} */
+/** @type {'idle' | 'checking' | 'available' | 'downloading' | 'downloaded' | 'error'} */
 let updateStatus = 'idle';
 /** @type {string | null} */
 let updateVersion = null;
+let updatePromptOpen = false;
+let requiredUpdate = false;
+let initialUpdateCheck = true;
+let mandatoryFailureOpen = false;
+let expectedUpdateVersion = null;
+let updateCheckPromise = null;
+const hasSingleInstanceLock = typeof app.requestSingleInstanceLock === 'function'
+  ? app.requestSingleInstanceLock()
+  : true;
+if (!hasSingleInstanceLock) app.quit();
+else app.on('second-instance', () => showMainWindow());
 
 function resolveIconPath() {
   const candidates = [
@@ -64,6 +87,7 @@ function getLaunchExec() {
 }
 
 function readAutostartEnabled() {
+  if (process.platform === 'win32') return app.getLoginItemSettings().openAtLogin;
   try {
     return fs.existsSync(AUTOSTART_FILE);
   } catch {
@@ -72,6 +96,10 @@ function readAutostartEnabled() {
 }
 
 function writeAutostart(enabled) {
+  if (process.platform === 'win32') {
+    app.setLoginItemSettings({ openAtLogin: enabled });
+    return enabled;
+  }
   const dir = path.dirname(AUTOSTART_FILE);
   if (!enabled) {
     try {
@@ -100,10 +128,12 @@ StartupNotify=false
 }
 
 function showMainWindow() {
+  if (requiredUpdate || (app.isPackaged && initialUpdateCheck && !(process.platform === 'linux' && !process.env.APPIMAGE))) return;
   if (!mainWindow) {
     createWindow();
     return;
   }
+  if (callPipWindow && !callPipWindow.isDestroyed() && callPipWindow.isVisible()) callPipWindow.hide();
   if (mainWindow.isMinimized()) {
     mainWindow.restore();
   }
@@ -128,11 +158,13 @@ function buildTrayMenu() {
         autoUpdater.quitAndInstall(false, true);
       },
     });
-  } else if (updateStatus === 'available' && updateVersion) {
+  } else if (updateStatus === 'downloading' && updateVersion) {
     updateItems.push({
       label: `Качаю обновление v${updateVersion}…`,
       enabled: false,
     });
+  } else if (updateStatus === 'available') {
+    updateItems.push({ label: `Доступна v${updateVersion || ''} — проверить обновления`, click: () => void checkForAppUpdates({ userInitiated: true }) });
   } else if (updateStatus === 'checking') {
     updateItems.push({ label: 'Проверка обновлений…', enabled: false });
   } else {
@@ -154,6 +186,10 @@ function buildTrayMenu() {
       },
     },
     { type: 'separator' },
+    {
+      label: 'Тест уведомления',
+      click: () => showOsNotification({ title: 'Adventura', body: 'Уведомления работают' }),
+    },
     {
       label: 'Тест PiP (поверх окон)',
       click: () => showTestCallPip(),
@@ -252,7 +288,7 @@ function applyCallPipBounds() {
   const nextX = Math.min(Math.max(work.x, x), work.x + work.width - width);
   const nextY = Math.min(Math.max(work.y, y), work.y + work.height - height);
   callPipWindow.setBounds({ x: nextX, y: nextY, width, height }, false);
-  pinCallPipOnTop(callPipWindow);
+  if (callPipWindow.isVisible()) pinCallPipOnTop(callPipWindow);
 }
 
 function ensureCallPipWindow() {
@@ -294,11 +330,11 @@ function ensureCallPipWindow() {
     },
   });
 
-  pinCallPipOnTop(callPipWindow);
   callPipWindow.setMenu(null);
   callPipWindow.on('closed', () => {
     callPipWindow = null;
     callPipCollapsed = false;
+    callPipLoadPending = false;
   });
 
   void callPipWindow.loadFile(path.join(__dirname, 'call-pip.html'));
@@ -309,35 +345,111 @@ function showCallPipWindow(win) {
   if (!win || win.isDestroyed()) {
     return;
   }
-  if (!win.isVisible()) {
-    win.show();
+  if (isMainWindowForeground()) {
+    if (win.isVisible()) win.hide();
+    return;
   }
-  pinCallPipOnTop(win);
+  if (!win.isVisible()) {
+    win.showInactive();
+    pinCallPipOnTop(win);
+  }
+}
+
+function nativeMainWindowForeground() {
+  if (!mainWindow || mainWindow.isDestroyed() || !mainWindow.isVisible() || mainWindow.isMinimized?.()) return false;
+  if (mainWindow.isFocused()) return true;
+  const focused = BrowserWindow?.getFocusedWindow?.();
+  if (!focused || focused.isDestroyed() || focused === callPipWindow || notificationWindows.has(focused)) return false;
+  if (focused === mainWindow) return true;
+  try { return new URL(focused.webContents.getURL()).origin === new URL(START_URL).origin; }
+  catch { return false; }
+}
+
+function isMainWindowForeground() {
+  if (!mainWindow || mainWindow.isDestroyed() || !mainWindow.isVisible() || mainWindow.isMinimized?.()) return false;
+  return mainFocusSignaled || nativeMainWindowForeground();
+}
+
+function syncCallPipVisibility() {
+  if (!callPipWindow || callPipWindow.isDestroyed()) return;
+  if (!latestCallPipState?.visible || requiredUpdate ||
+      isMainWindowForeground()) {
+    if (callPipWindow.isVisible()) callPipWindow.hide();
+    return;
+  }
+  showCallPipWindow(callPipWindow);
+}
+
+function reconcileCallPipFocus() {
+  if (!latestCallPipState?.visible || !callPipWindow || callPipWindow.isDestroyed()) return;
+  const nativeFocused = nativeMainWindowForeground();
+  if (nativeFocused) {
+    mainFocusSignaled = true;
+    focusMisses = 0;
+  } else if (mainFocusSignaled && ++focusMisses >= 3) {
+    mainFocusSignaled = false;
+    focusMisses = 0;
+  }
+  syncCallPipVisibility();
+}
+
+function handleMainWindowFocus() {
+  mainFocusSignaled = true;
+  focusMisses = 0;
+  if (focusSyncTimer) { clearTimeout(focusSyncTimer); focusSyncTimer = null; }
+  syncCallPipVisibility();
+  for (const win of [...notificationWindows]) if (!win.isDestroyed()) win.close();
+}
+
+function handleMainWindowBlur() {
+  mainFocusSignaled = false;
+  focusMisses = 0;
+  if (focusSyncTimer) clearTimeout(focusSyncTimer);
+  focusSyncTimer = setTimeout(() => { focusSyncTimer = null; syncCallPipVisibility(); }, 150);
 }
 
 function pushCallPipState(state) {
   const win = ensureCallPipWindow();
+  const visibilityChanged = Boolean(state?.visible) !== lastCallVisible || (state?.mode || null) !== lastCallMode;
+  latestCallPipState = state;
+  if (process.platform === 'win32' && state?.visible && state.mode === 'incoming' &&
+      (!lastCallVisible || lastCallMode !== 'incoming')) {
+    callPipCollapsed = false;
+    const work = screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).workArea;
+    win.setBounds({ x: Math.round(work.x + (work.width - CALL_PIP_WIDTH) / 2),
+      y: Math.round(work.y + (work.height - CALL_PIP_HEIGHT) / 2),
+      width: CALL_PIP_WIDTH, height: CALL_PIP_HEIGHT });
+  } else if (process.platform === 'win32' && state?.visible && state.mode !== 'incoming' &&
+             lastCallVisible && lastCallMode === 'incoming') {
+    const work = screen.getDisplayMatching(win.getBounds()).workArea;
+    win.setPosition(work.x + work.width - CALL_PIP_WIDTH - 24,
+      work.y + work.height - CALL_PIP_HEIGHT - 24);
+  }
+  lastCallVisible = Boolean(state?.visible);
+  lastCallMode = state?.mode || null;
   const send = () => {
     if (!win.isDestroyed()) {
-      win.webContents.send('call-pip:state', state);
+      win.webContents.send('call-pip:state', latestCallPipState);
     }
   };
 
   if (win.webContents.isLoadingMainFrame?.() || win.webContents.isLoading()) {
-    win.webContents.once('did-finish-load', () => {
-      send();
-      if (state?.visible) {
-        showCallPipWindow(win);
-      }
-    });
+    if (!callPipLoadPending) {
+      callPipLoadPending = true;
+      win.webContents.once('did-finish-load', () => {
+        callPipLoadPending = false;
+        send();
+        syncCallPipVisibility();
+      });
+    }
   } else {
     send();
   }
 
-  if (state?.visible) {
-    showCallPipWindow(win);
+  if (state?.visible && visibilityChanged) {
+    syncCallPipVisibility();
     applyCallPipBounds();
-  } else if (win.isVisible()) {
+  } else if (!state?.visible && win.isVisible()) {
     win.hide();
   }
 }
@@ -386,8 +498,13 @@ function createWindow() {
     minWidth: 960,
     minHeight: 640,
     title: 'Adventura',
+    show: !app.isPackaged || (process.platform === 'linux' && !process.env.APPIMAGE) || !initialUpdateCheck,
     backgroundColor: '#0B111B',
     autoHideMenuBar: true,
+    ...(process.platform === 'win32' ? {
+      titleBarStyle: 'hidden',
+      titleBarOverlay: { color: '#111827', symbolColor: '#d6e1f2', height: 40 },
+    } : {}),
     icon: iconPath || undefined,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -395,6 +512,8 @@ function createWindow() {
       nodeIntegration: false,
       sandbox: true,
       webSecurity: true,
+      backgroundThrottling: false,
+      autoplayPolicy: 'no-user-gesture-required',
     },
   });
 
@@ -440,25 +559,95 @@ function createWindow() {
 
   const inject = () => {
     void injectCallPresenceWatcher(mainWindow.webContents);
+    if (process.platform === 'win32') {
+      const logo = iconPath ? nativeImage.createFromPath(iconPath).resize({ width: 48, height: 48 }).toDataURL() : '';
+      const titlebarScript = fs.readFileSync(path.join(__dirname, 'titlebar-inject.js'), 'utf8')
+        .replace('"__ADVENTURA_TITLEBAR_LOGO__"', JSON.stringify(logo));
+      void mainWindow.webContents.executeJavaScript(titlebarScript).catch((err) => {
+        console.warn('[titlebar] inject failed', err?.message || err);
+      });
+    }
+    const script = fs.readFileSync(path.join(__dirname, 'notification-inject.js'), 'utf8');
+    void mainWindow.webContents.executeJavaScript(script).catch((err) => {
+      console.warn('[notification] inject failed', err?.message || err);
+    });
   };
   mainWindow.webContents.on('did-finish-load', inject);
   mainWindow.webContents.on('did-navigate-in-page', inject);
-  mainWindow.on('focus', () => {
-    // Re-assert PiP stacking after focus changes (some WMs reshuffle).
-    if (callPipWindow && !callPipWindow.isDestroyed() && callPipWindow.isVisible()) {
-      pinCallPipOnTop(callPipWindow);
-    }
-  });
-  mainWindow.on('blur', () => {
-    if (callPipWindow && !callPipWindow.isDestroyed() && callPipWindow.isVisible()) {
-      pinCallPipOnTop(callPipWindow);
-    }
-  });
+  mainWindow.on('focus', handleMainWindowFocus);
+  mainWindow.on('blur', handleMainWindowBlur);
+  mainWindow.on('hide', handleMainWindowBlur);
+  mainWindow.on('minimize', handleMainWindowBlur);
 
   void mainWindow.loadURL(START_URL);
 }
 
+function arrangeNotificationWindows() {
+  const work = screen.getPrimaryDisplay().workArea;
+  const width = 340;
+  const height = 108;
+  const rows = Math.max(1, Math.floor((work.height - 32) / (height + 8)));
+  let index = 0;
+  for (const win of notificationWindows) {
+    if (win.isDestroyed()) continue;
+    const column = Math.floor(index / rows);
+    const row = index % rows;
+    win.setPosition(Math.max(work.x, work.x + work.width - width - 16 - column * (width + 8)),
+      work.y + work.height - height - 16 - row * (height + 8));
+    index += 1;
+  }
+}
+
+function showWindowsNotification(payload, onClick) {
+  const work = screen.getPrimaryDisplay().workArea;
+  const width = 340;
+  const height = 108;
+  const win = new BrowserWindow({
+    width, height, x: work.x + work.width - width - 16,
+    y: work.y + work.height - height - 16,
+    show: false, frame: false, resizable: false, skipTaskbar: true,
+    alwaysOnTop: true, focusable: false, backgroundColor: '#111827',
+    webPreferences: { preload: path.join(__dirname, 'notification-preload.js'),
+      contextIsolation: true, nodeIntegration: false, sandbox: true },
+  });
+  notificationWindows.add(win);
+  arrangeNotificationWindows();
+  win.on('closed', () => {
+    notificationWindows.delete(win);
+    arrangeNotificationWindows();
+  });
+  win.webContents.once('did-finish-load', () => {
+    if (win.isDestroyed()) return;
+    win.webContents.send('notification:content', {
+      title: String(payload?.title || 'Adventura').slice(0, 120),
+      body: String(payload?.body || '').slice(0, 240),
+    });
+    win.showInactive();
+    pinCallPipOnTop(win);
+  });
+  win.webContents.on('ipc-message', (_event, channel) => {
+    if (channel === 'notification:dismiss') {
+      win.close();
+      return;
+    }
+    if (channel !== 'notification:click') return;
+    if (typeof onClick === 'function') onClick();
+    else {
+      showMainWindow();
+      if (typeof payload?.url === 'string' && payload.url && mainWindow && !mainWindow.isDestroyed())
+        mainWindow.webContents.send('desktop:navigate', payload.url);
+    }
+    if (!win.isDestroyed()) win.close();
+  });
+  void win.loadFile(path.join(__dirname, 'notification.html'));
+  setTimeout(() => { if (!win.isDestroyed()) win.close(); }, 12000);
+  return true;
+}
+
 function showOsNotification(payload, onClick) {
+  if (process.platform === 'win32') {
+    return showWindowsNotification(payload, onClick);
+  }
   if (!Notification.isSupported()) {
     return false;
   }
@@ -494,61 +683,130 @@ function setupAutoUpdater() {
     return;
   }
 
-  autoUpdater.autoDownload = true;
-  autoUpdater.autoInstallOnAppQuit = true;
-  // GitHub Releases; override: ADVENTURA_UPDATE_URL=https://adventu.ru/desktop/
-  if (process.env.ADVENTURA_UPDATE_URL) {
-    autoUpdater.setFeedURL({
-      provider: 'generic',
-      url: process.env.ADVENTURA_UPDATE_URL.replace(/\/$/, ''),
-    });
-  }
+  autoUpdater.autoDownload = false;
+  autoUpdater.autoInstallOnAppQuit = false;
+  autoUpdater.disableDifferentialDownload = true;
+  autoUpdater.setFeedURL({ provider: 'generic', url: UPDATE_URL });
 
   autoUpdater.on('checking-for-update', () => {
     updateStatus = 'checking';
     refreshTrayMenu();
   });
 
-  autoUpdater.on('update-available', (info) => {
+  autoUpdater.on('update-available', async (info) => {
+    if (expectedUpdateVersion && info?.version !== expectedUpdateVersion) {
+      console.warn('[autoUpdater] manifest does not match the selected release');
+      updateStatus = 'error';
+      refreshTrayMenu();
+      if (requiredUpdate) void showMandatoryUpdateFailure();
+      else showOsNotification({ title: 'Обновления', body: 'Версия обновления изменилась. Повторите проверку.' });
+      return;
+    }
     updateStatus = 'available';
     updateVersion = info?.version || null;
     refreshTrayMenu();
-    showOsNotification({
-      title: 'Обновление Adventura',
-      body: `Качаю v${updateVersion || ''}…`,
-    });
+    if (updatePromptOpen) return;
+    updatePromptOpen = true;
+    try {
+      const result = await dialog.showMessageBox({
+        type: 'info', title: 'Обновление Adventura',
+        message: `Доступна версия ${updateVersion || ''}`,
+        detail: requiredUpdate
+          ? 'Эта версия больше не поддерживается. Для продолжения необходимо обновить приложение.'
+          : 'Скачать и установить обновление? После загрузки приложение перезапустится.',
+        buttons: requiredUpdate ? ['Обновить', 'Выйти'] : ['Обновить', 'Позже'], defaultId: 0, cancelId: 1,
+      });
+      if (result.response === 0) {
+        updateStatus = 'downloading';
+        refreshTrayMenu();
+        await autoUpdater.downloadUpdate();
+      } else if (requiredUpdate) {
+        app.quit();
+      }
+    } catch (err) {
+      console.warn('[autoUpdater] download failed', err?.message || err);
+      if (requiredUpdate) void showMandatoryUpdateFailure();
+    } finally {
+      updatePromptOpen = false;
+    }
   });
 
   autoUpdater.on('update-not-available', () => {
     updateStatus = 'idle';
     updateVersion = null;
     refreshTrayMenu();
+    if (requiredUpdate) void showMandatoryUpdateFailure();
   });
 
   autoUpdater.on('error', (err) => {
     console.warn('[autoUpdater]', err?.message || err);
     updateStatus = 'error';
     refreshTrayMenu();
+    if (requiredUpdate) void showMandatoryUpdateFailure();
   });
 
   autoUpdater.on('update-downloaded', (info) => {
     updateStatus = 'downloaded';
     updateVersion = info?.version || updateVersion;
     refreshTrayMenu();
-    showOsNotification(
-      {
-        title: 'Обновление готово',
-        body: `v${updateVersion || ''} — нажми, чтобы перезапустить`,
-      },
-      () => {
-        isQuitting = true;
-        autoUpdater.quitAndInstall(false, true);
-      },
-    );
+    isQuitting = true;
+    autoUpdater.quitAndInstall(false, true);
   });
 }
 
-async function checkForAppUpdates(options = {}) {
+async function showMandatoryUpdateFailure() {
+  if (mandatoryFailureOpen) return;
+  mandatoryFailureOpen = true;
+  const result = await dialog.showMessageBox({
+    type: 'error', title: 'Требуется обновление',
+    message: 'Не удалось установить обязательное обновление.',
+    detail: 'Проверьте подключение и повторите попытку.',
+    buttons: ['Повторить', 'Выйти'], defaultId: 0, cancelId: 1,
+  });
+  mandatoryFailureOpen = false;
+  if (result.response === 0) void checkForAppUpdates({ userInitiated: true });
+  else app.quit();
+}
+
+async function getUpdatePolicy() {
+  const url = new URL(`${UPDATE_URL}/policy`);
+  url.searchParams.set('platform', process.platform);
+  const response = await fetch(url, { signal: AbortSignal.timeout(10000), cache: 'no-store' });
+  if (!response.ok) throw new Error(`Policy HTTP ${response.status}`);
+  const policy = await response.json();
+  if (!policy.configured) return null;
+  if (!semver.valid(policy.current) || !semver.valid(policy.minimum) || semver.gt(policy.minimum, policy.current)) {
+    throw new Error('Invalid desktop update policy');
+  }
+  return policy;
+}
+
+function applyUpdatePolicy(policy) {
+  requiredUpdate = Boolean(policy && semver.lt(app.getVersion(), policy.minimum));
+  expectedUpdateVersion = policy?.current || null;
+  autoUpdater.allowDowngrade = Boolean(policy && semver.gt(app.getVersion(), policy.current));
+  if (requiredUpdate) {
+    mainWindow?.hide();
+    if (callPipWindow && !callPipWindow.isDestroyed()) pushCallPipState({ visible: false });
+  }
+}
+
+function readCachedUpdatePolicy() {
+  try {
+    const policy = JSON.parse(fs.readFileSync(path.join(app.getPath('userData'), 'desktop-update-policy.json'), 'utf8'));
+    if (semver.valid(policy.current) && semver.valid(policy.minimum) && semver.lte(policy.minimum, policy.current)) return policy;
+  } catch { /* no previously verified policy */ }
+  return null;
+}
+
+function checkForAppUpdates(options = {}) {
+  if (updateCheckPromise) return updateCheckPromise;
+  if (updatePromptOpen || updateStatus === 'downloading') return Promise.resolve();
+  updateCheckPromise = performUpdateCheck(options).finally(() => { updateCheckPromise = null; });
+  return updateCheckPromise;
+}
+
+async function performUpdateCheck(options = {}) {
   const { userInitiated = false } = options;
   if (!app.isPackaged) {
     if (userInitiated) {
@@ -559,8 +817,29 @@ async function checkForAppUpdates(options = {}) {
     }
     return;
   }
+  if (process.platform === 'linux' && !process.env.APPIMAGE) {
+    if (userInitiated) showOsNotification({ title: 'Обновления', body: 'Автообновление доступно для версии AppImage.' });
+    return;
+  }
 
   try {
+    try {
+      const policy = await getUpdatePolicy();
+      applyUpdatePolicy(policy);
+      try {
+        const file = path.join(app.getPath('userData'), 'desktop-update-policy.json');
+        if (policy) fs.writeFileSync(file, JSON.stringify(policy));
+        else if (fs.existsSync(file)) fs.unlinkSync(file);
+      } catch (err) { console.warn('[autoUpdater] policy cache failed', err?.message || err); }
+    } catch (err) {
+      console.warn('[autoUpdater] policy unavailable', err?.message || err);
+      const cached = readCachedUpdatePolicy();
+      if (cached) applyUpdatePolicy(cached);
+    }
+    if (initialUpdateCheck) {
+      initialUpdateCheck = false;
+      if (!requiredUpdate) showMainWindow();
+    }
     updateStatus = 'checking';
     refreshTrayMenu();
     const result = await autoUpdater.checkForUpdates();
@@ -574,8 +853,12 @@ async function checkForAppUpdates(options = {}) {
     console.warn('[autoUpdater] check failed', err?.message || err);
     updateStatus = 'error';
     refreshTrayMenu();
+    if (requiredUpdate) {
+      void showMandatoryUpdateFailure();
+      return;
+    }
     if (userInitiated) {
-      const isDeb = !process.env.APPIMAGE;
+      const isDeb = process.platform === 'linux' && !process.env.APPIMAGE;
       showOsNotification({
         title: 'Обновления',
         body: isDeb
@@ -586,8 +869,28 @@ async function checkForAppUpdates(options = {}) {
   }
 }
 
-app.whenReady().then(() => {
-  session.defaultSession.setPermissionRequestHandler((_wc, permission, callback) => {
+function isTrustedLocationRequest(contents, requestingUrl, details) {
+  if (!mainWindow || mainWindow.isDestroyed() || contents !== mainWindow.webContents || details?.isMainFrame !== true) return false;
+  try {
+    const start = new URL(START_URL);
+    const current = new URL(contents.getURL());
+    // Electron can omit requestingOrigin on main-frame permission checks.
+    const requested = new URL(requestingUrl || details.requestingUrl || contents.getURL());
+    const secure = start.protocol === 'https:' ||
+      (start.protocol === 'http:' && ['localhost', '127.0.0.1', '[::1]'].includes(start.hostname));
+    return secure && current.origin === start.origin && requested.origin === start.origin;
+  } catch {
+    return false;
+  }
+}
+
+if (hasSingleInstanceLock) app.whenReady().then(() => {
+  if (process.platform === 'win32') app.setAppUserModelId('ru.adventu.desktop');
+  session.defaultSession.setPermissionRequestHandler((wc, permission, callback, details) => {
+    if (permission === 'geolocation') {
+      callback(isTrustedLocationRequest(wc, details?.requestingUrl, details));
+      return;
+    }
     const allow = [
       'media',
       'mediaKeySystem',
@@ -598,17 +901,27 @@ app.whenReady().then(() => {
     callback(allow);
   });
 
-  session.defaultSession.setPermissionCheckHandler((_wc, permission) =>
-    [
+  session.defaultSession.setPermissionCheckHandler((wc, permission, origin, details) => {
+    if (permission === 'geolocation') return isTrustedLocationRequest(wc, origin, details);
+    return [
       'media',
       'mediaKeySystem',
       'display-capture',
       'notifications',
       'clipboard-sanitized-write',
-    ].includes(permission),
-  );
+    ].includes(permission);
+  });
 
-  ipcMain.handle('desktop:notify', (_event, payload) => showOsNotification(payload || {}));
+  ipcMain.handle('desktop:notify', (_event, payload) => {
+    if (mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible() && mainWindow.isFocused()) return false;
+    const category = payload?.titleFallback
+      ? (payload.title === 'Новое сообщение' ? 'chat' : 'portal')
+      : typeof payload?.url === 'string' && payload.url.startsWith('/chats') ? 'chat'
+        : payload?.url === '/notifications' ? 'portal' : null;
+    if (payload?.titleFallback && category && Date.now() - lastDetailedNotificationAt[category] < 1500) return false;
+    if (!payload?.titleFallback && category) lastDetailedNotificationAt[category] = Date.now();
+    return showOsNotification(payload || {});
+  });
   ipcMain.handle('desktop:show-window', () => {
     showMainWindow();
     return true;
@@ -625,6 +938,7 @@ app.whenReady().then(() => {
   });
 
   ipcMain.handle('desktop:call-pip-update', (_event, state) => {
+    if (requiredUpdate) return false;
     pushCallPipState(state || { visible: false });
     return true;
   });
@@ -636,6 +950,7 @@ app.whenReady().then(() => {
   });
 
   ipcMain.on('call-pip:action', (_event, action) => {
+    if (requiredUpdate) return;
     const name = String(action || '');
     if (name === 'expand' || name === 'accept') {
       showMainWindow();
@@ -652,17 +967,16 @@ app.whenReady().then(() => {
   createWindow();
   ensureCallPipWindow();
 
-  if (!readAutostartEnabled()) {
+  if ((process.platform !== 'win32' || app.isPackaged) && !readAutostartEnabled()) {
     writeAutostart(true);
     refreshTrayMenu();
   }
 
-  setTimeout(() => {
-    void checkForAppUpdates();
-  }, 8_000);
+  void checkForAppUpdates();
   setInterval(() => {
     void checkForAppUpdates();
   }, UPDATE_CHECK_MS);
+  setInterval(reconcileCallPipFocus, 400);
 
   app.on('activate', () => {
     showMainWindow();

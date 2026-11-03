@@ -150,8 +150,6 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
       return;
     }
 
-    connectRealtime(token);
-    updateRealtimeAuthToken(token);
     let cancelled = false;
     let hasUnreadSynced = false;
     void hydrateNotificationSoundSettingsFromProfile();
@@ -231,6 +229,8 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
       },
     });
 
+    connectRealtime(token);
+    updateRealtimeAuthToken(token);
     void getNotificationsUnreadCount()
       .then((result) => {
         if (!cancelled && !hasUnreadSynced) {

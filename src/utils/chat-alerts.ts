@@ -99,7 +99,7 @@ export function isChatConversationFocused(conversationId: string): boolean {
     return false;
   }
   if (canUseWebAlerts()) {
-    return document.visibilityState === 'visible';
+    return document.visibilityState === 'visible' && document.hasFocus();
   }
   return true;
 }

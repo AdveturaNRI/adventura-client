@@ -7,6 +7,8 @@ const JPEG_QUALITY = 0.72;
 
 let canvas: HTMLCanvasElement | null = null;
 let captureBusy = false;
+let captureVideo: HTMLVideoElement | null = null;
+let captureTrack: MediaStreamTrack | null = null;
 
 function getCanvas(): HTMLCanvasElement {
   if (!canvas) {
@@ -32,6 +34,18 @@ export function pickCallPipParticipant(
     pool[0] ||
     null
   );
+}
+
+/** Prefer the screen share selected in the call, then the remote camera. */
+export function pickCallPipVideo(
+  participants: ChatLiveVoiceParticipant[],
+  selectedScreenIdentity: string | null,
+): { participant: ChatLiveVoiceParticipant; track: VideoTrack | null; screenShare: boolean } | null {
+  const selected = participants.find((p) => !p.isLocal && p.identity === selectedScreenIdentity && p.screenShareTrack);
+  const shared = selected || participants.find((p) => !p.isLocal && p.screenShareTrack);
+  if (shared) return { participant: shared, track: shared.screenShareTrack, screenShare: true };
+  const participant = pickCallPipParticipant(participants);
+  return participant ? { participant, track: participant.cameraOn ? participant.videoTrack : null, screenShare: false } : null;
 }
 
 export async function captureVideoTrackFrame(
@@ -105,28 +119,41 @@ function fitSize(w: number, h: number): { width: number; height: number } {
 
 function captureViaVideoElement(mediaTrack: MediaStreamTrack): Promise<string | null> {
   return new Promise((resolve) => {
-    const video = document.createElement('video');
-    video.muted = true;
-    video.playsInline = true;
-    video.srcObject = new MediaStream([mediaTrack]);
-
-    const cleanup = () => {
+    if (!captureVideo || captureTrack !== mediaTrack) {
       try {
-        video.pause();
-        video.srcObject = null;
-        video.remove();
+        captureVideo?.pause();
+        if (captureVideo) captureVideo.srcObject = null;
       } catch {
         // ignore
       }
+      captureVideo = document.createElement('video');
+      captureVideo.muted = true;
+      captureVideo.playsInline = true;
+      captureVideo.srcObject = new MediaStream([mediaTrack]);
+      captureTrack = mediaTrack;
+      mediaTrack.addEventListener('ended', () => {
+        if (captureTrack !== mediaTrack) return;
+        captureVideo?.pause();
+        if (captureVideo) captureVideo.srcObject = null;
+        captureVideo = null;
+        captureTrack = null;
+      }, { once: true });
+    }
+    const video = captureVideo;
+    let settled = false;
+    const finish = (value: string | null) => {
+      if (settled) return;
+      settled = true;
+      window.clearTimeout(failTimer);
+      video.removeEventListener('loadeddata', capture);
+      resolve(value);
     };
 
     const failTimer = window.setTimeout(() => {
-      cleanup();
-      resolve(null);
+      finish(null);
     }, 800);
 
-    video.onloadeddata = () => {
-      window.clearTimeout(failTimer);
+    const capture = () => {
       try {
         const { videoWidth: w, videoHeight: h } = video;
         const { width, height } = fitSize(w || 320, h || 240);
@@ -135,24 +162,20 @@ function captureViaVideoElement(mediaTrack: MediaStreamTrack): Promise<string | 
         surface.height = height;
         const ctx = surface.getContext('2d');
         if (!ctx) {
-          cleanup();
-          resolve(null);
+          finish(null);
           return;
         }
         ctx.drawImage(video, 0, 0, width, height);
         const dataUrl = surface.toDataURL('image/jpeg', JPEG_QUALITY);
-        cleanup();
-        resolve(dataUrl);
+        finish(dataUrl);
       } catch {
-        cleanup();
-        resolve(null);
+        finish(null);
       }
     };
-
-    void video.play().catch(() => {
-      window.clearTimeout(failTimer);
-      cleanup();
-      resolve(null);
-    });
+    if (video.readyState >= 2 && video.videoWidth > 0) capture();
+    else {
+      video.addEventListener('loadeddata', capture, { once: true });
+      void video.play().catch(() => finish(null));
+    }
   });
 }

@@ -1,22 +1,62 @@
 import { Platform } from 'react-native';
+import { isElectronShell } from '@/services/desktop/electronBridge';
 import { apiRequest } from '@/services/api/client';
 import { firebaseWebConfig, firebaseWebVapidKey, isFirebaseWebConfigured, } from '@/services/push/firebase-config';
+export { isElectronShell };
 const SW_PATH = '/service-worker.js';
 const FCM_TOKEN_KEY = '@adventura/fcm-device-token';
 /** Firebase Cloud Messaging opt-in (settings + soft prompt). */
 export const WEB_PUSH_OPT_IN_ENABLED = true;
 let messagingPromise = null;
 let vapidCache = null;
-const VAPID_CACHE_MS = 5 * 60_000;
-function canUseWebPush() {
+const VAPID_CACHE_MS = 5 * 60000;
+function canUseWebPushApis() {
     return (Platform.OS === 'web' &&
         typeof window !== 'undefined' &&
+        typeof navigator !== 'undefined' &&
         'serviceWorker' in navigator &&
         'PushManager' in window &&
         typeof Notification !== 'undefined');
 }
+/** Low-level browser APIs only (no Firebase / VAPID). */
+function canUseWebPush() {
+    return canUseWebPushApis() && Boolean(window.isSecureContext) && !isElectronShell();
+}
+/** Why the settings toggle is disabled — null means ready. */
+export function getWebPushBlockReason() {
+    if (Platform.OS !== 'web' || typeof window === 'undefined') {
+        return 'unsupported';
+    }
+    if (isElectronShell()) {
+        return 'electron';
+    }
+    if (!window.isSecureContext) {
+        return 'insecure';
+    }
+    if (!canUseWebPushApis()) {
+        return 'unsupported';
+    }
+    if (!isFirebaseWebConfigured()) {
+        return 'firebase_unconfigured';
+    }
+    return null;
+}
 export function isWebPushSupported() {
-    return canUseWebPush() && isFirebaseWebConfigured();
+    return getWebPushBlockReason() === null;
+}
+export function webPushBlockHint(reason) {
+    switch (reason) {
+        case 'insecure':
+            return 'Уведомления сейчас недоступны.';
+        case 'firebase_unconfigured':
+            return 'Уведомления сейчас недоступны.';
+        case 'electron':
+            return 'В десктоп-клиенте фоновые web-push недоступны (ограничение Electron). Пока приложение открыто, сообщения приходят по сокету.';
+        case 'unsupported':
+            return 'Этот браузер не поддерживает уведомления.';
+        default:
+            return null;
+    }
 }
 export function getNotificationPermission() {
     if (!canUseWebPush()) {
@@ -71,14 +111,17 @@ async function ensureServiceWorker() {
         return null;
     }
     const registration = await navigator.serviceWorker.register(SW_PATH, {
+        // Always revalidate service-worker.js — don't serve a cached SW script.
         updateViaCache: 'none',
     });
+    // Kick an update check on this visit (browser may otherwise wait up to ~24h).
     try {
         await registration.update();
     }
     catch {
         // ignore network failures
     }
+    // Old SW builds without skipWaiting stay "waiting" until told — wake them once.
     if (registration.waiting) {
         registration.waiting.postMessage({ type: 'SKIP_WAITING' });
     }
@@ -95,7 +138,10 @@ async function ensureServiceWorker() {
     });
     return registration;
 }
-/** Soft SW refresh on any web visit — one reload after deploy is enough. */
+/**
+ * Soft SW refresh on any web visit (even without enabling push again).
+ * One page reload is enough after deploy — new SW skipWaiting + claim.
+ */
 export async function refreshPushServiceWorker() {
     if (!canUseWebPushApis() || !window.isSecureContext) {
         return;
@@ -223,6 +269,9 @@ export async function syncWebPushToUser() {
 export async function enableWebPush() {
     if (!WEB_PUSH_OPT_IN_ENABLED) {
         return { ok: false, reason: 'unsupported' };
+    }
+    if (isElectronShell()) {
+        return { ok: false, reason: 'electron' };
     }
     if (!canUseWebPush() || !isFirebaseWebConfigured()) {
         return { ok: false, reason: 'unsupported' };

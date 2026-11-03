@@ -1,4 +1,5 @@
 import { Platform } from 'react-native';
+import { isElectronShell, notifyElectronDesktop } from '@/services/desktop/electronBridge';
 import { getEffectiveNotificationSoundUrl, getNotificationSoundSettingsSync, } from '@/utils/notification-sound-settings';
 import { getPortalNotificationCopy } from '@/utils/portal-notification-copy';
 const SITE_TITLE = 'Adventura';
@@ -84,7 +85,7 @@ export function isChatConversationFocused(conversationId) {
         return false;
     }
     if (canUseWebAlerts()) {
-        return document.visibilityState === 'visible';
+        return document.visibilityState === 'visible' && document.hasFocus();
     }
     return true;
 }
@@ -264,17 +265,28 @@ export function stopNewMessageTitleBlink(options) {
         // ignore
     }
 }
-export function notifyIncomingChatMessage(conversationId) {
+export function previewMessageBody(body, hasMedia) {
+    const trimmed = (body ?? '').trim();
+    if (trimmed) return trimmed.length > 160 ? `${trimmed.slice(0, 157)}…` : trimmed;
+    return hasMedia ? 'Вложение' : 'Новое сообщение в чате';
+}
+export function notifyIncomingChatMessage(conversationId, options) {
     if (conversationId && isChatConversationFocused(conversationId)) {
         return;
     }
     playIncomingMessageSound();
     startTitleBlink(MESSAGE_ALERT_TITLE);
+    showDesktopPush(options?.title?.trim() || MESSAGE_ALERT_TITLE, options?.body?.trim() || 'Новое сообщение в чате', conversationId ? `/chats/${conversationId}` : '/chats');
 }
-function showDesktopPush(title, body) {
-    if (!canUseWebAlerts() || typeof Notification === 'undefined') {
+function showDesktopPush(title, body, url) {
+    if (!canUseWebAlerts()) {
         return;
     }
+    if (isElectronShell()) {
+        void notifyElectronDesktop({ title, body, url });
+        return;
+    }
+    if (typeof Notification === 'undefined') return;
     if (Notification.permission !== 'granted') {
         return;
     }
@@ -284,6 +296,12 @@ function showDesktopPush(title, body) {
     catch {
         // ignore unsupported notification payloads
     }
+}
+export function notifyIncomingVoiceCall(options) {
+    if (!canUseWebAlerts()) return;
+    const title = 'Входящий звонок';
+    startTitleBlink(title);
+    showDesktopPush(title, options.peerName?.trim() || 'Собеседник', options.conversationId ? `/chats/${options.conversationId}` : '/chats');
 }
 export function notifyIncomingPortalNotification(options) {
     playIncomingMessageSound();
@@ -300,5 +318,5 @@ export function notifyIncomingPortalNotification(options) {
         messageText: options.messageText,
     });
     startTitleBlink(title);
-    showDesktopPush(title, body);
+    showDesktopPush(title, body, '/notifications');
 }

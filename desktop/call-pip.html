@@ -23,6 +23,7 @@
         box-sizing: border-box;
         user-select: none;
       }
+      [hidden] { display: none !important; }
       html,
       body {
         margin: 0;
@@ -111,6 +112,7 @@
         background: #000;
         pointer-events: none;
       }
+      .media img.frame { object-fit: contain; }
       .media img.avatar {
         object-fit: cover;
         width: 42%;
@@ -255,6 +257,11 @@
       const collapsedActions = document.getElementById('collapsedActions');
       const btnCollapse = document.getElementById('btnCollapse');
       const btnExpandApp = document.getElementById('btnExpandApp');
+
+      avatar.addEventListener('error', () => {
+        avatar.hidden = true;
+        placeholder.hidden = false;
+      });
 
       let lastMode = '';
       let lastMuted = '';

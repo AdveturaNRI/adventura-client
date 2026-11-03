@@ -436,7 +436,7 @@ export const MapSearchControls = forwardRef<MapSearchControlsHandle, Props>(
             }}
             style={({ pressed }) => [styles.deniedBanner, pressed && { opacity: 0.88 }]}>
             <Ionicons name="location-outline" size={16} color={colors.textMuted} />
-            <Text style={styles.deniedText}>Вы запретили доступ к геолокации</Text>
+            <Text style={styles.deniedText}>Нет доступа к геолокации</Text>
           </Pressable>
         ) : null}
       </View>

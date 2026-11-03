@@ -1,7 +1,7 @@
 {
   "name": "adventura-desktop",
   "productName": "Adventura",
-  "version": "0.5.0",
+  "version": "0.6.12",
   "description": "Adventura desktop shell (Electron + tray + call PiP + auto-update)",
   "author": "Adventura <admin@adventu.ru>",
   "homepage": "https://adventu.ru",
@@ -15,7 +15,7 @@
     "start": "electron .",
     "pack": "electron-builder --dir",
     "dist:linux": "electron-builder --linux AppImage deb",
-    "dist:publish": "electron-builder --linux AppImage deb --publish always"
+    "dist:win": "electron-builder --win nsis"
   },
   "build": {
     "appId": "ru.adventu.desktop",
@@ -31,17 +31,26 @@
       "call-pip.html",
       "call-pip-preload.js",
       "call-presence-inject.js",
+      "notification.html",
+      "notification-preload.js",
+      "notification-inject.js",
+      "titlebar-inject.js",
       "package.json",
       "build/icon.png"
     ],
     "publish": [
       {
-        "provider": "github",
-        "owner": "AdveturaNRI",
-        "repo": "adventura-client",
-        "releaseType": "release"
+        "provider": "generic",
+        "url": "https://api.adventu.ru/api/desktop-updates"
       }
     ],
+    "win": {
+      "target": [
+        "nsis"
+      ],
+      "icon": "build/icon.png",
+      "artifactName": "${productName}-Setup-${version}.${ext}"
+    },
     "linux": {
       "target": [
         "AppImage",
@@ -65,7 +74,8 @@
     }
   },
   "dependencies": {
-    "electron-updater": "^6.8.11"
+    "electron-updater": "^6.8.11",
+    "semver": "^7.8.6"
   },
   "devDependencies": {
     "electron": "^37.2.6",

@@ -27,6 +27,7 @@ import {
 import { playMicToggleSound, playUrgentRequestAlert } from '@/utils/call-ringtone';
 import { localizeErrorMessage } from '@/utils/localizeError';
 import { loadVoiceDevicePrefs, subscribeVoiceDevicePrefs } from '@/utils/voice-device-settings';
+import { decideVoiceDeviceFallback, recoverVoiceInputToSystem, watchVoiceDeviceChanges } from '@/utils/voice-device-fallback';
 import { applyAudioOutputToElement, stopMediaStream, takePrimedMicrophone } from '@/utils/voice-media-devices';
 import {
   applyMicPipelineToRoom,
@@ -502,6 +503,10 @@ export function useChatLiveVoice(conversationId: string | null): UseChatLiveVoic
   statusRef.current = status;
   const [error, setError] = useState<string | null>(null);
   const [muted, setMuted] = useState(false);
+  const mutedByUserRef = useRef(false);
+  const audioFallbackRef = useRef({ input: false, output: false });
+  const selectedAudioIdsRef = useRef<{ input: string | null; output: string | null }>({ input: null, output: null });
+  const audioSwitchQueueRef = useRef<Promise<void>>(Promise.resolve());
   const [deafened, setDeafened] = useState(false);
   const [cameraOn, setCameraOn] = useState(false);
   const [screenShareOn, setScreenShareOn] = useState(false);
@@ -522,6 +527,12 @@ export function useChatLiveVoice(conversationId: string | null): UseChatLiveVoic
   urgentByIdRef.current = urgentById;
   const lastUrgentSentAtRef = useRef(0);
   const dataHandlersRef = useRef<Map<string, Set<RoomDataHandler>>>(new Map());
+
+  const queueAudioSwitch = useCallback((work: () => Promise<void>) => {
+    const task = audioSwitchQueueRef.current.catch(() => undefined).then(work);
+    audioSwitchQueueRef.current = task.catch(() => undefined);
+    return task;
+  }, []);
 
   /** Auto-pick sole stream; keep current if still valid; clear when gone / need manual pick. */
   const reconcileScreenSelection = useCallback((room: Room) => {
@@ -695,6 +706,8 @@ export function useChatLiveVoice(conversationId: string | null): UseChatLiveVoic
   }, [clearAutoRejoinTimer, tryAutoRejoin]);
 
   const leave = useCallback(async () => {
+    mutedByUserRef.current = false;
+    audioFallbackRef.current = { input: false, output: false };
     intentionalLeaveRef.current = true;
     expectConnectedRef.current = false;
     joiningRef.current = false;
@@ -783,7 +796,7 @@ export function useChatLiveVoice(conversationId: string | null): UseChatLiveVoic
           autoGainControl: Math.abs(prefs.micGain - 1) < 0.05,
           voiceIsolation: false,
           ...(isUsableMediaDeviceId(prefs.inputDeviceId)
-            ? { deviceId: { exact: prefs.inputDeviceId } }
+            ? { deviceId: { exact: prefs.inputDeviceId! } }
             : {}),
         },
         videoCaptureDefaults: {
@@ -976,7 +989,7 @@ export function useChatLiveVoice(conversationId: string | null): UseChatLiveVoic
         });
 
       let connectTimeoutHandle: ReturnType<typeof setTimeout> | null = setTimeout(() => {
-        if (roomRef.current !== room || intentionalLeaveRef.current) {
+        if (!room || roomRef.current !== room || intentionalLeaveRef.current) {
           return;
         }
         if (room.state === ConnectionState.Connected) {
@@ -1024,6 +1037,7 @@ export function useChatLiveVoice(conversationId: string | null): UseChatLiveVoic
       }
 
       preferredOutputDeviceId = prefs.outputDeviceId;
+      selectedAudioIdsRef.current = { input: prefs.inputDeviceId, output: prefs.outputDeviceId };
       if (isUsableMediaDeviceId(prefs.inputDeviceId)) {
         try {
           await room.switchActiveDevice('audioinput', prefs.inputDeviceId!);
@@ -1094,6 +1108,7 @@ export function useChatLiveVoice(conversationId: string | null): UseChatLiveVoic
     const currentlyMuted = !room.localParticipant.isMicrophoneEnabled;
     try {
       if (!currentlyMuted) {
+        mutedByUserRef.current = true;
         await room.localParticipant.setMicrophoneEnabled(false);
         setMuted(true);
         playMicToggleSound(true);
@@ -1101,6 +1116,7 @@ export function useChatLiveVoice(conversationId: string | null): UseChatLiveVoic
         return;
       }
 
+      mutedByUserRef.current = false;
       // Prefer a plain unmute when the track already exists — re-running the
       // full capture/processor pipeline often leaves the mic stuck off.
       const pub = room.localParticipant.getTrackPublication(Track.Source.Microphone);
@@ -1110,7 +1126,7 @@ export function useChatLiveVoice(conversationId: string | null): UseChatLiveVoic
         const prefs = await loadVoiceDevicePrefs();
         const primed = await takePrimedMicrophone();
         const result = await applyMicPipelineToRoom(room, {
-          deviceId: isUsableMediaDeviceId(prefs.inputDeviceId) ? prefs.inputDeviceId : null,
+          deviceId: !audioFallbackRef.current.input && isUsableMediaDeviceId(prefs.inputDeviceId) ? prefs.inputDeviceId : null,
           micGain: prefs.micGain,
           noiseSuppression: prefs.noiseSuppression,
           primedStream: primed,
@@ -1404,6 +1420,99 @@ export function useChatLiveVoice(conversationId: string | null): UseChatLiveVoic
     return () => sub.remove();
   }, [tryAutoRejoin]);
 
+  // Recover to system devices when a USB/Bluetooth device disappears.
+  useEffect(() => {
+    if (Platform.OS !== 'web' || status !== 'connected' || typeof navigator === 'undefined' || !navigator.mediaDevices?.enumerateDevices) return;
+    const devices = navigator.mediaDevices;
+    const room = roomRef.current;
+    if (!room) return;
+    let stopped = false;
+
+    const recover = () => {
+      void queueAudioSwitch(async () => {
+        if (stopped || roomRef.current !== room || room.state !== ConnectionState.Connected) return;
+        let available: MediaDeviceInfo[];
+        try { available = await devices.enumerateDevices(); } catch { return; }
+        if (stopped || roomRef.current !== room) return;
+        const prefs = await loadVoiceDevicePrefs();
+        if (stopped || roomRef.current !== room) return;
+        const track = room.localParticipant.getTrackPublication(Track.Source.Microphone)?.audioTrack;
+        const decision = decideVoiceDeviceFallback({
+          devices: available,
+          preferredInput: prefs.inputDeviceId,
+          preferredOutput: prefs.outputDeviceId,
+          activeInput: room.getActiveDevice('audioinput'),
+          activeOutput: room.getActiveDevice('audiooutput'),
+          inputEnded: !track || track.mediaStreamTrack.readyState === 'ended',
+          mutedByUser: mutedByUserRef.current,
+          inputAlreadyDefault: audioFallbackRef.current.input,
+          outputAlreadyDefault: audioFallbackRef.current.output,
+        });
+        if (track?.mediaStreamTrack.readyState === 'ended' && !mutedByUserRef.current &&
+            !available.some((device) => device.kind === 'audioinput' && device.deviceId)) {
+          setError('Нет доступного микрофона');
+        }
+        if (decision.output) {
+          try { await room.switchActiveDevice('audiooutput', 'default'); } catch { /* browser may use its own default */ }
+          if (stopped || roomRef.current !== room) return;
+          preferredOutputDeviceId = null;
+          await applyPreferredOutputToAllRemote();
+          audioFallbackRef.current.output = true;
+        }
+        if (decision.inputReset) {
+          try {
+            const result = await recoverVoiceInputToSystem({
+              switchToDefault: () => room.switchActiveDevice('audioinput', 'default'),
+              isCurrent: () => !stopped && roomRef.current === room,
+              isMutedByUser: () => mutedByUserRef.current,
+              restoreTrack: async () => {
+                const current = room.localParticipant.getTrackPublication(Track.Source.Microphone)?.audioTrack;
+                if (current?.mediaStreamTrack.readyState === 'ended') await current.restartTrack({ deviceId: 'default' });
+                if (stopped || roomRef.current !== room || mutedByUserRef.current) return;
+                if (!current) {
+                  await applyMicPipelineToRoom(room, { deviceId: null, micGain: prefs.micGain, noiseSuppression: prefs.noiseSuppression });
+                } else if (!room.localParticipant.isMicrophoneEnabled) {
+                  await room.localParticipant.setMicrophoneEnabled(true);
+                }
+              },
+              applyProcessing: () => syncVoicePrefsToRoom(room, { deviceId: null, micGain: prefs.micGain, noiseSuppression: prefs.noiseSuppression }),
+              enforceMute: async () => { await room.localParticipant.setMicrophoneEnabled(false); },
+            });
+            if (result === 'cancelled') return;
+            const recoveredTrack = room.localParticipant.getTrackPublication(Track.Source.Microphone)?.audioTrack?.mediaStreamTrack;
+            const recovered = room.localParticipant.isMicrophoneEnabled && recoveredTrack?.readyState === 'live';
+            audioFallbackRef.current.input = result === 'prepared' || recovered;
+            if (result === 'recovered') {
+              setError(recovered ? null : 'Не удалось переключить микрофон');
+            }
+            refreshParticipants();
+          } catch {
+            if (!stopped && roomRef.current === room && !mutedByUserRef.current) setError('Не удалось переключить микрофон');
+          }
+        }
+      }).catch(() => undefined);
+    };
+    const stopWatching = watchVoiceDeviceChanges({
+      devices,
+      getTrack: () => room.localParticipant.getTrackPublication(Track.Source.Microphone)?.audioTrack?.mediaStreamTrack ?? null,
+      listenTracks: (bindTrack) => {
+        room.on(RoomEvent.LocalTrackPublished, bindTrack);
+        room.on(RoomEvent.LocalTrackUnpublished, bindTrack);
+        room.on(RoomEvent.ActiveDeviceChanged, bindTrack);
+        return () => {
+          room.off(RoomEvent.LocalTrackPublished, bindTrack);
+          room.off(RoomEvent.LocalTrackUnpublished, bindTrack);
+          room.off(RoomEvent.ActiveDeviceChanged, bindTrack);
+        };
+      },
+      onChange: recover,
+    });
+    return () => {
+      stopped = true;
+      stopWatching();
+    };
+  }, [queueAudioSwitch, refreshParticipants, status]);
+
   // Settings → live call: switch mic/speaker/camera without rejoining.
   useEffect(() => {
     let applySeq = 0;
@@ -1413,22 +1522,40 @@ export function useChatLiveVoice(conversationId: string | null): UseChatLiveVoic
         return;
       }
       const seq = ++applySeq;
-      void (async () => {
-        preferredOutputDeviceId = prefs.outputDeviceId;
-        if (isUsableMediaDeviceId(prefs.outputDeviceId)) {
-          try {
-            await room.switchActiveDevice('audiooutput', prefs.outputDeviceId!);
-          } catch {
-            // Safari / some Chromium builds reject sink switches
-          }
+      void queueAudioSwitch(async () => {
+        if (seq !== applySeq || roomRef.current !== room) return;
+        const inputChanged = selectedAudioIdsRef.current.input !== prefs.inputDeviceId;
+        if (inputChanged) audioFallbackRef.current.input = false;
+        if (selectedAudioIdsRef.current.output !== prefs.outputDeviceId) audioFallbackRef.current.output = false;
+        selectedAudioIdsRef.current = { input: prefs.inputDeviceId, output: prefs.outputDeviceId };
+        let available: MediaDeviceInfo[] | null = null;
+        try { available = await navigator.mediaDevices?.enumerateDevices?.() ?? null; } catch { /* keep current choice */ }
+        if (seq !== applySeq || roomRef.current !== room) return;
+        const present = (kind: MediaDeviceKind, id: string | null) => {
+          if (!id || id === 'default' || id === 'communications' || !available) return true;
+          const list = available.filter((device) => device.kind === kind && device.deviceId);
+          return list.length === 0 || list.some((device) => device.deviceId === id);
+        };
+        const outputId = !audioFallbackRef.current.output && present('audiooutput', prefs.outputDeviceId) ? prefs.outputDeviceId : null;
+        const inputId = !audioFallbackRef.current.input && present('audioinput', prefs.inputDeviceId) ? prefs.inputDeviceId : null;
+        preferredOutputDeviceId = outputId;
+        try {
+          await room.switchActiveDevice('audiooutput', isUsableMediaDeviceId(outputId) ? outputId! : 'default');
+        } catch {
+          // Safari / some Chromium builds reject sink switches
         }
         await applyPreferredOutputToAllRemote();
         if (seq !== applySeq || roomRef.current !== room) {
           return;
         }
 
+        if (inputChanged && !isUsableMediaDeviceId(inputId)) {
+          try { await room.switchActiveDevice('audioinput', 'default'); } catch { /* no available microphone */ }
+        }
+        if (seq !== applySeq || roomRef.current !== room) return;
+
         await syncVoicePrefsToRoom(room, {
-          deviceId: prefs.inputDeviceId,
+          deviceId: inputId,
           micGain: prefs.micGain,
           noiseSuppression: prefs.noiseSuppression,
         });
@@ -1447,9 +1574,9 @@ export function useChatLiveVoice(conversationId: string | null): UseChatLiveVoic
           }
         }
         refreshParticipants();
-      })();
+      }).catch(() => undefined);
     });
-  }, [refreshParticipants]);
+  }, [queueAudioSwitch, refreshParticipants]);
 
   useEffect(() => {
     const prev = prevConversationIdRef.current;

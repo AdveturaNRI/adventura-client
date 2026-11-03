@@ -3,7 +3,7 @@ import { AppState, Platform } from 'react-native';
 import { useAuth } from '@/context/AuthContext';
 import { getNotificationsUnreadCount, } from '@/services/notifications/notificationsApi';
 import { bindRealtimeHandlers, connectRealtime, disconnectRealtime, ensureRealtimeConnected, updateRealtimeAuthToken, } from '@/services/realtime/socket';
-import { notifyIncomingChatMessage, notifyIncomingPortalNotification, stopNewMessageTitleBlink, unlockChatAlerts, } from '@/utils/chat-alerts';
+import { notifyIncomingChatMessage, notifyIncomingPortalNotification, previewMessageBody, stopNewMessageTitleBlink, unlockChatAlerts, } from '@/utils/chat-alerts';
 import { appendCachedThreadMessage } from '@/utils/chat-thread-cache';
 import { hydrateNotificationSoundSettingsFromProfile } from '@/utils/notification-sound-settings';
 const RealtimeContext = createContext(null);
@@ -54,8 +54,6 @@ export function RealtimeProvider({ children }) {
             setLastNotification(null);
             return;
         }
-        connectRealtime(token);
-        updateRealtimeAuthToken(token);
         let cancelled = false;
         let hasUnreadSynced = false;
         void hydrateNotificationSoundSettingsFromProfile();
@@ -70,7 +68,10 @@ export function RealtimeProvider({ children }) {
                     message.kind !== 'favorite_removed' &&
                     message.kind !== 'user_blocked' &&
                     message.kind !== 'missed_voice_call') {
-                    notifyIncomingChatMessage(message.conversationId);
+                    notifyIncomingChatMessage(message.conversationId, {
+                        title: message.sender?.nickname || 'Новое сообщение',
+                        body: previewMessageBody(message.body, Boolean(message.image || message.attachment || message.attachments?.length)),
+                    });
                 }
             },
             onConversationUpdated: (conversation) => {
@@ -105,6 +106,8 @@ export function RealtimeProvider({ children }) {
                 callListenersRef.current.forEach((listener) => listener(event));
             },
         });
+        connectRealtime(token);
+        updateRealtimeAuthToken(token);
         void getNotificationsUnreadCount()
             .then((result) => {
             if (!cancelled && !hasUnreadSynced) {

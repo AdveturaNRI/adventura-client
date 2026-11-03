@@ -1513,6 +1513,8 @@ export default function ChatThreadScreen({
     }
     let cancelled = false;
     let inFlight = false;
+    let callEventsVersion = 0;
+    let refreshAgain = false;
     /** Fallback when WS invite is dropped — keep short so Accept UI still appears mid-ring. */
     const FALLBACK_POLL_MS = 4_000;
 
@@ -1521,9 +1523,10 @@ export default function ChatThreadScreen({
         return;
       }
       inFlight = true;
+      const requestedAtVersion = callEventsVersion;
       try {
         const active = await getActiveChatVoiceCall(conversationId);
-        if (cancelled) {
+        if (cancelled || requestedAtVersion !== callEventsVersion) {
           return;
         }
         // Hangup on this device — don't flash «Вернуться» while /active is briefly stale.
@@ -1545,11 +1548,15 @@ export default function ChatThreadScreen({
         // Show for anyone not already in this call UI — including rejoin after drop.
         setOngoingVoiceCall(active ?? null);
       } catch {
-        if (!cancelled) {
+        if (!cancelled && requestedAtVersion === callEventsVersion) {
           setOngoingVoiceCall(null);
         }
       } finally {
         inFlight = false;
+        if (!cancelled && refreshAgain) {
+          refreshAgain = false;
+          void refresh();
+        }
       }
     };
 
@@ -1593,13 +1600,15 @@ export default function ChatThreadScreen({
       if (event.payload.conversationId !== conversationId) {
         return;
       }
+      callEventsVersion += 1;
       // Drop the join banner immediately — don't wait on /active (TTL prune used to skip events).
       if (event.type === 'ended') {
         setOngoingVoiceCall((prev) =>
           prev?.callId === event.payload.callId ? null : prev,
         );
       }
-      void refresh();
+      if (inFlight) refreshAgain = true;
+      else void refresh();
     });
 
     return () => {
@@ -3959,38 +3968,8 @@ export default function ChatThreadScreen({
                     expandVoiceCall();
                     return;
                   }
-                  // Live multi-party lobby → rejoin. Solo/zombie lobby → fall through to
-                  // startCall (kills lobby + fresh invite) so the peer gets Accept + ringtone.
-                  if (ongoingVoiceCall) {
-                    const aloneLobby =
-                      Boolean(ongoingVoiceCall.isJoined) && ongoingVoiceCall.joinedCount <= 1;
-                    if (!aloneLobby) {
-                      const callSnapshot = ongoingVoiceCall;
-                      setJoiningOngoingVoice(true);
-                      void joinOngoingCall(
-                        conversationId,
-                        callSnapshot.callId,
-                        callSnapshot.isGroup
-                          ? callSnapshot.conversationTitle || title
-                          : callSnapshot.fromNickname,
-                        callSnapshot.fromAvatarUrl,
-                        {
-                          isGroup: callSnapshot.isGroup,
-                          myRole: callSnapshot.isGroup ? myGroupRole : null,
-                        },
-                      )
-                        .then((ok) => {
-                          if (!ok) {
-                            setOngoingVoiceCall((prev) =>
-                              prev?.callId === callSnapshot.callId ? null : prev,
-                            );
-                          }
-                        })
-                        .finally(() => setJoiningOngoingVoice(false));
-                      return;
-                    }
-                    setOngoingVoiceCall(null);
-                  }
+                  // startCall checks the current server state; the banner snapshot may
+                  // have expired since the last poll.
                   void (async () => {
                     // Mic prime already started in onPressIn — do not await network before takePrimedMicrophone inside startCall.
                     let ringingPeers = isGroup

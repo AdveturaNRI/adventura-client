@@ -98,6 +98,13 @@ export function markClubsMapInitialLocateDone() {
   state.didInitialLocate = true;
 }
 
+/** Claim the automatic attempt before starting async work, even if the screen blurs. */
+export function beginClubsMapInitialLocate(): boolean {
+  if (state.didInitialLocate) return false;
+  state.didInitialLocate = true;
+  return true;
+}
+
 export function markClubsMapInitialCameraDone() {
   state.didInitialCamera = true;
 }

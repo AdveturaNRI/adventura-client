@@ -4,7 +4,7 @@ import { Platform } from 'react-native';
 import type { ChatLiveVoiceParticipant } from '@/hooks/use-chat-live-voice';
 import {
   captureVideoTrackFrame,
-  pickCallPipParticipant,
+  pickCallPipVideo,
 } from '@/services/desktop/callPipCapture';
 import {
   getElectronBridge,
@@ -22,6 +22,7 @@ type Props = {
   peerAvatarUrl: string | null;
   muted: boolean;
   participants: ChatLiveVoiceParticipant[];
+  selectedScreenIdentity: string | null;
   /** Epoch ms when active call started; null while ringing. */
   activeSinceMs: number | null;
   onExpand: () => void;
@@ -31,7 +32,7 @@ type Props = {
   onDecline: () => void;
 };
 
-const FRAME_INTERVAL_MS = 280;
+const FRAME_INTERVAL_MS = 125;
 const META_INTERVAL_MS = 1000;
 
 export function DesktopCallPipController({
@@ -41,6 +42,7 @@ export function DesktopCallPipController({
   peerAvatarUrl,
   muted,
   participants,
+  selectedScreenIdentity,
   activeSinceMs,
   onExpand,
   onHangup,
@@ -71,6 +73,7 @@ export function DesktopCallPipController({
     muted,
     activeSinceMs,
     participants,
+    selectedScreenIdentity,
   });
   metaRef.current = {
     mode,
@@ -80,6 +83,7 @@ export function DesktopCallPipController({
     muted,
     activeSinceMs,
     participants,
+    selectedScreenIdentity,
   };
 
   const lastFrameRef = useRef<string | null>(null);
@@ -159,10 +163,11 @@ export function DesktopCallPipController({
         return;
       }
 
-      const featured = pickCallPipParticipant(snap.participants);
-      const name = featured?.name || snap.peerName || 'Собеседник';
-      const avatar = featured?.avatarUrl ?? snap.peerAvatarUrl;
-      const hasVideo = Boolean(featured?.cameraOn && featured?.videoTrack);
+      const video = pickCallPipVideo(snap.participants, snap.selectedScreenIdentity);
+      const featured = video?.participant;
+      const name = (snap.mode === 'incoming' ? snap.peerName : featured?.name || snap.peerName) || 'Собеседник';
+      const avatar = snap.mode === 'incoming' ? snap.peerAvatarUrl : featured?.avatarUrl ?? snap.peerAvatarUrl;
+      const hasVideo = snap.mode !== 'incoming' && Boolean(video?.track);
       const durationSec =
         snap.mode === 'active' && snap.activeSinceMs
           ? Math.max(0, Math.floor((Date.now() - snap.activeSinceMs) / 1000))
@@ -173,6 +178,8 @@ export function DesktopCallPipController({
         subtitle = 'Входящий звонок';
       } else if (snap.mode === 'outgoing') {
         subtitle = 'Вызов…';
+      } else if (video?.screenShare) {
+        subtitle = 'Демонстрация экрана';
       } else if (featured?.speaking) {
         subtitle = 'Говорит';
       } else if (hasVideo) {
@@ -208,7 +215,7 @@ export function DesktopCallPipController({
         state.hasVideo,
         state.muted,
         state.durationSec,
-        frame ? frame.slice(-32) : '',
+        frame || '',
       ].join('|');
 
       if (key === lastStateKeyRef.current) {
@@ -225,14 +232,14 @@ export function DesktopCallPipController({
     }, META_INTERVAL_MS);
 
     frameTimer = setInterval(() => {
-      const featured = pickCallPipParticipant(metaRef.current.participants);
-      if (!featured?.videoTrack) {
+      const video = pickCallPipVideo(metaRef.current.participants, metaRef.current.selectedScreenIdentity);
+      if (!video?.track) {
         if (lastFrameRef.current) {
           void buildAndPush(null);
         }
         return;
       }
-      void captureVideoTrackFrame(featured.videoTrack).then((frame) => {
+      void captureVideoTrackFrame(video.track).then((frame) => {
         if (frame) {
           void buildAndPush(frame);
         }
